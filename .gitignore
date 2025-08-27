@@ -1,0 +1,41 @@
+# call.zip outputs
+graphs/
+logs/
+
+/target
+/bin
+scripts/venv
+/venv
+.idea
+*.pem
+
+# Binary name from "go build"
+call.zip
+call.zip.linux
+call.zip.macos
+call.zip.exe
+
+# Go specific
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Ignore .env files
+.env
+.env.*
+
