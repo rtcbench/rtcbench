@@ -2,6 +2,7 @@ package bosh
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"regexp"
@@ -14,6 +15,19 @@ import (
 	"call.zip/internal/vp9"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
+)
+
+const (
+	vbotErrReadFromTrackID int = iota
+	vbotErrUnmarshalPacketID
+	vbotErrParseVP9PayloadID
+	vbotErrSeqNoJumpID
+	nVbotErrIDs
+
+	vbotErrUnmarshalPacketMsg = "failed to unmarshal packet"
+	vbotErrReadFromTrackMsg   = "failed to read from track id"
+	vbotErrParseVP9PayloadMsg = "failed to parse vp9 payload"
+	vbotErrSeqNoJumpMsg       = "detected sequence number gap"
 )
 
 func parseIceCredentials(sdp string) (ufrag, pwd, fingerprint string) {
@@ -163,49 +177,108 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 		}
 	}
 
-	// Use OnTrack instead of raw UDP read
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		go func() {
-			buf := make([]byte, 1500)
-			var lastSeq uint16 = 0
-			for {
-				n, _, readErr := track.Read(buf)
-				if readErr != nil {
-					state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 Read error: %s", readErr)
-					return
-				}
-				raw := buf[:n]
-				pkt := &rtp.Packet{}
-				if err := pkt.Unmarshal(raw); err != nil {
-					state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 Failed to unmarshal packet! Error: %s", err)
-					continue
-				}
-				if lastSeq != 0 && pkt.SequenceNumber != lastSeq+1 {
-					state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 RTP SeqNo jump: last=%d now=%d", lastSeq, pkt.SequenceNumber)
-				}
-				lastSeq = pkt.SequenceNumber
-				state.PktRecvAOF.LogPrintf("[OnTrack] ✅ Got RTP PT=%d SeqNo=%d Payload=%d bytes", pkt.PayloadType, pkt.SequenceNumber, len(pkt.Payload))
-
-				if packetsCSV != nil {
-					if err := record.LogPacketAOF(int(pkt.PayloadType), raw, packetsCSV); err != nil { // 12 byte rtp header is included
-						state.PktRecvAOF.LogPrintf("[OnTrack] ❌ Failed to write packets CSV: %s", err)
-					}
-				}
-
-				sid := -1
-				tid := -1
-				vp9desc, err := vp9.ParseVP9PayloadDescriptor(pkt.Payload)
-				if err != nil {
-					state.PktRecvAOF.LogPrintf("[OnTrack] ❌❌ Not VP9 Payload Descriptor: %s", err)
-				} else {
-					sid = int(vp9desc.SID)
-					tid = int(vp9desc.TID)
-				}
-
-				state.NetStatsAOF.Printf("%s,%d,%d,%d,%d,%d,%d,%d\n", time.Now().Format(time.RFC3339), pkt.PayloadType, pkt.SequenceNumber, len(pkt.Payload), sid, tid, pkt.Timestamp, time.Now().UnixMicro())
-			}
-		}()
+		if state.EnableClientLoopV2 {
+			go clientLoopV2(track)
+		} else {
+			go clientLoopV1(track, packetsCSV, state)
+		}
 	})
 
 	return pc, nil
+}
+
+// clientLoopV2 new version of track read loop replacing clientLoopV1
+// this version features in-memory packet and error stats
+func clientLoopV2(track *webrtc.TrackRemote) {
+	var n int
+	var err error
+	var raw []byte
+
+	var vp9Desc vp9.PayloadDescriptor
+
+	var lastTrackReadTime, nErrsTotal int64
+	var errCountsByID = make([]int64, nVbotErrIDs)
+
+	var buf = make([]byte, 1500)
+	var lastSeq uint16 = 0
+	var pkt rtp.Packet
+
+	for {
+		n, _, err = track.Read(buf)
+		lastTrackReadTime = time.Now().UnixMicro()
+
+		if err != nil {
+			errCountsByID[vbotErrReadFromTrackID]++
+			nErrsTotal++
+			continue
+		}
+
+		raw = buf[:n]
+		if err = pkt.Unmarshal(raw); err != nil {
+			errCountsByID[vbotErrUnmarshalPacketID]++
+			nErrsTotal++
+			continue
+		}
+
+		if lastSeq != 0 && pkt.SequenceNumber != lastSeq+1 {
+			errCountsByID[vbotErrSeqNoJumpID]++
+			nErrsTotal++
+			// fall-through
+		}
+		lastSeq = pkt.SequenceNumber
+
+		if err = vp9.ParseVP9PayloadDescriptor(pkt.Payload, &vp9Desc); err != nil {
+			errCountsByID[vbotErrParseVP9PayloadID]++
+			nErrsTotal++
+			continue
+		}
+
+		log.Printf("[clientLoopV2] SID=%d TID=%d lastTrackReadTime=%d rtp_timestamp=%d",
+			vp9Desc.SID, vp9Desc.TID, lastTrackReadTime, pkt.Timestamp)
+	}
+}
+
+// clientLoopV1 original version of track read loop
+// Deprecated: will be removed in v0.3.0
+func clientLoopV1(track *webrtc.TrackRemote, packetsCSV *os.File, state *model.ConnectionState) {
+	buf := make([]byte, 1500)
+	var lastSeq uint16 = 0
+	for {
+		n, _, readErr := track.Read(buf)
+		if readErr != nil {
+			state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 Read error: %s", readErr)
+			return
+		}
+		raw := buf[:n]
+		pkt := &rtp.Packet{}
+		if err := pkt.Unmarshal(raw); err != nil {
+			state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 Failed to unmarshal packet! Error: %s", err)
+			continue
+		}
+		if lastSeq != 0 && pkt.SequenceNumber != lastSeq+1 {
+			state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 RTP SeqNo jump: last=%d now=%d", lastSeq, pkt.SequenceNumber)
+		}
+		lastSeq = pkt.SequenceNumber
+		state.PktRecvAOF.LogPrintf("[OnTrack] ✅ Got RTP PT=%d SeqNo=%d Payload=%d bytes", pkt.PayloadType, pkt.SequenceNumber, len(pkt.Payload))
+
+		if packetsCSV != nil {
+			if err := record.LogPacketAOF(int(pkt.PayloadType), raw, packetsCSV); err != nil { // 12 byte rtp header is included
+				state.PktRecvAOF.LogPrintf("[OnTrack] ❌ Failed to write packets CSV: %s", err)
+			}
+		}
+
+		sid := -1
+		tid := -1
+		var vp9desc vp9.PayloadDescriptor
+		err := vp9.ParseVP9PayloadDescriptor(pkt.Payload, &vp9desc)
+		if err != nil {
+			state.PktRecvAOF.LogPrintf("[OnTrack] ❌❌ Not VP9 Payload Descriptor: %s", err)
+		} else {
+			sid = int(vp9desc.SID)
+			tid = int(vp9desc.TID)
+		}
+
+		state.NetStatsAOF.Printf("%s,%d,%d,%d,%d,%d,%d,%d\n", time.Now().Format(time.RFC3339), pkt.PayloadType, pkt.SequenceNumber, len(pkt.Payload), sid, tid, pkt.Timestamp, time.Now().UnixMicro())
+	}
 }
