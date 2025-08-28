@@ -1,8 +1,10 @@
 package vp9
 
 import (
-	"fmt"
+	"errors"
 )
+
+var ErrEmptyPayload = errors.New("empty payload")
 
 type PayloadDescriptor struct {
 	I         uint8
@@ -24,12 +26,12 @@ type PayloadDescriptor struct {
 }
 
 // ParseVP9PayloadDescriptor parses the VP9 payload descriptor from RTP payload
-func ParseVP9PayloadDescriptor(payload []byte) (*PayloadDescriptor, error) {
+func ParseVP9PayloadDescriptor(payload []byte, desc *PayloadDescriptor) error {
 	if len(payload) == 0 {
-		return nil, fmt.Errorf("empty payload")
+		return ErrEmptyPayload
 	}
 
-	desc := &PayloadDescriptor{}
+	*desc = PayloadDescriptor{} // zero out caller's memory
 
 	firstByte := payload[0]
 	desc.I = (firstByte >> 7) & 1
@@ -43,7 +45,7 @@ func ParseVP9PayloadDescriptor(payload []byte) (*PayloadDescriptor, error) {
 
 	ptr := 1
 	if ptr >= len(payload) {
-		return desc, nil
+		return nil
 	}
 
 	// Parse optional Picture ID
@@ -51,7 +53,7 @@ func ParseVP9PayloadDescriptor(payload []byte) (*PayloadDescriptor, error) {
 		pictureIDByte := payload[ptr]
 		ptr++
 		if ptr >= len(payload) {
-			return desc, nil
+			return nil
 		}
 
 		desc.PictureID = uint16(pictureIDByte & 0x7F) // Lower 7 bits
@@ -67,13 +69,13 @@ func ParseVP9PayloadDescriptor(payload []byte) (*PayloadDescriptor, error) {
 	// Parse Layer indices if L is set
 	if desc.L != 0 {
 		if ptr >= len(payload) {
-			return desc, nil
+			return nil
 		}
 
 		layerByte := payload[ptr]
 		ptr++
 		if ptr >= len(payload) {
-			return desc, nil
+			return nil
 		}
 
 		desc.TID = (layerByte >> 5) & 0x07  // Temporal ID (TID)
@@ -82,7 +84,7 @@ func ParseVP9PayloadDescriptor(payload []byte) (*PayloadDescriptor, error) {
 		desc.DBit = layerByte & 0x01        // D bit
 
 		if ptr >= len(payload) {
-			return desc, nil
+			return nil
 		}
 
 		desc.TL0PicIdx = payload[ptr] // Temporal Layer 0 Picture Index
@@ -96,5 +98,5 @@ func ParseVP9PayloadDescriptor(payload []byte) (*PayloadDescriptor, error) {
 		desc.SSPresent = 0
 	}
 
-	return desc, nil
+	return nil
 }

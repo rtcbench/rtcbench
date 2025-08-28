@@ -1,36 +1,38 @@
 package bosh
 
 import (
+	"fmt"
+	"net/url"
+	"time"
+
 	"call.zip/internal/aofconf"
 	"call.zip/internal/bosh/httpxml"
 	"call.zip/internal/bosh/model"
 	"call.zip/internal/bosh/steps"
-	"fmt"
 	"github.com/google/uuid"
-	"net/url"
-	"time"
 )
 
 func initialRid() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string) {
+func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string, enableClientLoopV2 bool) {
 	state := &model.ConnectionState{
-		StepsAOF:    aof.Steps,
-		PionAOF:     aof.Pion,
-		PktRecvAOF:  aof.PktRecv,
-		NetStatsAOF: aof.NetStats,
-		BOSHSender:  httpxml.NewBOSHSender(aof.BOSH),
-		BoshURL:     fmt.Sprintf("https://%s/http-bind", serverIP),
-		RoomName:    confName,
-		MachineUID:  uuid.NewString(),
-		RID:         initialRid(),
-		Nickname:    viewerName,
-		LANServerIP: serverIP,
-		LANClientIP: clientIP,
-		LogsDir:     aof.LogsDir,
-		DumpPackets: aof.DumpPackets,
+		StepsAOF:           aof.Steps,
+		PionAOF:            aof.Pion,
+		PktRecvAOF:         aof.PktRecv,
+		NetStatsAOF:        aof.NetStats,
+		BOSHSender:         httpxml.NewBOSHSender(aof.BOSH),
+		BoshURL:            fmt.Sprintf("https://%s/http-bind", serverIP),
+		RoomName:           confName,
+		MachineUID:         uuid.NewString(),
+		RID:                initialRid(),
+		Nickname:           viewerName,
+		LANServerIP:        serverIP,
+		LANClientIP:        clientIP,
+		LogsDir:            aof.LogsDir,
+		DumpPackets:        aof.DumpPackets,
+		EnableClientLoopV2: enableClientLoopV2,
 	}
 
 	u, _ := url.Parse(state.BoshURL)
