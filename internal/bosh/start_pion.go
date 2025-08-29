@@ -11,23 +11,11 @@ import (
 	"time"
 
 	"call.zip/internal/bosh/model"
+	"call.zip/internal/bot"
 	"call.zip/internal/record"
 	"call.zip/internal/vp9"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
-)
-
-const (
-	vbotErrReadFromTrackID int = iota
-	vbotErrUnmarshalPacketID
-	vbotErrParseVP9PayloadID
-	vbotErrSeqNoJumpID
-	nVbotErrIDs
-
-	vbotErrUnmarshalPacketMsg = "failed to unmarshal packet"
-	vbotErrReadFromTrackMsg   = "failed to read from track id"
-	vbotErrParseVP9PayloadMsg = "failed to parse vp9 payload"
-	vbotErrSeqNoJumpMsg       = "detected sequence number gap"
 )
 
 func parseIceCredentials(sdp string) (ufrag, pwd, fingerprint string) {
@@ -179,7 +167,7 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		if state.EnableClientLoopV2 {
-			go clientLoopV2(track)
+			go clientLoopV2(track, receiver)
 		} else {
 			go clientLoopV1(track, packetsCSV, state)
 		}
@@ -190,53 +178,19 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 
 // clientLoopV2 new version of track read loop replacing clientLoopV1
 // this version features in-memory packet and error stats
-func clientLoopV2(track *webrtc.TrackRemote) {
-	var n int
-	var err error
-	var raw []byte
-
-	var vp9Desc vp9.PayloadDescriptor
-
-	var lastTrackReadTime, nErrsTotal int64
-	var errCountsByID = make([]int64, nVbotErrIDs)
-
-	var buf = make([]byte, 1500)
-	var lastSeq uint16 = 0
-	var pkt rtp.Packet
-
-	for {
-		n, _, err = track.Read(buf)
-		lastTrackReadTime = time.Now().UnixMicro()
-
-		if err != nil {
-			errCountsByID[vbotErrReadFromTrackID]++
-			nErrsTotal++
-			continue
-		}
-
-		raw = buf[:n]
-		if err = pkt.Unmarshal(raw); err != nil {
-			errCountsByID[vbotErrUnmarshalPacketID]++
-			nErrsTotal++
-			continue
-		}
-
-		if lastSeq != 0 && pkt.SequenceNumber != lastSeq+1 {
-			errCountsByID[vbotErrSeqNoJumpID]++
-			nErrsTotal++
-			// fall-through
-		}
-		lastSeq = pkt.SequenceNumber
-
-		if err = vp9.ParseVP9PayloadDescriptor(pkt.Payload, &vp9Desc); err != nil {
-			errCountsByID[vbotErrParseVP9PayloadID]++
-			nErrsTotal++
-			continue
-		}
-
-		log.Printf("[clientLoopV2] SID=%d TID=%d lastTrackReadTime=%d rtp_timestamp=%d",
-			vp9Desc.SID, vp9Desc.TID, lastTrackReadTime, pkt.Timestamp)
+func clientLoopV2(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+	mgr := bot.NewManager() // TODO manager refactor
+	_, err := mgr.SpawnViewer(track, receiver, func(sample *vp9.VideoQualitySample) {
+		log.Println(sample.String())
+	}, &bot.ViewerConfig{
+		PacketsPerSample:  1000,
+		VP9RTPPayloadType: 101,
+		TrackBufferSize:   1500,
+	})
+	if err != nil {
+		panic(err) // TODO don't panic (manager refactor)
 	}
+	select {} // TODO manager refactor
 }
 
 // clientLoopV1 original version of track read loop
