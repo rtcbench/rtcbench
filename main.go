@@ -21,7 +21,8 @@ func main() {
 	loggerFlag := flag.String("log", defaultLogMode, "how to log: std/debug/silent/vb+/vbot")
 	roomNameFlag := flag.String("room", "", "room name, e.g. 'test7'")
 	vbotsFlag := flag.Int("n", 3, "number of vbots (default is 3)")
-	enableClientLoopV2Flag := flag.Bool("cl2", false, "enable new client recv loop behavior")
+	enableClientLoopV2Flag := flag.Bool("preview-cl2", false, "(preview) new client loop behavior")
+	enableAES128GCMFlag := flag.Bool("preview-gcm", false, "(preview) use AES-128-GCM instead of CM")
 	flag.Parse()
 
 	if *roomNameFlag == "" {
@@ -41,6 +42,7 @@ func main() {
 	clientIP := *clientIPFlag
 	numVbots := *vbotsFlag
 	enableClientLoopV2 := *enableClientLoopV2Flag
+	enableAES128GCM := *enableAES128GCMFlag
 
 	room := muc.NewRandomMUC(1, numVbots)
 	room.Name = roomName
@@ -73,6 +75,6 @@ func main() {
 			aof = aofconf.NewStdClientConfig(serverIP, clientIP, confName, viewerName)
 		}
 
-		bosh.PerformHandshake(aof, serverIP, clientIP, confName, viewerName, enableClientLoopV2)
+		bosh.PerformHandshake(aof, serverIP, clientIP, confName, viewerName, enableClientLoopV2, enableAES128GCM)
 	})
 }

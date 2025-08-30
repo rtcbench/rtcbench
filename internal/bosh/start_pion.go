@@ -14,6 +14,7 @@ import (
 	"call.zip/internal/bot"
 	"call.zip/internal/record"
 	"call.zip/internal/vp9"
+	"github.com/pion/dtls/v2"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -50,6 +51,9 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 	state.PionAOF.LogPrintf("[startPion] Listening on UDP %s:%d", hostIP, hostPort)
 
 	se := webrtc.SettingEngine{}
+	if state.EnableAES128GCM {
+		se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
+	}
 	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 

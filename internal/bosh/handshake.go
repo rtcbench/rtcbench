@@ -16,7 +16,7 @@ func initialRid() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string, enableClientLoopV2 bool) {
+func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string, enableClientLoopV2, enableAES128GCM bool) {
 	state := &model.ConnectionState{
 		StepsAOF:           aof.Steps,
 		PionAOF:            aof.Pion,
@@ -33,6 +33,7 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 		LogsDir:            aof.LogsDir,
 		DumpPackets:        aof.DumpPackets,
 		EnableClientLoopV2: enableClientLoopV2,
+		EnableAES128GCM:    enableAES128GCM,
 	}
 
 	u, _ := url.Parse(state.BoshURL)
