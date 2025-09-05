@@ -16,24 +16,22 @@ func initialRid() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string, enableClientLoopV2, enableAES128GCM bool) {
+func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string) {
 	state := &model.ConnectionState{
-		StepsAOF:           aof.Steps,
-		PionAOF:            aof.Pion,
-		PktRecvAOF:         aof.PktRecv,
-		NetStatsAOF:        aof.NetStats,
-		BOSHSender:         httpxml.NewBOSHSender(aof.BOSH),
-		BoshURL:            fmt.Sprintf("https://%s/http-bind", serverIP),
-		RoomName:           confName,
-		MachineUID:         uuid.NewString(),
-		RID:                initialRid(),
-		Nickname:           viewerName,
-		LANServerIP:        serverIP,
-		LANClientIP:        clientIP,
-		LogsDir:            aof.LogsDir,
-		DumpPackets:        aof.DumpPackets,
-		EnableClientLoopV2: enableClientLoopV2,
-		EnableAES128GCM:    enableAES128GCM,
+		StepsAOF:    aof.Steps,
+		PionAOF:     aof.Pion,
+		PktRecvAOF:  aof.PktRecv,
+		NetStatsAOF: aof.NetStats,
+		BOSHSender:  httpxml.NewBOSHSender(aof.BOSH),
+		BoshURL:     fmt.Sprintf("https://%s/http-bind", serverIP),
+		RoomName:    confName,
+		MachineUID:  uuid.NewString(),
+		RID:         initialRid(),
+		Nickname:    viewerName,
+		LANServerIP: serverIP,
+		LANClientIP: clientIP,
+		LogsDir:     aof.LogsDir,
+		DumpPackets: aof.DumpPackets,
 	}
 
 	u, _ := url.Parse(state.BoshURL)

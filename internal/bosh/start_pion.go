@@ -4,18 +4,14 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"regexp"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"call.zip/internal/bosh/model"
 	"call.zip/internal/bot"
-	"call.zip/internal/record"
 	"call.zip/internal/vp9"
 	"github.com/pion/dtls/v2"
-	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -51,9 +47,7 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 	state.PionAOF.LogPrintf("[startPion] Listening on UDP %s:%d", hostIP, hostPort)
 
 	se := webrtc.SettingEngine{}
-	if state.EnableAES128GCM {
-		se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
-	}
+	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
 	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 
@@ -161,28 +155,14 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 	state.PionAOF.LogPrintf("[startPion] ✅ Local SDP ufrag=%s pwd=%s fingerprint=%s", ufrag, pwd, fingerprint)
 	state.PionAOF.LogPrintln("[startPion] ✅ pion PeerConnection ready with SDP answer generated.")
 
-	var packetsCSV *os.File
-	if state.LogsDir != nil && state.DumpPackets {
-		packetsCSV, err = record.CreateOrOpenAOF(fmt.Sprintf("%s/pkt-%s.csv", *state.LogsDir, state.Nickname))
-		if err != nil {
-			state.PionAOF.LogFatalf("❌ Failed to open AOF file: %v", err)
-		}
-	}
-
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		if state.EnableClientLoopV2 {
-			go clientLoopV2(track, receiver)
-		} else {
-			go clientLoopV1(track, packetsCSV, state)
-		}
+		go createViewerBot(track, receiver)
 	})
 
 	return pc, nil
 }
 
-// clientLoopV2 new version of track read loop replacing clientLoopV1
-// this version features in-memory packet and error stats
-func clientLoopV2(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+func createViewerBot(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 	mgr := bot.NewManager() // TODO manager refactor
 	_, err := mgr.SpawnViewer(track, receiver, func(sample *vp9.VideoQualitySample) {
 		log.Println(sample.String())
@@ -195,48 +175,4 @@ func clientLoopV2(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		panic(err) // TODO don't panic (manager refactor)
 	}
 	select {} // TODO manager refactor
-}
-
-// clientLoopV1 original version of track read loop
-// Deprecated: will be removed in v0.3.0
-func clientLoopV1(track *webrtc.TrackRemote, packetsCSV *os.File, state *model.ConnectionState) {
-	buf := make([]byte, 1500)
-	var lastSeq uint16 = 0
-	for {
-		n, _, readErr := track.Read(buf)
-		if readErr != nil {
-			state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 Read error: %s", readErr)
-			return
-		}
-		raw := buf[:n]
-		pkt := &rtp.Packet{}
-		if err := pkt.Unmarshal(raw); err != nil {
-			state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 Failed to unmarshal packet! Error: %s", err)
-			continue
-		}
-		if lastSeq != 0 && pkt.SequenceNumber != lastSeq+1 {
-			state.PktRecvAOF.LogPrintf("[OnTrack] 🚨 RTP SeqNo jump: last=%d now=%d", lastSeq, pkt.SequenceNumber)
-		}
-		lastSeq = pkt.SequenceNumber
-		state.PktRecvAOF.LogPrintf("[OnTrack] ✅ Got RTP PT=%d SeqNo=%d Payload=%d bytes", pkt.PayloadType, pkt.SequenceNumber, len(pkt.Payload))
-
-		if packetsCSV != nil {
-			if err := record.LogPacketAOF(int(pkt.PayloadType), raw, packetsCSV); err != nil { // 12 byte rtp header is included
-				state.PktRecvAOF.LogPrintf("[OnTrack] ❌ Failed to write packets CSV: %s", err)
-			}
-		}
-
-		sid := -1
-		tid := -1
-		var vp9desc vp9.PayloadDescriptor
-		err := vp9.ParseVP9PayloadDescriptor(pkt.Payload, &vp9desc)
-		if err != nil {
-			state.PktRecvAOF.LogPrintf("[OnTrack] ❌❌ Not VP9 Payload Descriptor: %s", err)
-		} else {
-			sid = int(vp9desc.SID)
-			tid = int(vp9desc.TID)
-		}
-
-		state.NetStatsAOF.Printf("%s,%d,%d,%d,%d,%d,%d,%d\n", time.Now().Format(time.RFC3339), pkt.PayloadType, pkt.SequenceNumber, len(pkt.Payload), sid, tid, pkt.Timestamp, time.Now().UnixMicro())
-	}
 }

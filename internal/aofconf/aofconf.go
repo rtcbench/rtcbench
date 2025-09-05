@@ -1,18 +1,19 @@
 package aofconf
 
 import (
-	"call.zip/internal/aoflog"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"call.zip/internal/aoflog"
 )
 
 type Config struct {
 	LogsDir     *string
-	DumpPackets bool
+	DumpPackets bool // Deprecated: functionality gone in 0.3.0
 	Steps       aoflog.Client
 	Pion        aoflog.Client
 	PktRecv     aoflog.Client

@@ -8,19 +8,17 @@ import (
 // ConnectionState is an object built by the signaling flow
 type ConnectionState struct {
 	// === Bot config ===
-	StepsAOF           aoflog.Client
-	PionAOF            aoflog.Client
-	PktRecvAOF         aoflog.Client
-	NetStatsAOF        aoflog.Client
-	BOSHSender         httpxml.BOSHSender
-	BotRandom          string
-	Nickname           string
-	LANServerIP        string  // e.g. "10.99.0.210"
-	LANClientIP        string  // e.g. "10.99.0.219"
-	LogsDir            *string // e.g. "logs/e-2025XXXXXXXX/split/vbot-XXXXXXXX" or nil for no output
-	DumpPackets        bool    // should we write a packets-XXXX.csv file? (LogsDir must not be nil)
-	EnableClientLoopV2 bool    // Deprecated: feature-flag for new client loop will be enabled by default in v0.3.0
-	EnableAES128GCM    bool    // Deprecated: feature-flag for DTLS-AEAD-AES-128-GCM will be enabled by default in v0.3.0
+	StepsAOF    aoflog.Client
+	PionAOF     aoflog.Client
+	PktRecvAOF  aoflog.Client
+	NetStatsAOF aoflog.Client
+	BOSHSender  httpxml.BOSHSender
+	BotRandom   string
+	Nickname    string
+	LANServerIP string  // e.g. "10.99.0.210"
+	LANClientIP string  // e.g. "10.99.0.219"
+	LogsDir     *string // e.g. "logs/e-2025XXXXXXXX/split/vbot-XXXXXXXX" or nil for no output
+	DumpPackets bool    // Deprecated: functionality gone in 0.3.0
 
 	// === Static config ===
 	BoshURL    string // e.g. https://10.99.0.210/http-bind
