@@ -22,7 +22,11 @@ a=extmap:5 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extension
 a=setup:actpass
 a=mid:0
 
+{{if .InstantReplay}}
+a=sendrecv
+{{else}}
 a=recvonly
+{{end}}
 
 a=ice-ufrag:{{.ICEUfrag}}
 a=ice-pwd:{{.ICEPwd}}

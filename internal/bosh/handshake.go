@@ -17,22 +17,23 @@ func initialRid() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string) {
+func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string, instantReplay bool) {
 	state := &model.ConnectionState{
-		StepsAOF:    aof.Steps,
-		PionAOF:     aof.Pion,
-		PktRecvAOF:  aof.PktRecv,
-		NetStatsAOF: aof.NetStats,
-		BOSHSender:  httpxml.NewBOSHSender(aof.BOSH),
-		BoshURL:     fmt.Sprintf("https://%s/http-bind", serverIP),
-		RoomName:    confName,
-		MachineUID:  uuid.NewString(),
-		RID:         initialRid(),
-		Nickname:    viewerName,
-		LANServerIP: serverIP,
-		LANClientIP: clientIP,
-		LogsDir:     aof.LogsDir,
-		DumpPackets: aof.DumpPackets,
+		StepsAOF:      aof.Steps,
+		PionAOF:       aof.Pion,
+		PktRecvAOF:    aof.PktRecv,
+		NetStatsAOF:   aof.NetStats,
+		BOSHSender:    httpxml.NewBOSHSender(aof.BOSH),
+		BoshURL:       fmt.Sprintf("https://%s/http-bind", serverIP),
+		RoomName:      confName,
+		MachineUID:    uuid.NewString(),
+		RID:           initialRid(),
+		Nickname:      viewerName,
+		LANServerIP:   serverIP,
+		LANClientIP:   clientIP,
+		LogsDir:       aof.LogsDir,
+		DumpPackets:   aof.DumpPackets,
+		InstantReplay: instantReplay,
 	}
 
 	u, _ := url.Parse(state.BoshURL)
@@ -63,9 +64,10 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 	}
 
 	sdp, err := sdp_tmpl.RenderSDP(sdp_tmpl.SDPState{
-		ICEUfrag:    state.ICEUfrag,
-		ICEPwd:      state.ICEPwd,
-		Fingerprint: state.Fingerprint,
+		ICEUfrag:      state.ICEUfrag,
+		ICEPwd:        state.ICEPwd,
+		Fingerprint:   state.Fingerprint,
+		InstantReplay: state.InstantReplay,
 	})
 	if err != nil {
 		aof.Handshake.LogPrintf("SDP conversion failed: %v", err)
@@ -115,42 +117,4 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 	}()
 
 	select {}
-}
-
-func ConvertJingleToSDP(state *model.ConnectionState) (string, error) {
-	sdp := "v=0\n"
-	sdp += "o=- 0 0 IN IP4 0.0.0.0\n"
-	sdp += "s=-\n"
-	sdp += "t=0 0\n"
-	sdp += "a=msid-semantic: WMS\n"
-	sdp += "a=group:BUNDLE 0\n"
-
-	// === m=video ===
-	sdp += "m=video 9 UDP/TLS/RTP/SAVPF 101\n"
-	sdp += "c=IN IP4 0.0.0.0\n"
-	sdp += "a=rtpmap:101 VP9/90000\n"
-	sdp += "a=fmtp:101 profile-id=0 max-fr=30;max-fs=12266\n"
-	sdp += "a=rtcp:9 IN IP4 0.0.0.0\n"
-
-	// RTCP Feedback (VP9 SVC safe set)
-	sdp += "a=rtcp-fb:101 ccm fir\n"
-	sdp += "a=rtcp-fb:101 nack\n"
-	sdp += "a=rtcp-fb:101 nack pli\n"
-	sdp += "a=rtcp-fb:101 transport-cc\n"
-
-	// Header extensions (must match Jitsi offer)
-	sdp += "a=extmap:3 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time\n"
-	sdp += "a=extmap:5 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01\n"
-
-	sdp += "a=setup:actpass\n"
-	sdp += "a=mid:0\n"
-	sdp += "a=recvonly\n"
-	sdp += fmt.Sprintf("a=ice-ufrag:%s\n", state.ICEUfrag)
-	sdp += fmt.Sprintf("a=ice-pwd:%s\n", state.ICEPwd)
-	sdp += fmt.Sprintf("a=fingerprint:sha-256 %s\n", state.Fingerprint)
-	sdp += "a=ice-options:trickle\n"
-	sdp += "a=rtcp-mux\n"
-	sdp += "a=extmap-allow-mixed\n"
-
-	return sdp, nil
 }

@@ -89,10 +89,14 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 		}
 	})
 
-	_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
-		Direction: webrtc.RTPTransceiverDirectionRecvonly,
-	})
-	if err != nil {
+	dir := webrtc.RTPTransceiverDirectionRecvonly
+	if state.InstantReplay {
+		dir = webrtc.RTPTransceiverDirectionSendrecv
+	}
+	if _, err = pc.AddTransceiverFromKind(
+		webrtc.RTPCodecTypeVideo,
+		webrtc.RTPTransceiverInit{Direction: dir},
+	); err != nil {
 		return nil, fmt.Errorf("AddTransceiver failed: %w", err)
 	}
 
@@ -135,6 +139,36 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 		}
 	}
 
+	var pubTrack *webrtc.TrackLocalStaticRTP
+	if state.InstantReplay {
+		state.PionAOF.LogPrintln("[instant-replay] Attaching local TrackLocalStaticRTP on same PeerConnection (sendrecv)")
+		pubTrack, err = webrtc.NewTrackLocalStaticRTP(
+			webrtc.RTPCodecCapability{
+				MimeType:    webrtc.MimeTypeVP9,
+				ClockRate:   90000,
+				SDPFmtpLine: "profile-id=0",
+			},
+			"video",          // track ID
+			"instant-replay", // stream ID
+		)
+		if err != nil {
+			return nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
+		}
+		sender, err := pc.AddTrack(pubTrack)
+		if err != nil {
+			return nil, fmt.Errorf("AddTrack (instant replay) failed: %w", err)
+		}
+		// drain RTCP so feedback doesn't back up
+		go func() {
+			pkts := make([]byte, 10000) // TODO made up buffer size
+			for {
+				if _, _, err := sender.Read(pkts); err != nil {
+					return
+				}
+			}
+		}()
+	}
+
 	answer, err := pc.CreateAnswer(nil)
 	answer.SDP = strings.Replace(answer.SDP, "a=setup:actpass", "a=setup:active", 1)
 	if err != nil {
@@ -156,23 +190,25 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 	state.PionAOF.LogPrintln("[startPion] ✅ pion PeerConnection ready with SDP answer generated.")
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		go createViewerBot(track, receiver)
+		go func() {
+			mgr := bot.NewManager() // TODO manager refactor
+
+			cfg := &bot.ViewerConfig{
+				PacketsPerSample:  1000,
+				VP9RTPPayloadType: 101,
+				TrackBufferSize:   1500,
+				PublishTrack:      pubTrack, // nil unless PreviewInstantReplay
+			}
+
+			if _, err := mgr.SpawnViewer(track, receiver, func(sample *vp9.VideoQualitySample) {
+				log.Println(sample.String())
+			}, cfg); err != nil {
+				panic(err) // TODO don't panic (manager refactor)
+			}
+
+			select {} // TODO manager refactor
+		}()
 	})
 
 	return pc, nil
-}
-
-func createViewerBot(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-	mgr := bot.NewManager() // TODO manager refactor
-	_, err := mgr.SpawnViewer(track, receiver, func(sample *vp9.VideoQualitySample) {
-		log.Println(sample.String())
-	}, &bot.ViewerConfig{
-		PacketsPerSample:  1000,
-		VP9RTPPayloadType: 101,
-		TrackBufferSize:   1500,
-	})
-	if err != nil {
-		panic(err) // TODO don't panic (manager refactor)
-	}
-	select {} // TODO manager refactor
 }
