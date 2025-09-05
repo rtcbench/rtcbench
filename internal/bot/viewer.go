@@ -29,6 +29,11 @@ type ViewerConfig struct {
 	PacketsPerSample  int `json:"packets_per_sample"`
 	VP9RTPPayloadType int `json:"vp9_rtp_payload_type"`
 	TrackBufferSize   int `json:"track_buffer_size"`
+
+	// Optional: if set, every accepted VP9 RTP packet will also be written
+	// to this TrackLocal, enabling same-PC instant replay / rebroadcast.
+	// TODO this does not go in the config, use a EnableInstantReplay bool here
+	PublishTrack *webrtc.TrackLocalStaticRTP `json:"-"`
 }
 
 func (c *ViewerConfig) verify() error {
@@ -124,6 +129,10 @@ loop:
 		if err = vp9.ParseVP9PayloadDescriptor(pkt.Payload, &vp9PayloadDesc); err != nil {
 			errs[errViewerParseVP9PayloadID]++
 			continue
+		}
+
+		if v.config.PublishTrack != nil {
+			_ = v.config.PublishTrack.WriteRTP(&pkt)
 		}
 
 		vp9FrameStats.AcceptPacket(clientReadTime, pkt.Timestamp, &vp9PayloadDesc)

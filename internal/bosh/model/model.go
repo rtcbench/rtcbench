@@ -8,17 +8,18 @@ import (
 // ConnectionState is an object built by the signaling flow
 type ConnectionState struct {
 	// === Bot config ===
-	StepsAOF    aoflog.Client
-	PionAOF     aoflog.Client
-	PktRecvAOF  aoflog.Client
-	NetStatsAOF aoflog.Client
-	BOSHSender  httpxml.BOSHSender
-	BotRandom   string
-	Nickname    string
-	LANServerIP string  // e.g. "10.99.0.210"
-	LANClientIP string  // e.g. "10.99.0.219"
-	LogsDir     *string // e.g. "logs/e-2025XXXXXXXX/split/vbot-XXXXXXXX" or nil for no output
-	DumpPackets bool    // Deprecated: functionality gone in 0.3.0
+	StepsAOF      aoflog.Client
+	PionAOF       aoflog.Client
+	PktRecvAOF    aoflog.Client
+	NetStatsAOF   aoflog.Client
+	BOSHSender    httpxml.BOSHSender
+	BotRandom     string
+	Nickname      string
+	LANServerIP   string  // e.g. "10.99.0.210"
+	LANClientIP   string  // e.g. "10.99.0.219"
+	LogsDir       *string // e.g. "logs/e-2025XXXXXXXX/split/vbot-XXXXXXXX" or nil for no output
+	DumpPackets   bool    // Deprecated: functionality gone in 0.3.0
+	InstantReplay bool    // Deprecated: instant replay is a preview in 0.3
 
 	// === Static config ===
 	BoshURL    string // e.g. https://10.99.0.210/http-bind
