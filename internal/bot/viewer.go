@@ -30,9 +30,6 @@ type ViewerConfig struct {
 	VP9RTPPayloadType int `json:"vp9_rtp_payload_type"`
 	TrackBufferSize   int `json:"track_buffer_size"`
 
-	// Optional: if set, every accepted VP9 RTP packet will also be written
-	// to this TrackLocal, enabling same-PC instant replay / rebroadcast.
-	// TODO this does not go in the config, use a EnableInstantReplay bool here
 	PublishTrack *webrtc.TrackLocalStaticRTP `json:"-"`
 }
 
@@ -132,7 +129,10 @@ loop:
 		}
 
 		if v.config.PublishTrack != nil {
-			_ = v.config.PublishTrack.WriteRTP(&pkt)
+			err := v.config.PublishTrack.WriteRTP(&pkt)
+			if err != nil {
+				panic(err) // TODO
+			}
 		}
 
 		vp9FrameStats.AcceptPacket(clientReadTime, pkt.Timestamp, &vp9PayloadDesc)

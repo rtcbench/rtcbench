@@ -11,6 +11,7 @@ import (
 	"call.zip/internal/bosh/model"
 	"call.zip/internal/bot"
 	"call.zip/internal/vp9"
+	"github.com/google/uuid"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
 )
@@ -139,6 +140,8 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 		}
 	}
 
+	var outSSRC uint32
+	var outMSID string
 	var pubTrack *webrtc.TrackLocalStaticRTP
 	if state.InstantReplay {
 		state.PionAOF.LogPrintln("[instant-replay] Attaching local TrackLocalStaticRTP on same PeerConnection (sendrecv)")
@@ -149,7 +152,7 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 				SDPFmtpLine: "profile-id=0",
 			},
 			"video",          // track ID
-			"instant-replay", // stream ID
+			uuid.NewString(), // stream ID
 		)
 		if err != nil {
 			return nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
@@ -167,7 +170,14 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 				}
 			}
 		}()
+		params := sender.GetParameters()
+		if len(params.Encodings) > 0 {
+			outSSRC = uint32(params.Encodings[0].SSRC)
+		}
+		outMSID = pubTrack.StreamID()
 	}
+	state.SenderSSRC = fmt.Sprintf("%d", outSSRC)
+	state.SenderMSID = fmt.Sprintf("%s", outMSID)
 
 	answer, err := pc.CreateAnswer(nil)
 	answer.SDP = strings.Replace(answer.SDP, "a=setup:actpass", "a=setup:active", 1)
@@ -197,7 +207,7 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 				PacketsPerSample:  1000,
 				VP9RTPPayloadType: 101,
 				TrackBufferSize:   1500,
-				PublishTrack:      pubTrack, // nil unless PreviewInstantReplay
+				PublishTrack:      pubTrack, // nil unless InstantReplay
 			}
 
 			if _, err := mgr.SpawnViewer(track, receiver, func(sample *vp9.VideoQualitySample) {
