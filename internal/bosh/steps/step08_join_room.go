@@ -1,14 +1,21 @@
 package steps
 
 import (
-	"call.zip/internal/bosh/model"
 	"fmt"
 	"strings"
+
+	"call.zip/internal/bosh/model"
 )
 
 // Step08_JoinRoom sends the initial <presence/> stanza to the MUC room.
 func Step08_JoinRoom(state *model.ConnectionState) error {
 	state.RID++
+
+	sourceInfoJSON := "{}"
+
+	if state.InstantReplay {
+		sourceInfoJSON = fmt.Sprintf("{\"%s-v0\":{\"muted\":true}}", state.Nickname)
+	}
 
 	requestBody := fmt.Sprintf(`
 <body xmlns="http://jabber.org/protocol/httpbind"
@@ -17,7 +24,7 @@ func Step08_JoinRoom(state *model.ConnectionState) error {
   <presence xmlns="jabber:client"
             to="%s@conference.%s/%s">
     <x xmlns="http://jabber.org/protocol/muc" />
-    <SourceInfo>{}</SourceInfo>
+    <SourceInfo>%s</SourceInfo>
     <jitsi_participant_codecList>vp9</jitsi_participant_codecList>
     <nick xmlns="http://jabber.org/protocol/nick">%s</nick>
   </presence>
@@ -27,6 +34,7 @@ func Step08_JoinRoom(state *model.ConnectionState) error {
 		state.RoomName,
 		state.Domain,
 		state.Nickname,
+		sourceInfoJSON,
 		state.Nickname,
 	)
 
