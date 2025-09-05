@@ -1,14 +1,13 @@
 package steps
 
 import (
-	"call.zip/internal/bosh/model"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
-)
 
-// === Helpers ===
+	"call.zip/internal/bosh/model"
+)
 
 type HostCandidate struct {
 	IP       string
@@ -43,6 +42,7 @@ func extractHostCandidate(sdp string) HostCandidate {
 	}
 	return HostCandidate{}
 }
+
 func Step10_SendSessionAccept(state *model.ConnectionState) error {
 	state.RID++
 
@@ -63,16 +63,23 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
 		}
 	} else {
 		candidate = extractHostCandidate(state.LocalSDP)
-		//state.StepsAOF.LogPrintln("extractHostCandidate ====\n" + state.LocalSDP + "\n==== END extractHostCandidate")
-	}
-
-	if ufrag == "" || pwd == "" || fingerprint == "" || candidate.IP == "" {
-		state.StepsAOF.LogPrintln("[Step10] WARN: Missing ICE details", ufrag, pwd, fingerprint, candidate.IP)
-		return fmt.Errorf("incomplete ICE details")
 	}
 
 	state.StepsAOF.LogPrintf("[Step10] Using ufrag=%s pwd=%s fingerprint=%s hostIP=%s port=%d priority=%d",
 		ufrag, pwd, fingerprint, candidate.IP, candidate.Port, candidate.Priority)
+
+	videoSenders := "responder" // recvonly
+	videoSourcesXML := ""
+	if state.InstantReplay {
+		ssrc := state.SenderSSRC
+		msid := state.SenderMSID
+		videoSenders = "both"
+		videoSourcesXML = fmt.Sprintf(
+			`<source name="%s" xmlns="urn:xmpp:jingle:apps:rtp:ssma:0" ssrc="%s" videoType="camera">`+
+				`<parameter name="msid" value="%s"/>`+
+				`</source>`, state.Nickname+"-v0", ssrc, msid)
+		state.StepsAOF.LogPrintf("[Step10] will advertise outgoing video SSRC=%s msid=%q", ssrc, msid)
+	}
 
 	requestBody := fmt.Sprintf(`<body xmlns="http://jabber.org/protocol/httpbind" rid="%d" sid="%s">
   <iq xmlns="jabber:client" id="session-accept" to="%s" type="set">
@@ -98,7 +105,7 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
           <candidate foundation="1" component="1" protocol="udp" ip="%s" port="%d" priority="%d" type="host"/>
         </transport>
       </content>
-      <content creator="responder" name="video" senders="responder">
+      <content creator="responder" name="video" senders="%s">
         <description xmlns="urn:xmpp:jingle:apps:rtp:1" media="video">
           <payload-type id="101" name="VP9" clockrate="90000">
             <parameter name="profile-id" value="0"/>
@@ -107,6 +114,7 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
             <rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="nack" subtype="pli"/>
             <rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="ccm" subtype="fir"/>
           </payload-type>
+          %s
           <rtcp-mux/>
           <rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="3" uri="http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time"/>
           <rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="5" uri="http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"/>
@@ -125,6 +133,7 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
 		// audio transport
 		ufrag, pwd, fingerprint, candidate.IP, candidate.Port, candidate.Priority,
 		// video transport
+		videoSenders, videoSourcesXML,
 		ufrag, pwd, fingerprint, candidate.IP, candidate.Port, candidate.Priority,
 	)
 
