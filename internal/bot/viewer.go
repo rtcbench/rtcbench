@@ -40,7 +40,7 @@ func (c *ViewerConfig) verify() error {
 		return fmt.Errorf("invalid config: c.VP9RTPPayloadType (%d) out of range [0..255]",
 			c.VP9RTPPayloadType)
 	}
-	if c.TrackBufferSize < 100 && c.TrackBufferSize > 10_000 { // TODO artificial limit
+	if c.TrackBufferSize < 100 || c.TrackBufferSize > 10_000 { // TODO artificial limit
 		return fmt.Errorf("invalid config: c.TrackBufferSize (%d) out of range [100..10000]", c.TrackBufferSize)
 	}
 	return nil
