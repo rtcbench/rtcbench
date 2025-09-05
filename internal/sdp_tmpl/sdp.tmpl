@@ -1,0 +1,32 @@
+v=0
+o=- 0 0 IN IP4 0.0.0.0
+s=-
+t=0 0
+a=msid-semantic: WMS
+a=group:BUNDLE 0
+
+m=video 9 UDP/TLS/RTP/SAVPF 101
+c=IN IP4 0.0.0.0
+a=rtpmap:101 VP9/90000
+a=fmtp:101 profile-id=0 max-fr=30;max-fs=12266
+a=rtcp:9 IN IP4 0.0.0.0
+
+a=rtcp-fb:101 ccm fir
+a=rtcp-fb:101 nack
+a=rtcp-fb:101 nack pli
+a=rtcp-fb:101 transport-cc
+
+a=extmap:3 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time
+a=extmap:5 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
+
+a=setup:actpass
+a=mid:0
+
+a=recvonly
+
+a=ice-ufrag:{{.ICEUfrag}}
+a=ice-pwd:{{.ICEPwd}}
+a=fingerprint:sha-256 {{.Fingerprint}}
+a=ice-options:trickle
+a=rtcp-mux
+a=extmap-allow-mixed

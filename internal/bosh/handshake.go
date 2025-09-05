@@ -9,6 +9,7 @@ import (
 	"call.zip/internal/bosh/httpxml"
 	"call.zip/internal/bosh/model"
 	"call.zip/internal/bosh/steps"
+	"call.zip/internal/sdp_tmpl"
 	"github.com/google/uuid"
 )
 
@@ -61,7 +62,11 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 		return
 	}
 
-	sdp, err := ConvertJingleToSDP(state)
+	sdp, err := sdp_tmpl.RenderSDP(sdp_tmpl.SDPState{
+		ICEUfrag:    state.ICEUfrag,
+		ICEPwd:      state.ICEPwd,
+		Fingerprint: state.Fingerprint,
+	})
 	if err != nil {
 		aof.Handshake.LogPrintf("SDP conversion failed: %v", err)
 		return
