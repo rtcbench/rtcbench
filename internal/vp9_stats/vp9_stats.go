@@ -1,8 +1,10 @@
-package vp9
+package vp9_stats
 
 import (
 	"fmt"
 	"strings"
+
+	"call.zip/internal/vp9"
 )
 
 const (
@@ -14,10 +16,14 @@ const (
 
 	StatsBufferSize = 2048
 
-	fpsEWMAAlpha = float32(0.9)
+	fpsEWMAAlpha     = float32(0.9)
+	bitrateEWMAAlpha = fpsEWMAAlpha
 )
 
 type FrameStatistics struct {
+	// sampleSequenceNo this sequence number counts the number of calls to TakeSample which writes it to each sample
+	sampleSequenceNo uint64
+
 	// pos current position in the buffer
 	pos int
 
@@ -39,8 +45,14 @@ type FrameStatistics struct {
 	// latestSmoothFPS latest computed smoothed frame per second value
 	latestSmoothFPS float32
 
+	// latestSmoothBPS latest computed smoothed bits per second value
+	latestSmoothBitrate float32
+
 	// skipInvalidPackets count of packets skipped from stats due to invalid data
 	skipInvalidPackets int64
+
+	// sumBytes total byte sum of all rtp payloads in the buffer
+	sumBytes int64
 }
 
 type frameInfo struct {
@@ -50,9 +62,14 @@ type frameInfo struct {
 	// rtpTimestamp remote timestamp (all packets of the same frame have the same timestamp)
 	rtpTimestamp uint32
 
-	// bufferFPS FPS computed using start and end time of all full frames in buffer.
-	// We exclude frames at the start and end of the buffer as they may be partial.
+	// nBytes is byte count of the packet used to calculate bitrate (configured by caller of AcceptPacket)
+	nBytes int
+
+	// bufferFPS FPS computed using start and end time of packets in buffer
 	bufferFPS float32
+
+	// bufferBitrate bits per second computed using start and end time of packets in buffer
+	bufferBitrate float32
 
 	// spatialID video resolution (see PayloadDescriptor.SID)
 	spatialID uint8
@@ -62,15 +79,27 @@ type frameInfo struct {
 }
 
 type VideoQualitySample struct {
+	// SequenceNo monotonic sequence number
+	SequenceNo uint64
+
 	// Layers histogram of SID x TID counts (counted by packet)
 	Layers [nSpatialLayers][nTemporalLayers]int
 
 	// SmoothFPS latest computed smoothed frame per second value
 	SmoothFPS float32
+
+	// BufferFPS latest computed bufferFPS (non-smoothed FPS)
+	BufferFPS float32
+
+	// SmoothBitrate latest computed smoothed bits per second value
+	SmoothBitrate float32
+
+	// BufferBitrate latest computed bufferBitrate (non-smoothed bitrate)
+	BufferBitrate float32
 }
 
 // AcceptPacket updates the stat tracker with information about the newly arrived VP9 RTP packet
-func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp uint32, payloadDesc *PayloadDescriptor) {
+func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp uint32, nBytes int, payloadDesc *vp9.PayloadDescriptor) {
 	spatialID := payloadDesc.SID
 	temporalID := payloadDesc.TID
 
@@ -84,7 +113,9 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 	stats.packets[stats.pos] = frameInfo{
 		clientReadTime: clientReadTime,
 		rtpTimestamp:   rtpTimestamp,
+		nBytes:         nBytes,
 		bufferFPS:      float32(0),
+		bufferBitrate:  float32(0),
 		spatialID:      spatialID,
 		temporalID:     temporalID,
 	}
@@ -101,17 +132,23 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 					stats.uniqueRtpTimestamps++
 				}
 				stats.rtpTimestamps[stats.packets[i].rtpTimestamp]++
+				stats.sumBytes += int64(stats.packets[i].nBytes)
 			}
 
 			elapsedUS := stats.packets[StatsBufferSize-1].clientReadTime - stats.packets[0].clientReadTime
 			if elapsedUS <= 0 {
 				elapsedUS = 1
 			}
+
 			bufferFPS := float32(stats.uniqueRtpTimestamps) / (float32(elapsedUS) / float32(1_000_000))
 			stats.latestSmoothFPS = bufferFPS
 
+			bufferBitrate := float32(stats.sumBytes*8) / (float32(elapsedUS) / float32(1_000_000))
+			stats.latestSmoothBitrate = bufferBitrate
+
 			for i := 0; i < StatsBufferSize; i++ {
 				stats.packets[i].bufferFPS = bufferFPS
+				stats.packets[i].bufferBitrate = bufferBitrate
 			}
 
 			stats.pos = 0
@@ -128,6 +165,9 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 		stats.uniqueRtpTimestamps--
 	}
 
+	stats.sumBytes -= int64(evictedPacket.nBytes)
+	stats.sumBytes += int64(nBytes)
+
 	_, frameExists := stats.rtpTimestamps[stats.packets[stats.pos].rtpTimestamp]
 	stats.rtpTimestamps[stats.packets[stats.pos].rtpTimestamp]++
 
@@ -139,22 +179,35 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 	if elapsedUS <= 0 {
 		elapsedUS = 1
 	}
+
+	// TODO: only latest bufferFPS and bufferBitrate is needed, uses extra memory in frameInfo
 	bufferFPS := float32(stats.uniqueRtpTimestamps) / (float32(elapsedUS) / float32(1_000_000))
 	stats.packets[stats.pos].bufferFPS = bufferFPS
+	bufferBitrate := float32(stats.sumBytes*8) / (float32(elapsedUS) / float32(1_000_000))
+	stats.packets[stats.pos].bufferBitrate = bufferBitrate
 
 	if !frameExists {
 		stats.latestSmoothFPS = fpsEWMAAlpha*stats.latestSmoothFPS + (1.0-fpsEWMAAlpha)*bufferFPS
 	}
 
+	stats.latestSmoothBitrate = bitrateEWMAAlpha*stats.latestSmoothBitrate + (1.0-bitrateEWMAAlpha)*bufferBitrate
+
 	stats.pos = (stats.pos + 1) % StatsBufferSize
 }
 
 // TakeSample copies the histogram and current FPS into sample (or copies zero's if sample is too small)
+// the sequence number is incremented, so the first call will have sample.SequenceNo == 1
 func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
+	stats.sampleSequenceNo++
+
 	if stats.len < StatsBufferSize {
-		*sample = VideoQualitySample{}
+		*sample = VideoQualitySample{
+			SequenceNo: stats.sampleSequenceNo,
+		}
 		return
 	}
+
+	sample.SequenceNo = stats.sampleSequenceNo
 
 	for sid := 0; sid < nSpatialLayers; sid++ {
 		for tid := 0; tid < nTemporalLayers; tid++ {
@@ -162,13 +215,22 @@ func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
 		}
 	}
 
+	// use stats.pos-1 because stats.pos points to the next eviction (eldest member)
+	lastPos := stats.pos - 1
+	if lastPos < 0 {
+		lastPos = StatsBufferSize - 1
+	}
 	sample.SmoothFPS = stats.latestSmoothFPS
+	sample.BufferFPS = stats.packets[lastPos].bufferFPS
+	sample.SmoothBitrate = stats.latestSmoothBitrate
+	sample.BufferBitrate = stats.packets[lastPos].bufferBitrate
 }
 
 // String formats the video quality sample for debug purposes
 func (sample *VideoQualitySample) String() string {
 	sb := strings.Builder{}
-	fmt.Fprintf(&sb, "vp9.VideoQualitySample[smooth_fps=%0.4f;SID-TID:count=", sample.SmoothFPS)
+	fmt.Fprintf(&sb, "vp9.VideoQualitySample[sm_fps=%0.4f;buf_fps=%0.4f;sm_bps=%0.4f;buf_bps=%0.4f;SID-TID:count=",
+		sample.SmoothFPS, sample.BufferFPS, sample.SmoothBitrate, sample.BufferBitrate)
 	for sid := nSpatialLayers - 1; sid >= 0; sid-- {
 		for tid := nTemporalLayers - 1; tid >= 0; tid-- {
 			if sample.Layers[sid][tid] > 0 {

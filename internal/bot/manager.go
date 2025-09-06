@@ -4,7 +4,7 @@ import (
 	"log"
 	"sync"
 
-	"call.zip/internal/vp9"
+	"call.zip/internal/vp9_stats"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -26,7 +26,7 @@ func NewManager() *Manager {
 func (m *Manager) SpawnViewer(
 	track *webrtc.TrackRemote,
 	receiver *webrtc.RTPReceiver,
-	onSample func(*vp9.VideoQualitySample),
+	onSample func(*vp9_stats.VideoQualitySample),
 	config *ViewerConfig,
 ) (*Viewer, error) {
 	v, err := newViewer(track, receiver, config)
@@ -40,7 +40,7 @@ func (m *Manager) SpawnViewer(
 	m.mu.Unlock()
 
 	m.wg.Add(1)
-	go func(onSample_ func(*vp9.VideoQualitySample)) {
+	go func(onSample_ func(*vp9_stats.VideoQualitySample)) {
 		defer m.wg.Done()
 		err := v.run(m.done, onSample_)
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"call.zip/internal/vp9"
+	"call.zip/internal/vp9_stats"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -34,9 +35,9 @@ type ViewerConfig struct {
 }
 
 func (c *ViewerConfig) verify() error {
-	if c.PacketsPerSample > vp9.StatsBufferSize {
-		return fmt.Errorf("invalid config: c.PacketsPerSample (%d) > vp9.StatsBufferSize (%d)",
-			c.PacketsPerSample, vp9.StatsBufferSize)
+	if c.PacketsPerSample > vp9_stats.StatsBufferSize {
+		return fmt.Errorf("invalid config: c.PacketsPerSample (%d) > vp9_stats.StatsBufferSize (%d)",
+			c.PacketsPerSample, vp9_stats.StatsBufferSize)
 	}
 	if c.VP9RTPPayloadType < 0 || c.VP9RTPPayloadType > 255 {
 		return fmt.Errorf("invalid config: c.VP9RTPPayloadType (%d) out of range [0..255]",
@@ -65,7 +66,7 @@ func newViewer(
 
 func (v *Viewer) run(
 	done <-chan struct{},
-	onSample func(*vp9.VideoQualitySample),
+	onSample func(*vp9_stats.VideoQualitySample),
 ) error {
 	var (
 		pkt rtp.Packet
@@ -78,8 +79,8 @@ func (v *Viewer) run(
 
 		vp9RTPPayloadType = v.config.VP9RTPPayloadType
 		vp9PayloadDesc    vp9.PayloadDescriptor
-		vp9FrameStats     vp9.FrameStatistics
-		vp9QualitySample  vp9.VideoQualitySample
+		vp9FrameStats     vp9_stats.FrameStatistics
+		vp9QualitySample  vp9_stats.VideoQualitySample
 
 		packetsInSample  int
 		packetsPerSample = v.config.PacketsPerSample
@@ -135,7 +136,7 @@ loop:
 			}
 		}
 
-		vp9FrameStats.AcceptPacket(clientReadTime, pkt.Timestamp, &vp9PayloadDesc)
+		vp9FrameStats.AcceptPacket(clientReadTime, pkt.Timestamp, len(pkt.Payload), &vp9PayloadDesc)
 
 		if packetsInSample == packetsPerSample {
 			packetsInSample = 0
