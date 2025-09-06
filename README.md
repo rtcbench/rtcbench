@@ -4,13 +4,14 @@ Stress test large video calls using lightweight viewer bots.
 Compatible with Jicofo and JVB (using VP9 SVC codec) to test Jitsi Meet conferences over LAN.
 
 ### Getting started
-Go 1.24 or newer is required.  
-Build and launch 100 viewer bots (replace the IPs below) with:
+
+Launch 100 viewer bots with:
 
 ```bash
-go build -v
-./call.zip -room test1 -n 100 -server-ip x.x.x.x -client-ip y.y.y.y
+go run cmd/cli/main.go -room test1 -n 100 -server-ip x.x.x.x -client-ip y.y.y.y
 ```
+
+[Go 1.24 or newer](https://go.dev) is required.
 
 ### Contribution
 

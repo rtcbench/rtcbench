@@ -1,4 +1,4 @@
-package bosh
+package client
 
 import (
 	"fmt"
@@ -35,7 +35,7 @@ func parseIceCredentials(sdp string) (ufrag, pwd, fingerprint string) {
 
 var i atomic.Uint64
 
-func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
+func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 	state.PionAOF.LogPrintln("[startPion] Initializing pion PeerConnection...")
 
 	var hostIP = state.LANClientIP
@@ -201,8 +201,6 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		go func() {
-			mgr := bot.NewManager() // TODO manager refactor
-
 			cfg := &bot.ViewerConfig{
 				PacketsPerSample:  1000,
 				VP9RTPPayloadType: 101,
@@ -210,8 +208,8 @@ func startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 				PublishTrack:      pubTrack, // nil unless InstantReplay
 			}
 
-			if _, err := mgr.SpawnViewer(track, receiver, func(sample *vp9.VideoQualitySample) {
-				log.Println(sample.String())
+			if _, err := c.botManager.SpawnViewer(track, receiver, func(sample *vp9.VideoQualitySample) {
+				log.Println(sample.String()) // TODO client `c` should had c.onSample field
 			}, cfg); err != nil {
 				panic(err) // TODO don't panic (manager refactor)
 			}
