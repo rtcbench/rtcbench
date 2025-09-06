@@ -1,4 +1,4 @@
-package bosh
+package client
 
 import (
 	"fmt"
@@ -17,23 +17,23 @@ func initialRid() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerName string, instantReplay bool) {
+func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string, replay bool) error {
 	state := &model.ConnectionState{
 		StepsAOF:      aof.Steps,
 		PionAOF:       aof.Pion,
 		PktRecvAOF:    aof.PktRecv,
 		NetStatsAOF:   aof.NetStats,
 		BOSHSender:    httpxml.NewBOSHSender(aof.BOSH),
-		BoshURL:       fmt.Sprintf("https://%s/http-bind", serverIP),
-		RoomName:      confName,
+		BoshURL:       fmt.Sprintf("https://%s/http-bind", c.serverIP),
+		RoomName:      room,
 		MachineUID:    uuid.NewString(),
 		RID:           initialRid(),
-		Nickname:      viewerName,
-		LANServerIP:   serverIP,
-		LANClientIP:   clientIP,
+		Nickname:      nickname,
+		LANServerIP:   c.serverIP,
+		LANClientIP:   c.clientIP,
 		LogsDir:       aof.LogsDir,
 		DumpPackets:   aof.DumpPackets,
-		InstantReplay: instantReplay,
+		InstantReplay: replay,
 	}
 
 	u, _ := url.Parse(state.BoshURL)
@@ -54,13 +54,13 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 		err := step(state)
 		if err != nil {
 			aof.Handshake.LogPrintf("Step failed: %v", err)
-			return
+			return err
 		}
 	}
 
 	if err := steps.Step09_WaitForJingleOffer(state); err != nil {
 		aof.Handshake.LogPrintf("Step09 failed: %v", err)
-		return
+		return err
 	}
 
 	sdp, err := sdp_tmpl.RenderSDP(sdp_tmpl.SDPState{
@@ -71,14 +71,14 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 	})
 	if err != nil {
 		aof.Handshake.LogPrintf("SDP conversion failed: %v", err)
-		return
+		return err
 	}
 	state.RemoteSDP = sdp
 
-	pionConnection, err := startPion(state)
+	pionConnection, err := c.startPion(state)
 	if err != nil {
 		aof.Handshake.LogPrintf("startPion failed: %v", err)
-		return
+		return err
 	}
 
 	// pionConnection generates local SDP (answer) with real ICE creds.
@@ -86,7 +86,7 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 
 	if err := steps.Step10_SendSessionAccept(state); err != nil {
 		aof.Handshake.LogPrintf("Step10 failed: %v", err)
-		return
+		return err
 	}
 
 	// TODO send xmpp heartbeats (BROKEN)
@@ -104,7 +104,7 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 				state.RID,
 				state.Sid,
 				uuid.NewString(),
-				serverIP,
+				c.serverIP,
 			)
 
 			_, err := state.BOSHSender.Send(state.BoshURL, requestBody)
@@ -116,5 +116,5 @@ func PerformHandshake(aof *aofconf.Config, serverIP, clientIP, confName, viewerN
 		}
 	}()
 
-	select {}
+	return nil
 }
