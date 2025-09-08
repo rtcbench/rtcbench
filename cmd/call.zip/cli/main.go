@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -18,7 +18,7 @@ const (
 	defaultLogMode  = "std"
 )
 
-func main() {
+func Main() {
 	serverIP := flag.String("server-ip", defaultServerIP, "conference server LAN IP")
 	clientIP := flag.String("client-ip", defaultClientIP, "this machines LAN IP")
 	logMode := flag.String("log", defaultLogMode, "how to log: std/debug/silent/vb+/vbot")
