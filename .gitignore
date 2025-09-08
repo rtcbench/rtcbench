@@ -14,6 +14,7 @@ call.zip
 call.zip.linux
 call.zip.macos
 call.zip.exe
+!cmd/call.zip
 
 # Go specific
 *.exe
