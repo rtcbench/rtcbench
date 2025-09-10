@@ -1,12 +1,16 @@
 package client
 
 import (
+	"log"
+
 	"call.zip/internal/aofconf"
 	"call.zip/internal/bot"
+	"call.zip/internal/vp9_stats"
 )
 
 type Client struct {
 	botManager *bot.Manager
+	publisher  *vp9_stats.Publisher
 	logMode    string
 	serverIP   string
 	clientIP   string
@@ -18,9 +22,20 @@ type ViewerConfig struct {
 	Replay   bool
 }
 
-func NewClient(botManager *bot.Manager, logMode, serverIP, clientIP string) *Client {
+func NewClient(logMode, serverIP, clientIP string, inputChanSize int64) *Client {
+	input := make(chan vp9_stats.VideoQualitySample, inputChanSize)
+	botManager := bot.NewManager(input)
+	publisher := vp9_stats.NewPublisher(input)
+
+	publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+		log.Printf("[sub-data-v1] period=%s,sample=%s", period.String(), sample.String())
+	})
+
+	go publisher.Run()
+
 	return &Client{
 		botManager: botManager,
+		publisher:  publisher,
 		logMode:    logMode,
 		serverIP:   serverIP,
 		clientIP:   clientIP,
@@ -30,6 +45,11 @@ func NewClient(botManager *bot.Manager, logMode, serverIP, clientIP string) *Cli
 func (c *Client) ConnectViewer(vc ViewerConfig) error {
 	aof := buildAOFConfig(c.logMode, c.serverIP, c.clientIP, vc.RoomName, vc.Nickname)
 	return c.performHandshake(aof, vc.RoomName, vc.Nickname, vc.Replay)
+}
+
+func (c *Client) Shutdown() {
+	c.botManager.StopAll()
+	c.publisher.Stop()
 }
 
 func buildAOFConfig(logMode, serverIP, clientIP, room, nickname string) *aofconf.Config {
