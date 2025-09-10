@@ -16,6 +16,7 @@ const (
 	errViewerUnmarshalPacketID
 	errViewerParseVP9PayloadID
 	errViewerSeqNoJumpID
+	errViewerInputChannelID
 	numViewerErrIDs
 )
 
@@ -23,6 +24,8 @@ const (
 type Viewer struct {
 	track    *webrtc.TrackRemote
 	receiver *webrtc.RTPReceiver
+	input    chan<- vp9_stats.VideoQualitySample
+	nickname string
 	config   ViewerConfig
 }
 
@@ -52,6 +55,8 @@ func (c *ViewerConfig) verify() error {
 func newViewer(
 	track *webrtc.TrackRemote,
 	receiver *webrtc.RTPReceiver,
+	input chan<- vp9_stats.VideoQualitySample,
+	nickname string,
 	config *ViewerConfig,
 ) (*Viewer, error) {
 	if err := config.verify(); err != nil {
@@ -60,14 +65,13 @@ func newViewer(
 	return &Viewer{
 		track:    track,
 		receiver: receiver,
+		input:    input,
+		nickname: nickname,
 		config:   *config,
 	}, nil
 }
 
-func (v *Viewer) run(
-	done <-chan struct{},
-	onSample func(*vp9_stats.VideoQualitySample),
-) error {
+func (v *Viewer) run(done <-chan struct{}) error {
 	var (
 		pkt rtp.Packet
 		buf = make([]byte, v.config.TrackBufferSize)
@@ -141,7 +145,14 @@ loop:
 		if packetsInSample == packetsPerSample {
 			packetsInSample = 0
 			vp9FrameStats.TakeSample(&vp9QualitySample)
-			onSample(&vp9QualitySample)
+			vp9QualitySample.Nickname = v.nickname
+			select {
+			case v.input <- vp9QualitySample:
+				vp9FrameStats.EndSample()
+			default:
+				// TODO: adaptively lower the sampling rate due to detected consumer bottleneck
+				errs[errViewerInputChannelID]++
+			}
 		}
 	}
 

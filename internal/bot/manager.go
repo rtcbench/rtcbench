@@ -14,22 +14,24 @@ type Manager struct {
 	once    sync.Once
 	done    chan struct{}
 	viewers map[*Viewer]struct{}
+	input   chan<- vp9_stats.VideoQualitySample
 }
 
-func NewManager() *Manager {
+func NewManager(input chan<- vp9_stats.VideoQualitySample) *Manager {
 	return &Manager{
 		done:    make(chan struct{}),
 		viewers: make(map[*Viewer]struct{}),
+		input:   input,
 	}
 }
 
 func (m *Manager) SpawnViewer(
 	track *webrtc.TrackRemote,
 	receiver *webrtc.RTPReceiver,
-	onSample func(*vp9_stats.VideoQualitySample),
+	nickname string,
 	config *ViewerConfig,
 ) (*Viewer, error) {
-	v, err := newViewer(track, receiver, config)
+	v, err := newViewer(track, receiver, m.input, nickname, config)
 
 	if err != nil {
 		return nil, err
@@ -40,9 +42,9 @@ func (m *Manager) SpawnViewer(
 	m.mu.Unlock()
 
 	m.wg.Add(1)
-	go func(onSample_ func(*vp9_stats.VideoQualitySample)) {
+	go func() {
 		defer m.wg.Done()
-		err := v.run(m.done, onSample_)
+		err := v.run(m.done)
 
 		// TODO do something with the error...
 		if err != nil {
@@ -54,7 +56,7 @@ func (m *Manager) SpawnViewer(
 		m.mu.Lock()
 		delete(m.viewers, v)
 		m.mu.Unlock()
-	}(onSample)
+	}()
 	go func() {
 		<-m.done
 		v.stop()

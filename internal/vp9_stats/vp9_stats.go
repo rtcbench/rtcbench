@@ -1,11 +1,10 @@
 package vp9_stats
 
 import (
+	"call.zip/internal/vp9"
+	"encoding/json"
 	"fmt"
 	"math"
-	"strings"
-
-	"call.zip/internal/vp9"
 )
 
 const (
@@ -57,6 +56,16 @@ type FrameStatistics struct {
 
 	// initialized indicates that the buffer has been initialized
 	initialized bool
+
+	// sample contains measurements that reset on successful publish
+	sample SampleData
+}
+
+// SampleData per-sample data which is reset on EndSample()
+type SampleData struct {
+	TotalBytes                int64 `json:"total_bytes"`
+	FirstPacketClientReadTime int64 `json:"first_pkt_cl_read_t"`
+	LastPacketClientReadTime  int64 `json:"last_pkt_cl_read_t"`
 }
 
 type frameInfo struct {
@@ -84,25 +93,39 @@ type frameInfo struct {
 
 type VideoQualitySample struct {
 	// SequenceNo monotonic sequence number
-	SequenceNo uint64
+	SequenceNo uint64 `json:"seq"`
 
-	// Layers histogram of SID x TID counts (counted by packet)
-	Layers [nSpatialLayers][nTemporalLayers]int
+	// Nickname participant nickname
+	Nickname string `json:"nickname"`
 
 	// SmoothFPS latest computed smoothed frame per second value
-	SmoothFPS float32
+	SmoothFPS float32 `json:"sm_fps"`
 
 	// BufferFPS latest computed bufferFPS (non-smoothed FPS)
-	BufferFPS float32
+	BufferFPS float32 `json:"buf_fps"`
 
 	// SmoothBitrate latest computed smoothed bits per second value
-	SmoothBitrate float32
+	SmoothBitrate float32 `json:"sm_br"`
 
 	// BufferBitrate latest computed bufferBitrate (non-smoothed bitrate)
-	BufferBitrate float32
+	BufferBitrate float32 `json:"buf_br"`
 
 	// EstimatedFPS best frame per second value we offer
-	EstimatedFPS int
+	EstimatedFPS int `json:"est_fps"`
+
+	// TotalBytes total number of bytes seen in this sample
+	TotalBytes int64 `json:"bytes"`
+
+	// SVC scalable video coding specific measurements
+	SVC SVCData `json:"svc"`
+
+	// Sample contains the per-sample measurements
+	Sample SampleData `json:"sample"`
+}
+
+type SVCData struct {
+	// Layers histogram of SID x TID counts (counted by packet)
+	Layers [nSpatialLayers][nTemporalLayers]int `json:"layers"`
 }
 
 // AcceptPacket updates the stat tracker with information about the newly arrived VP9 RTP packet
@@ -169,6 +192,13 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 	stats.latestSmoothBitrate = bitrateEWMAAlpha*stats.latestSmoothBitrate + (1.0-bitrateEWMAAlpha)*bufferBitrate
 
 	stats.pos = (stats.pos + 1) % StatsBufferSize
+
+	// update sample data
+	stats.sample.TotalBytes += int64(nBytes)
+	if stats.sample.FirstPacketClientReadTime == 0 {
+		stats.sample.FirstPacketClientReadTime = clientReadTime
+	}
+	stats.sample.LastPacketClientReadTime = clientReadTime
 }
 
 func (stats *FrameStatistics) bufferGrowthPhase() {
@@ -212,10 +242,7 @@ func (stats *FrameStatistics) initBufferStats() {
 }
 
 // TakeSample copies the histogram and current FPS into sample (or copies zero's if sample is too small)
-// the sequence number is incremented, so the first call will have sample.SequenceNo == 1
 func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
-	stats.sampleSequenceNo++
-
 	if stats.len < StatsBufferSize {
 		*sample = VideoQualitySample{
 			SequenceNo: stats.sampleSequenceNo,
@@ -224,10 +251,11 @@ func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
 	}
 
 	sample.SequenceNo = stats.sampleSequenceNo
+	sample.Sample = stats.sample
 
 	for sid := 0; sid < nSpatialLayers; sid++ {
 		for tid := 0; tid < nTemporalLayers; tid++ {
-			sample.Layers[sid][tid] = stats.layers[sid][tid]
+			sample.SVC.Layers[sid][tid] = stats.layers[sid][tid]
 		}
 	}
 
@@ -244,22 +272,19 @@ func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
 	sample.EstimatedFPS = int(math.Ceil(float64(sample.SmoothFPS))) - 2 /* we overcount the first and last frames */
 }
 
+// EndSample must be called if your data in TakeSample was successfully published,
+// otherwise don't call this and let the sample grow automatically
+func (stats *FrameStatistics) EndSample() {
+	stats.sample = SampleData{}
+	stats.sampleSequenceNo++
+}
+
 func (stats *FrameStatistics) Initialized() bool {
 	return stats.initialized
 }
 
 // String formats the video quality sample for debug purposes
 func (sample *VideoQualitySample) String() string {
-	sb := strings.Builder{}
-	fmt.Fprintf(&sb, "vp9.VideoQualitySample[sm_fps=%0.4f;buf_fps=%0.4f;sm_bps=%0.4f;buf_bps=%0.4f;SID-TID:count=",
-		sample.SmoothFPS, sample.BufferFPS, sample.SmoothBitrate, sample.BufferBitrate)
-	for sid := nSpatialLayers - 1; sid >= 0; sid-- {
-		for tid := nTemporalLayers - 1; tid >= 0; tid-- {
-			if sample.Layers[sid][tid] > 0 {
-				fmt.Fprintf(&sb, "%d-%d:%d,", sid, tid, sample.Layers[sid][tid])
-			}
-		}
-	}
-	sb.WriteRune(']')
-	return sb.String()
+	b, _ := json.Marshal(sample)
+	return fmt.Sprintf("vp9.VideoQualitySample[%s]", string(b))
 }

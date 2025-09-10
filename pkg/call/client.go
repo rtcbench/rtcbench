@@ -6,14 +6,16 @@ import (
 	"log"
 	"sync"
 
-	"call.zip/internal/bot"
 	"call.zip/internal/client"
 	"github.com/google/uuid"
 )
 
+const (
+	statsInputChanSize = 1 << 20 // TODO: configurable statsInputChanSize
+)
+
 type Client struct {
-	bm *bot.Manager
-	c  *client.Client
+	c *client.Client
 }
 
 type ClientConfig struct {
@@ -35,13 +37,8 @@ type SignalingConfig struct {
 }
 
 func NewClient(cfg ClientConfig) *Client {
-	botManager := bot.NewManager()
-	c := client.NewClient(botManager, cfg.LogMode, cfg.ServerIP, cfg.ClientIP)
-
-	return &Client{
-		bm: botManager,
-		c:  c,
-	}
+	c := client.NewClient(cfg.LogMode, cfg.ServerIP, cfg.ClientIP, statsInputChanSize)
+	return &Client{c}
 }
 
 type WrappedSignalingError struct {
@@ -115,10 +112,11 @@ func (c *Client) JoinRoom(cfg JoinRoomConfig) []WrappedSignalingError {
 
 	return errs
 }
+
 func (c *Client) Shutdown(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
-		c.bm.StopAll()
+		c.c.Shutdown()
 		close(done)
 	}()
 

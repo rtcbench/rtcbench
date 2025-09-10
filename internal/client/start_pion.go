@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"regexp"
 	"strings"
@@ -10,7 +9,6 @@ import (
 
 	"call.zip/internal/bosh/model"
 	"call.zip/internal/bot"
-	"call.zip/internal/vp9_stats"
 	"github.com/google/uuid"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
@@ -208,9 +206,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 				PublishTrack:      pubTrack, // nil unless InstantReplay
 			}
 
-			if _, err := c.botManager.SpawnViewer(track, receiver, func(sample *vp9_stats.VideoQualitySample) {
-				log.Println(sample.String()) // TODO client `c` should had c.onSample field
-			}, cfg); err != nil {
+			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg); err != nil {
 				panic(err) // TODO don't panic (manager refactor)
 			}
 

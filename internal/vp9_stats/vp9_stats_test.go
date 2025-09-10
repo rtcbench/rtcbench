@@ -166,22 +166,22 @@ func TestFrameStatistics_AcceptPacketAndTakeSample_SimpleVideos(t *testing.T) {
 		// simple "perfect" test packets
 		testPackets := createTestPackets1080p25fps(seconds)
 
-		lastSeq := uint64(0)
+		nextSeq := uint64(0)
 
 		checkSampleSequenceNumber := func() {
-			if sample.SequenceNo != lastSeq+1 {
-				t.Fatalf("[seconds=%d] SequenceNo mismatch: got %d, want %d", seconds, sample.SequenceNo, lastSeq+1)
+			if sample.SequenceNo != nextSeq {
+				t.Fatalf("[seconds=%d] SequenceNo mismatch: got %d, want %d", seconds, sample.SequenceNo, nextSeq)
 			}
-			lastSeq = sample.SequenceNo
+			nextSeq++
 		}
 
 		checkUninitializedSample := func() {
 			// All histogram buckets should be zero
 			for sid := 0; sid < nSpatialLayers; sid++ {
 				for tid := 0; tid < nTemporalLayers; tid++ {
-					if sample.Layers[sid][tid] != 0 {
+					if sample.SVC.Layers[sid][tid] != 0 {
 						t.Fatalf("[seconds=%d] expected zero layers during growth phase, got Layers[%d][%d]=%d",
-							seconds, sid, tid, sample.Layers[sid][tid])
+							seconds, sid, tid, sample.SVC.Layers[sid][tid])
 					}
 				}
 			}
@@ -210,13 +210,19 @@ func TestFrameStatistics_AcceptPacketAndTakeSample_SimpleVideos(t *testing.T) {
 		checkInitializedSample := func() {
 			wasInitialized = true
 
-			if sample.SequenceNo < StatsBufferSize {
+			if sample.SequenceNo < StatsBufferSize-1 {
 				t.Fatalf("[seconds=%d] initialized seq no < StatsBufferSize", seconds)
 			}
 
 			if sample.EstimatedFPS != 25 {
 				t.Fatalf("[seconds=%d;seq=%d] expected EstimatedFPS=25, got %v",
 					seconds, sample.SequenceNo, sample.EstimatedFPS)
+			}
+
+			if sample.SVC.Layers[maxLayerSpatialID][maxLayerTemporalID] != StatsBufferSize {
+				t.Fatalf("[seconds=%d;seq=%d] expected all SIDxTID's to be 2x2 got %d",
+					seconds, sample.SequenceNo,
+					sample.SVC.Layers[maxLayerSpatialID][maxLayerTemporalID])
 			}
 		}
 
@@ -232,6 +238,7 @@ func TestFrameStatistics_AcceptPacketAndTakeSample_SimpleVideos(t *testing.T) {
 		for _, pkt := range testPackets {
 			stats.AcceptPacket(pkt.clientReadTime, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
 			stats.TakeSample(&sample)
+			stats.EndSample()
 			checkSample()
 		}
 
