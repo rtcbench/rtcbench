@@ -25,6 +25,8 @@ func Main() {
 	roomName := flag.String("room", "", "room name, e.g. 'test7'")
 	vbots := flag.Int("n", 3, "number of vbots (default is 3)")
 	instantReplay := flag.Bool("preview-instant-replay", false, "preview feature")
+	viewersAlwaysRetry := flag.Bool("viewers-always-retry", false, "viewers always retry when signaling fails")
+	signalingConcurrency := flag.Int("signaling-concurrency", 1, "concurrency limit during signaling")
 	flag.Parse()
 
 	if *roomName == "" {
@@ -45,12 +47,37 @@ func Main() {
 		ClientIP: *clientIP,
 	})
 
-	if err := client.JoinRoom(call.JoinRoomConfig{
-		RoomName:   *roomName,
-		ViewerBots: map[bool]int{false: *vbots, true: (*vbots) - 1}[*instantReplay],
-		ReplayBots: map[bool]int{false: 0, true: 1}[*instantReplay],
-	}); err != nil {
-		log.Println("[cli-main] error from client.JoinRoom:", err)
+	if *viewersAlwaysRetry {
+		nViewers := *vbots
+		var errs []call.WrappedSignalingError
+		for {
+			errs = client.JoinRoom(call.JoinRoomConfig{
+				RoomName:   *roomName,
+				ViewerBots: nViewers,
+				ReplayBots: 0,
+				Signaling: call.SignalingConfig{
+					Concurrency: *signalingConcurrency,
+				},
+			})
+			if len(errs) == 0 {
+				log.Println("[viewers-always-retry] Finished joining room", *roomName)
+				break
+			}
+			log.Printf("[viewers-always-retry] %d errors occurred, will retry in 1 second\n", len(errs))
+			nViewers = len(errs)
+			time.Sleep(1 * time.Second)
+		}
+	} else {
+		if errs := client.JoinRoom(call.JoinRoomConfig{
+			RoomName:   *roomName,
+			ViewerBots: map[bool]int{false: *vbots, true: (*vbots) - 1}[*instantReplay],
+			ReplayBots: map[bool]int{false: 0, true: 1}[*instantReplay],
+			Signaling: call.SignalingConfig{
+				Concurrency: *signalingConcurrency,
+			},
+		}); errs != nil {
+			log.Printf("[cli-main] %d errors from client.JoinRoom: %v", len(errs), errs)
+		}
 	}
 
 	log.Println("[cli-main] joined room", *roomName, "— press Ctrl+C to exit")

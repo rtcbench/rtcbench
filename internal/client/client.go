@@ -12,6 +12,12 @@ type Client struct {
 	clientIP   string
 }
 
+type ViewerConfig struct {
+	RoomName string
+	Nickname string
+	Replay   bool
+}
+
 func NewClient(botManager *bot.Manager, logMode, serverIP, clientIP string) *Client {
 	return &Client{
 		botManager: botManager,
@@ -21,9 +27,9 @@ func NewClient(botManager *bot.Manager, logMode, serverIP, clientIP string) *Cli
 	}
 }
 
-func (c *Client) ConnectViewer(room, nickname string, replay bool) error {
-	aof := buildAOFConfig(c.logMode, c.serverIP, c.clientIP, room, nickname)
-	return c.performHandshake(aof, room, nickname, replay)
+func (c *Client) ConnectViewer(vc ViewerConfig) error {
+	aof := buildAOFConfig(c.logMode, c.serverIP, c.clientIP, vc.RoomName, vc.Nickname)
+	return c.performHandshake(aof, vc.RoomName, vc.Nickname, vc.Replay)
 }
 
 func buildAOFConfig(logMode, serverIP, clientIP, room, nickname string) *aofconf.Config {
