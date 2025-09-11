@@ -2,6 +2,7 @@ package vp9_stats
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"call.zip/internal/vp9"
@@ -14,7 +15,7 @@ const (
 	nSpatialLayers  = maxLayerSpatialID + 1
 	nTemporalLayers = maxLayerTemporalID + 1
 
-	StatsBufferSize = 2048
+	StatsBufferSize = 768 // TODO: configurable buffer size (StatsBufferSize)
 
 	fpsEWMAAlpha     = float32(0.9)
 	bitrateEWMAAlpha = fpsEWMAAlpha
@@ -99,6 +100,9 @@ type VideoQualitySample struct {
 
 	// BufferBitrate latest computed bufferBitrate (non-smoothed bitrate)
 	BufferBitrate float32
+
+	// EstimatedFPS best frame per second value we offer
+	EstimatedFPS int
 }
 
 // AcceptPacket updates the stat tracker with information about the newly arrived VP9 RTP packet
@@ -236,6 +240,8 @@ func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
 	sample.BufferFPS = stats.packets[lastPos].bufferFPS
 	sample.SmoothBitrate = stats.latestSmoothBitrate
 	sample.BufferBitrate = stats.packets[lastPos].bufferBitrate
+
+	sample.EstimatedFPS = int(math.Ceil(float64(sample.SmoothFPS))) - 2 /* we overcount the first and last frames */
 }
 
 func (stats *FrameStatistics) Initialized() bool {
