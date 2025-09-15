@@ -65,7 +65,7 @@ func (p *Publisher) Run() {
 }
 
 func (p *Publisher) onSample(sample VideoQualitySample) {
-	p.period.TotalBytes += sample.TotalBytes
+	p.period.TotalBytes += sample.Sample.TotalBytes
 
 	for _, sub := range p.subs {
 		sub(p.period, sample)
