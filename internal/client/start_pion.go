@@ -5,7 +5,6 @@ import (
 	"net"
 	"regexp"
 	"strings"
-	"sync/atomic"
 
 	"call.zip/internal/bosh/model"
 	"call.zip/internal/bot"
@@ -31,19 +30,15 @@ func parseIceCredentials(sdp string) (ufrag, pwd, fingerprint string) {
 	return
 }
 
-var i atomic.Uint64
-
 func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
 	state.PionAOF.LogPrintln("[startPion] Initializing pion PeerConnection...")
 
-	var hostIP = state.LANClientIP
-	var hostPort = 5000 + int(i.Add(1))
-
-	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:%d", hostIP, hostPort))
+	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:0", state.LANClientIP))
 	if err != nil {
 		return nil, fmt.Errorf("failed to bind UDP: %w", err)
 	}
-	state.PionAOF.LogPrintf("[startPion] Listening on UDP %s:%d", hostIP, hostPort)
+	addr := conn.LocalAddr().(*net.UDPAddr)
+	state.PionAOF.LogPrintf("[startPion] Listening on UDP %s:%d", addr.IP, addr.Port)
 
 	se := webrtc.SettingEngine{}
 	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
