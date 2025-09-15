@@ -1,10 +1,11 @@
 package vp9_stats
 
 import (
-	"call.zip/internal/vp9"
 	"encoding/json"
 	"fmt"
 	"math"
+
+	"call.zip/internal/vp9"
 )
 
 const (
@@ -112,9 +113,6 @@ type VideoQualitySample struct {
 
 	// EstimatedFPS best frame per second value we offer
 	EstimatedFPS int `json:"est_fps"`
-
-	// TotalBytes total number of bytes seen in this sample
-	TotalBytes int64 `json:"bytes"`
 
 	// SVC scalable video coding specific measurements
 	SVC SVCData `json:"svc"`
