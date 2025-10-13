@@ -88,7 +88,7 @@ func joinAllRooms(client *call.Client) {
 		wg.Add(1)
 		fmtRoomName := *roomName
 		if *nRooms > 1 {
-			fmtRoomName += "-" + strconv.Itoa(i)
+			fmtRoomName += "_" + strconv.Itoa(i)
 		}
 		go func() {
 			log.Printf("[cli-main] joining room %q (%d viewers)", fmtRoomName, nViewers)

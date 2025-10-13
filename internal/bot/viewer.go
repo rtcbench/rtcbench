@@ -39,10 +39,6 @@ type ViewerConfig struct {
 }
 
 func (c *ViewerConfig) verify() error {
-	if c.PacketsPerSample > vp9_stats.StatsBufferSize {
-		return fmt.Errorf("invalid config: c.PacketsPerSample (%d) > vp9_stats.StatsBufferSize (%d)",
-			c.PacketsPerSample, vp9_stats.StatsBufferSize)
-	}
 	if c.VP9RTPPayloadType < 0 || c.VP9RTPPayloadType > 255 {
 		return fmt.Errorf("invalid config: c.VP9RTPPayloadType (%d) out of range [0..255]",
 			c.VP9RTPPayloadType)
