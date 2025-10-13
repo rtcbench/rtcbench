@@ -35,6 +35,7 @@ type ViewerConfig struct {
 	TrackBufferSize   int `json:"track_buffer_size"`
 
 	PublishTrack *webrtc.TrackLocalStaticRTP `json:"-"`
+	Recorder     *Recorder                   `json:"-"`
 }
 
 func (c *ViewerConfig) verify() error {
@@ -131,6 +132,10 @@ loop:
 		if err = vp9.ParseVP9PayloadDescriptor(pkt.Payload, &vp9PayloadDesc); err != nil {
 			errs[errViewerParseVP9PayloadID]++
 			continue
+		}
+
+		if v.config.Recorder != nil {
+			v.config.Recorder.RecordPacket(&pkt)
 		}
 
 		if v.config.PublishTrack != nil {

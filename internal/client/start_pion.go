@@ -201,6 +201,10 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 				PublishTrack:      pubTrack, // nil unless InstantReplay
 			}
 
+			if state.InstantReplay {
+				cfg.Recorder = bot.New("rec_pkts_"+state.Nickname+".json", 1500*1_000_000, 10_000)
+			}
+
 			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg); err != nil {
 				panic(err) // TODO don't panic (manager refactor)
 			}
