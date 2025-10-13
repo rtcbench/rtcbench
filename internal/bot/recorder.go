@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/pion/rtp"
 )
@@ -14,10 +15,13 @@ type Recorder struct {
 
 	totalBytes int64
 	saveBuffer []SaveData
+
+	mu sync.Mutex
 }
 
 type SaveData struct {
 	SSRC         uint32 `json:"ssrc"`
+	PayloadType  int    `json:"payload_type"`
 	SequenceNo   uint16 `json:"sequence_no"`
 	RTPTimestamp uint32 `json:"rtp_timestamp"`
 	RTPPayload   []byte `json:"rtp_payload"`
@@ -57,6 +61,9 @@ func LoadFromFile(path string) ([]SaveData, error) {
 }
 
 func (r *Recorder) RecordPacket(pkt *rtp.Packet) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if pkt == nil {
 		return true
 	}
@@ -70,6 +77,7 @@ func (r *Recorder) RecordPacket(pkt *rtp.Packet) bool {
 
 	r.saveBuffer = append(r.saveBuffer, SaveData{
 		SSRC:         pkt.SSRC,
+		PayloadType:  int(pkt.PayloadType),
 		SequenceNo:   pkt.SequenceNumber,
 		RTPTimestamp: pkt.Timestamp,
 		RTPPayload:   payloadCopy,
@@ -79,6 +87,9 @@ func (r *Recorder) RecordPacket(pkt *rtp.Packet) bool {
 }
 
 func (r *Recorder) OnShutdown() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	f, err := os.Create(r.OutputFile)
 	if err != nil {
 		return err
