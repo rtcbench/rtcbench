@@ -38,11 +38,10 @@ func (m *Manager) SpawnViewer(
 		return nil, err
 	}
 
+	m.mu.Lock()
 	if config.Recorder != nil {
 		m.recs = append(m.recs, config.Recorder)
 	}
-
-	m.mu.Lock()
 	m.viewers[v] = struct{}{}
 	m.mu.Unlock()
 
