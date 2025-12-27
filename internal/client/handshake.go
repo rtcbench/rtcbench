@@ -17,23 +17,21 @@ func initialRid() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string, replay bool) error {
+func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string) error {
 	state := &model.ConnectionState{
-		StepsAOF:      aof.Steps,
-		PionAOF:       aof.Pion,
-		PktRecvAOF:    aof.PktRecv,
-		NetStatsAOF:   aof.NetStats,
-		BOSHSender:    httpxml.NewBOSHSender(aof.BOSH),
-		BoshURL:       fmt.Sprintf("https://%s/http-bind", c.serverIP),
-		RoomName:      room,
-		MachineUID:    uuid.NewString(),
-		RID:           initialRid(),
-		Nickname:      nickname,
-		LANServerIP:   c.serverIP,
-		LANClientIP:   c.clientIP,
-		LogsDir:       aof.LogsDir,
-		DumpPackets:   aof.DumpPackets,
-		InstantReplay: replay,
+		StepsAOF:    aof.Steps,
+		PionAOF:     aof.Pion,
+		PktRecvAOF:  aof.PktRecv,
+		NetStatsAOF: aof.NetStats,
+		BOSHSender:  httpxml.NewBOSHSender(aof.BOSH),
+		BoshURL:     fmt.Sprintf("https://%s/http-bind", c.serverIP),
+		RoomName:    room,
+		MachineUID:  uuid.NewString(),
+		RID:         initialRid(),
+		Nickname:    nickname,
+		LANServerIP: c.serverIP,
+		LANClientIP: c.clientIP,
+		LogsDir:     aof.LogsDir,
 	}
 
 	u, _ := url.Parse(state.BoshURL)
@@ -64,10 +62,9 @@ func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string, re
 	}
 
 	sdp, err := sdp_tmpl.RenderSDP(sdp_tmpl.SDPState{
-		ICEUfrag:      state.ICEUfrag,
-		ICEPwd:        state.ICEPwd,
-		Fingerprint:   state.Fingerprint,
-		InstantReplay: state.InstantReplay,
+		ICEUfrag:    state.ICEUfrag,
+		ICEPwd:      state.ICEPwd,
+		Fingerprint: state.Fingerprint,
 	})
 	if err != nil {
 		aof.Handshake.LogPrintf("SDP conversion failed: %v", err)

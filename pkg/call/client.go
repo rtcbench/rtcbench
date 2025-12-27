@@ -27,7 +27,6 @@ type ClientConfig struct {
 type JoinRoomConfig struct {
 	RoomName   string
 	ViewerBots int
-	ReplayBots int
 
 	Signaling SignalingConfig
 }
@@ -47,11 +46,10 @@ type WrappedSignalingError struct {
 	// other metadata for retrying
 	RoomName string
 	Nickname string
-	Replay   bool
 }
 
 func (c *Client) JoinRoom(cfg JoinRoomConfig) []WrappedSignalingError {
-	size := cfg.ViewerBots + cfg.ReplayBots
+	size := cfg.ViewerBots
 	if size < 1 {
 		return nil
 	}
@@ -61,14 +59,6 @@ func (c *Client) JoinRoom(cfg JoinRoomConfig) []WrappedSignalingError {
 		cfgCh <- client.ViewerConfig{
 			RoomName: cfg.RoomName,
 			Nickname: "viewer-" + uuid.NewString(),
-			Replay:   false,
-		}
-	}
-	for i := 0; i < cfg.ReplayBots; i++ {
-		cfgCh <- client.ViewerConfig{
-			RoomName: cfg.RoomName,
-			Nickname: "replay-" + uuid.NewString(),
-			Replay:   true,
 		}
 	}
 	close(cfgCh)
@@ -93,7 +83,6 @@ func (c *Client) JoinRoom(cfg JoinRoomConfig) []WrappedSignalingError {
 						Error:    fmt.Errorf("cannot join %q to room %q: %w", vc.Nickname, cfg.RoomName, err),
 						RoomName: cfg.RoomName,
 						Nickname: vc.Nickname,
-						Replay:   vc.Replay,
 					}
 				}
 			}

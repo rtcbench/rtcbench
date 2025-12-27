@@ -8,7 +8,6 @@ import (
 
 	"call.zip/internal/bosh/model"
 	"call.zip/internal/bot"
-	"github.com/google/uuid"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
 )
@@ -84,9 +83,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 	})
 
 	dir := webrtc.RTPTransceiverDirectionRecvonly
-	if state.InstantReplay {
-		dir = webrtc.RTPTransceiverDirectionSendrecv
-	}
+
 	if _, err = pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,
 		webrtc.RTPTransceiverInit{Direction: dir},
@@ -135,40 +132,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 
 	var outSSRC uint32
 	var outMSID string
-	var pubTrack *webrtc.TrackLocalStaticRTP
-	if state.InstantReplay {
-		state.PionAOF.LogPrintln("[instant-replay] Attaching local TrackLocalStaticRTP on same PeerConnection (sendrecv)")
-		pubTrack, err = webrtc.NewTrackLocalStaticRTP(
-			webrtc.RTPCodecCapability{
-				MimeType:    webrtc.MimeTypeVP9,
-				ClockRate:   90000,
-				SDPFmtpLine: "profile-id=0",
-			},
-			"video",          // track ID
-			uuid.NewString(), // stream ID
-		)
-		if err != nil {
-			return nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
-		}
-		sender, err := pc.AddTrack(pubTrack)
-		if err != nil {
-			return nil, fmt.Errorf("AddTrack (instant replay) failed: %w", err)
-		}
-		// drain RTCP so feedback doesn't back up
-		go func() {
-			pkts := make([]byte, 10000) // TODO made up buffer size
-			for {
-				if _, _, err := sender.Read(pkts); err != nil {
-					return
-				}
-			}
-		}()
-		params := sender.GetParameters()
-		if len(params.Encodings) > 0 {
-			outSSRC = uint32(params.Encodings[0].SSRC)
-		}
-		outMSID = pubTrack.StreamID()
-	}
+
 	state.SenderSSRC = fmt.Sprintf("%d", outSSRC)
 	state.SenderMSID = fmt.Sprintf("%s", outMSID)
 
@@ -198,11 +162,6 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 				PacketsPerSample:  1000,
 				VP9RTPPayloadType: 101,
 				TrackBufferSize:   1500,
-				PublishTrack:      pubTrack, // nil unless InstantReplay
-			}
-
-			if state.InstantReplay {
-				cfg.Recorder = bot.New("rec_pkts_"+state.Nickname+".json", 1500*1_000_000, 10_000)
 			}
 
 			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg); err != nil {

@@ -15,7 +15,6 @@ type Manager struct {
 	done    chan struct{}
 	viewers map[*Viewer]struct{}
 	input   chan<- vp9_stats.VideoQualitySample
-	recs    []*Recorder
 }
 
 func NewManager(input chan<- vp9_stats.VideoQualitySample) *Manager {
@@ -39,9 +38,6 @@ func (m *Manager) SpawnViewer(
 	}
 
 	m.mu.Lock()
-	if config.Recorder != nil {
-		m.recs = append(m.recs, config.Recorder)
-	}
 	m.viewers[v] = struct{}{}
 	m.mu.Unlock()
 
@@ -74,12 +70,6 @@ func (m *Manager) StopAll() {
 		close(m.done)
 	})
 	m.wg.Wait()
-	for _, rec := range m.recs {
-		err := rec.OnShutdown()
-		if err != nil {
-			log.Printf("Failed to shutdown recorder: %v", err)
-		}
-	}
 }
 
 func (m *Manager) Size() (n int) {

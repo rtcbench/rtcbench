@@ -19,7 +19,6 @@ type Client struct {
 type ViewerConfig struct {
 	RoomName string
 	Nickname string
-	Replay   bool
 }
 
 func NewClient(logMode, serverIP, clientIP string, inputChanSize int64) *Client {
@@ -44,7 +43,7 @@ func NewClient(logMode, serverIP, clientIP string, inputChanSize int64) *Client 
 
 func (c *Client) ConnectViewer(vc ViewerConfig) error {
 	aof := buildAOFConfig(c.logMode, c.serverIP, c.clientIP, vc.RoomName, vc.Nickname)
-	return c.performHandshake(aof, vc.RoomName, vc.Nickname, vc.Replay)
+	return c.performHandshake(aof, vc.RoomName, vc.Nickname)
 }
 
 func (c *Client) Shutdown() {
