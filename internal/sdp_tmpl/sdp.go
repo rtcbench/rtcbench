@@ -11,10 +11,9 @@ import (
 var sdpTmpl string
 
 type SDPState struct {
-	ICEUfrag      string
-	ICEPwd        string
-	Fingerprint   string
-	InstantReplay bool
+	ICEUfrag    string
+	ICEPwd      string
+	Fingerprint string
 }
 
 var (

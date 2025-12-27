@@ -70,16 +70,6 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
 
 	videoSenders := "responder" // recvonly
 	videoSourcesXML := ""
-	if state.InstantReplay {
-		ssrc := state.SenderSSRC
-		msid := state.SenderMSID
-		videoSenders = "both"
-		videoSourcesXML = fmt.Sprintf(
-			`<source name="%s" xmlns="urn:xmpp:jingle:apps:rtp:ssma:0" ssrc="%s" videoType="camera">`+
-				`<parameter name="msid" value="%s"/>`+
-				`</source>`, state.Nickname+"-v0", ssrc, msid)
-		state.StepsAOF.LogPrintf("[Step10] will advertise outgoing video SSRC=%s msid=%q", ssrc, msid)
-	}
 
 	requestBody := fmt.Sprintf(`<body xmlns="http://jabber.org/protocol/httpbind" rid="%d" sid="%s">
   <iq xmlns="jabber:client" id="session-accept" to="%s" type="set">

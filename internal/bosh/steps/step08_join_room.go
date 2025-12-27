@@ -13,10 +13,6 @@ func Step08_JoinRoom(state *model.ConnectionState) error {
 
 	sourceInfoJSON := "{}"
 
-	if state.InstantReplay {
-		sourceInfoJSON = fmt.Sprintf("{\"%s-v0\":{\"muted\":true}}", state.Nickname)
-	}
-
 	requestBody := fmt.Sprintf(`
 <body xmlns="http://jabber.org/protocol/httpbind"
       rid="%d"

@@ -33,9 +33,6 @@ var (
 	// signaling related
 	viewersAlwaysRetry   = flag.Bool("viewers-always-retry", false, "viewers always retry when signaling fails")
 	signalingConcurrency = flag.Int("signaling-concurrency", 1, "concurrency limit during signaling")
-
-	// preview features
-	instantReplay = flag.Bool("preview-instant-replay", false, "preview feature (currently broken)")
 )
 
 func Main() {
@@ -108,7 +105,6 @@ func joinRoom(client *call.Client, roomName string) {
 			errs = client.JoinRoom(call.JoinRoomConfig{
 				RoomName:   roomName,
 				ViewerBots: nViewersRemaining,
-				ReplayBots: 0,
 				Signaling: call.SignalingConfig{
 					Concurrency: *signalingConcurrency,
 				},
@@ -124,8 +120,7 @@ func joinRoom(client *call.Client, roomName string) {
 	} else {
 		if errs := client.JoinRoom(call.JoinRoomConfig{
 			RoomName:   roomName,
-			ViewerBots: map[bool]int{false: *nViewers, true: (*nViewers) - 1}[*instantReplay],
-			ReplayBots: map[bool]int{false: 0, true: 1}[*instantReplay],
+			ViewerBots: *nViewers,
 			Signaling: call.SignalingConfig{
 				Concurrency: *signalingConcurrency,
 			},
