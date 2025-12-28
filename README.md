@@ -5,10 +5,11 @@ Compatible with Jicofo and JVB (using VP9 SVC codec) to test Jitsi Meet conferen
 
 ### Getting started
 
-Launch 100 viewer bots with:
+Launch 250 viewer bots with:
 
 ```bash
-go run main.go -room test1 -n 100 -server-ip x.x.x.x -client-ip y.y.y.y
+make
+./call.zip example-config.yml
 ```
 
 [Go 1.24 or newer](https://go.dev) is required.
