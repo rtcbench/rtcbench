@@ -1,0 +1,34 @@
+apiVersion: call.zip/v1
+kind: VideoCallStressTest
+metadata:
+  name: stress-test-1
+spec:
+  plugin: jitsi
+  conference:
+    name: test
+    viewers: 25
+    totalRooms: 10
+    joinPolicy:
+      concurrency: 10
+      viewersAlwaysRetry: true
+  network:
+    serverIP: 10.99.0.210
+    clientIP: 10.99.0.2
+  pluginConfig:  # plugin-specific internal configuration
+    jitsi:
+      boshURL: 'https://10.99.0.210/http-bind'
+      domain: '10.99.0.210'
+  logging:
+    console: true
+    directory: '/var/log/call-zip'
+    streams:
+      - name: general
+        level: info
+      - name: signaling
+        level: debug
+      - name: media
+        level: info
+      - name: packets
+        level: info
+      - name: video_stats
+        level: info
