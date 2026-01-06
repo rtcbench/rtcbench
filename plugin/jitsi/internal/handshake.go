@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"call.zip/pkg/aofconf"
+	"call.zip/pkg/vp9"
 	"call.zip/plugin/jitsi/internal/httpxml"
 	"call.zip/plugin/jitsi/internal/model"
 	"call.zip/plugin/jitsi/internal/sdp_tmpl"
@@ -17,7 +18,7 @@ func initialRid() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string) error {
+func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string, ivf *vp9.IvfSegmenter) error {
 	state := &model.ConnectionState{
 		StepsAOF:    aof.Steps,
 		PionAOF:     aof.Pion,
@@ -72,7 +73,7 @@ func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string) er
 	}
 	state.RemoteSDP = sdp
 
-	pionConnection, err := c.startPion(state)
+	pionConnection, err := c.startPion(state, ivf)
 	if err != nil {
 		aof.Handshake.LogPrintf("startPion failed: %v", err)
 		return err
