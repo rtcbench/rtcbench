@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"call.zip/pkg/vp9"
 	"call.zip/plugin/jitsi/internal/bot"
 	"call.zip/plugin/jitsi/internal/model"
 	"github.com/pion/dtls/v2"
@@ -29,7 +30,7 @@ func parseIceCredentials(sdp string) (ufrag, pwd, fingerprint string) {
 	return
 }
 
-func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
+func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) (*webrtc.PeerConnection, error) {
 	state.PionAOF.LogPrintln("[startPion] Initializing pion PeerConnection...")
 
 	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:0", state.LANClientIP))
@@ -164,7 +165,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 				TrackBufferSize:   1500,
 			}
 
-			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg); err != nil {
+			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg, ivf); err != nil {
 				panic(err) // TODO don't panic (manager refactor)
 			}
 

@@ -4,6 +4,7 @@ import (
 	"log"
 	"sync"
 
+	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	"github.com/pion/webrtc/v3"
 )
@@ -30,8 +31,9 @@ func (m *Manager) SpawnViewer(
 	receiver *webrtc.RTPReceiver,
 	nickname string,
 	config *ViewerConfig,
+	ivf *vp9.IvfSegmenter,
 ) (*Viewer, error) {
-	v, err := newViewer(track, receiver, m.input, nickname, config)
+	v, err := newViewer(track, receiver, m.input, nickname, config, ivf)
 
 	if err != nil {
 		return nil, err

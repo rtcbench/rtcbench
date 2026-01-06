@@ -23,6 +23,9 @@ type PayloadDescriptor struct {
 	DBit      uint8
 	TL0PicIdx uint8
 	SSPresent uint8
+
+	// ByteLength total VP9 payload descriptor size in bytes
+	ByteLength int
 }
 
 // ParseVP9PayloadDescriptor parses the VP9 payload descriptor from RTP payload
@@ -45,6 +48,7 @@ func ParseVP9PayloadDescriptor(payload []byte, desc *PayloadDescriptor) error {
 
 	ptr := 1
 	if ptr >= len(payload) {
+		desc.ByteLength = ptr
 		return nil
 	}
 
@@ -53,6 +57,7 @@ func ParseVP9PayloadDescriptor(payload []byte, desc *PayloadDescriptor) error {
 		pictureIDByte := payload[ptr]
 		ptr++
 		if ptr >= len(payload) {
+			desc.ByteLength = ptr
 			return nil
 		}
 
@@ -69,34 +74,97 @@ func ParseVP9PayloadDescriptor(payload []byte, desc *PayloadDescriptor) error {
 	// Parse Layer indices if L is set
 	if desc.L != 0 {
 		if ptr >= len(payload) {
+			desc.ByteLength = ptr
 			return nil
 		}
 
 		layerByte := payload[ptr]
 		ptr++
-		if ptr >= len(payload) {
-			return nil
-		}
 
 		desc.TID = (layerByte >> 5) & 0x07  // Temporal ID (TID)
 		desc.UBit = (layerByte >> 4) & 0x01 // U bit
 		desc.SID = (layerByte >> 1) & 0x07  // Spatial ID (SID)
 		desc.DBit = layerByte & 0x01        // D bit
 
-		if ptr >= len(payload) {
-			return nil
+		if desc.F == 0 {
+			if ptr >= len(payload) {
+				desc.ByteLength = ptr
+				return nil
+			}
+			desc.TL0PicIdx = payload[ptr] // Temporal Layer 0 Picture Index
+			ptr++
 		}
-
-		desc.TL0PicIdx = payload[ptr] // Temporal Layer 0 Picture Index
-		ptr++
 	}
 
 	// Parse Scalability Structure (SS) if V is set
 	if desc.V != 0 {
 		desc.SSPresent = 1
+
+		if ptr >= len(payload) {
+			desc.ByteLength = ptr
+			return nil
+		}
+
+		ss := payload[ptr]
+		ptr++
+
+		nS := (ss >> 5) & 0x07
+		y := (ss >> 4) & 0x01
+		g := (ss >> 3) & 0x01
+
+		if y != 0 {
+			need := int(nS+1) * 4
+			if ptr+need > len(payload) {
+				desc.ByteLength = ptr
+				return nil
+			}
+			ptr += need
+		}
+
+		if g != 0 {
+			if ptr >= len(payload) {
+				desc.ByteLength = ptr
+				return nil
+			}
+
+			nG := payload[ptr]
+			ptr++
+
+			for i := 0; i < int(nG); i++ {
+				if ptr >= len(payload) {
+					desc.ByteLength = ptr
+					return nil
+				}
+				r := (payload[ptr] >> 4) & 0x0F
+				ptr++
+
+				if ptr+int(r) > len(payload) {
+					desc.ByteLength = ptr
+					return nil
+				}
+				ptr += int(r)
+			}
+		}
 	} else {
 		desc.SSPresent = 0
 	}
 
+	desc.ByteLength = ptr
 	return nil
+}
+
+func (desc *PayloadDescriptor) IsKeyframe() bool {
+	// P bit set => inter-picture predicted => not a keyframe
+	if desc.P != 0 {
+		return false
+	}
+
+	// No layer indices => P=0 implies keyframe
+	if desc.L == 0 {
+		return true
+	}
+
+	// Layered VP9:
+	// Keyframe if base spatial layer, or no interlayer dependency
+	return desc.SID == 0 || desc.DBit == 0
 }

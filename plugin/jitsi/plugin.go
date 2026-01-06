@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"call.zip"
+	"call.zip/pkg/vp9"
 	jitsi "call.zip/plugin/jitsi/internal"
 )
 
@@ -32,7 +33,11 @@ func (e *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 	if role != call.Viewer {
 		return call.ErrUnsupportedRole
 	}
-	err := e.client.ConnectViewer(roomID, userID) // TODO: pass ctx
+	ivf, err := vp9.NewIvfSegmenter("./vp9_ivf_files/room=" + roomID + "/user=" + userID)
+	if err != nil {
+		return errors.Join(call.ErrCannotJoinRoom, err)
+	}
+	err = e.client.ConnectViewer(roomID, userID, ivf) // TODO: pass ctx
 	if err != nil {
 		return errors.Join(call.ErrCannotJoinRoom, err)
 	}

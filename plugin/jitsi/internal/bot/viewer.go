@@ -17,6 +17,7 @@ const (
 	errViewerParseVP9PayloadID
 	errViewerSeqNoJumpID
 	errViewerInputChannelID
+	errViewerIVFSegmenterFailed
 	numViewerErrIDs
 )
 
@@ -27,6 +28,7 @@ type Viewer struct {
 	input    chan<- vp9_stats.VideoQualitySample
 	nickname string
 	config   ViewerConfig
+	ivf      *vp9.IvfSegmenter
 }
 
 type ViewerConfig struct {
@@ -52,6 +54,7 @@ func newViewer(
 	input chan<- vp9_stats.VideoQualitySample,
 	nickname string,
 	config *ViewerConfig,
+	ivf *vp9.IvfSegmenter,
 ) (*Viewer, error) {
 	if err := config.verify(); err != nil {
 		return nil, err
@@ -62,6 +65,7 @@ func newViewer(
 		input:    input,
 		nickname: nickname,
 		config:   *config,
+		ivf:      ivf,
 	}, nil
 }
 
@@ -128,6 +132,14 @@ loop:
 		}
 
 		vp9FrameStats.AcceptPacket(clientReadTime, pkt.Timestamp, len(pkt.Payload), &vp9PayloadDesc)
+
+		// TODO: map[uint32]*vp9.IvfSegmenter to split by SSRC
+		if v.ivf != nil {
+			if err = v.ivf.Push(pkt.Payload, pkt.Timestamp, &vp9PayloadDesc); err != nil {
+				errs[errViewerIVFSegmenterFailed]++
+				continue
+			}
+		}
 
 		if packetsInSample == packetsPerSample {
 			packetsInSample = 0

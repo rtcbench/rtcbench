@@ -5,6 +5,7 @@ import (
 
 	"call.zip"
 	"call.zip/pkg/aofconf"
+	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	"call.zip/plugin/jitsi/internal/bot"
 )
@@ -36,9 +37,9 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 	}
 }
 
-func (c *Client) ConnectViewer(roomID, userID string) error {
+func (c *Client) ConnectViewer(roomID, userID string, ivf *vp9.IvfSegmenter) error {
 	aof := buildAOFConfig(c.serverIP, c.clientIP, roomID, userID)
-	return c.performHandshake(aof, roomID, userID)
+	return c.performHandshake(aof, roomID, userID, ivf)
 }
 
 func (c *Client) Shutdown() {
