@@ -96,6 +96,20 @@ func ParseVP9PayloadDescriptor(payload []byte, desc *PayloadDescriptor) error {
 		}
 	}
 
+	if desc.P != 0 && desc.F != 0 {
+		for i := 0; i < 3; i++ {
+			if ptr >= len(payload) {
+				desc.ByteLength = ptr
+				return nil
+			}
+			pdiff := payload[ptr]
+			ptr++
+			if (pdiff & 0x01) == 0 {
+				break
+			}
+		}
+	}
+
 	// Parse Scalability Structure (SS) if V is set
 	if desc.V != 0 {
 		desc.SSPresent = 1
@@ -135,9 +149,11 @@ func ParseVP9PayloadDescriptor(payload []byte, desc *PayloadDescriptor) error {
 					desc.ByteLength = ptr
 					return nil
 				}
-				r := (payload[ptr] >> 4) & 0x0F
+
+				pgByte := payload[ptr]
 				ptr++
 
+				r := (pgByte >> 1) & 0x03
 				if ptr+int(r) > len(payload) {
 					desc.ByteLength = ptr
 					return nil
