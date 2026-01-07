@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 )
 
 // IvfSegmenter pushes VP9 packet payloads belonging to a single logical video stream into IVF files.
 type IvfSegmenter struct {
+	enabled   atomic.Bool
 	outputDir string
 
 	frameBuffer bytes.Buffer
@@ -29,9 +31,17 @@ func NewIvfSegmenter(outputDir string) (*IvfSegmenter, error) {
 	}, nil
 }
 
+func (s *IvfSegmenter) Enable() {
+	s.enabled.Store(true)
+}
+
 // Push ingests a single RTP payload (VP9 payload descriptor + VP9 payload).
 // timestamp is the RTP timestamp associated with this packet.
 func (s *IvfSegmenter) Push(payload []byte, timestamp uint32, desc *PayloadDescriptor) error {
+	if !s.enabled.Load() {
+		return nil
+	}
+
 	usable := len(payload) // we assume 16 byte AEAD padding is already stripped from the end
 	if usable <= 0 {
 		return nil
