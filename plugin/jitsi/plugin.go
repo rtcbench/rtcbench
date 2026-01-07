@@ -3,6 +3,7 @@ package jitsi
 import (
 	"context"
 	"errors"
+	"log"
 
 	"call.zip"
 	"call.zip/pkg/vp9"
@@ -37,6 +38,8 @@ func (e *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 	if err != nil {
 		return errors.Join(call.ErrCannotJoinRoom, err)
 	}
+	ivf.Enable()
+	log.Printf("Enabled IVF file writing for room=%s user=%s", roomID, userID)
 	err = e.client.ConnectViewer(roomID, userID, ivf) // TODO: pass ctx
 	if err != nil {
 		return errors.Join(call.ErrCannotJoinRoom, err)
