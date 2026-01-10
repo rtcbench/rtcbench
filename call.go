@@ -46,9 +46,10 @@ type signalingConfig struct {
 	concurrency int
 }
 
-type viewerConfig struct {
+type userConfig struct {
 	roomID string
 	userID string
+	role   UserRole
 }
 
 type wrappedSignalingError struct {
@@ -172,18 +173,27 @@ func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSign
 		return nil
 	}
 
-	cfgCh := make(chan viewerConfig)
+	cfgCh := make(chan userConfig)
 	go func() {
 		defer close(cfgCh)
 
 		spacing := c.config.Spec.Conference.JoinPolicy.JoinStartSpacing
+		senders := c.config.Spec.Conference.Cameras.PerRoom
+
 		for i := 0; i < cfg.viewerBots; i++ {
 			if i > 0 && spacing > 0 {
 				time.Sleep(spacing)
 			}
-			cfgCh <- viewerConfig{
+
+			role := Viewer
+			if i < senders { // senders have join priority over viewers
+				role = Sender
+			}
+
+			cfgCh <- userConfig{
 				roomID: cfg.roomName,
-				userID: "viewer-" + uuid.NewString(),
+				userID: fmt.Sprintf("%s-%s", string(role), uuid.NewString()),
+				role:   role,
 			}
 		}
 	}()
@@ -203,7 +213,7 @@ func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSign
 		go func(workerID int) {
 			defer wg.Done()
 			for vc := range cfgCh {
-				if err := c.plugin.JoinRoom(ctx, Viewer, vc.roomID, vc.userID); err != nil {
+				if err := c.plugin.JoinRoom(ctx, vc.role, vc.roomID, vc.userID); err != nil {
 					errCh <- wrappedSignalingError{
 						error:    fmt.Errorf("cannot join %q to room %q: %w", vc.userID, cfg.roomName, err),
 						roomName: cfg.roomName,
