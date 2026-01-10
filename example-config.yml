@@ -8,6 +8,11 @@ spec:
     name: test
     viewers: 25
     totalRooms: 10
+    cameras:
+      perRoom: 5
+      fileType: ivf
+      videoCodec: vp9
+      directory: '~/vp9_ivf_videos'
     joinPolicy:
       concurrency: 10
       viewersAlwaysRetry: true

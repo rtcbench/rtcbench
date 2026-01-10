@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -38,6 +39,14 @@ var (
 	ErrNonPositiveTotalRooms = errors.New("invalid spec.conference.totalRooms integer, must be >= 1")
 	ErrMissingJoinPolicy     = errors.New("missing spec.conference.joinPolicy section")
 
+	ErrMissingCameraCountPerRoom   = errors.New("missing spec.conference.cameras.perRoom integer")
+	ErrInvalidCameraCountPerRoom   = errors.New("invalid spec.conference.cameras.perRoom integer, must be >= 0")
+	ErrMissingCameraFileType       = errors.New("missing spec.conference.cameras.fileType string")
+	ErrUnsupportedCameraFileType   = errors.New("unsupported spec.conference.cameras.fileType string")
+	ErrMissingCameraVideoCodec     = errors.New("missing spec.conference.cameras.videoCodec string")
+	ErrUnsupportedCameraVideoCodec = errors.New("unsupported spec.conference.cameras.videoCodec string")
+	ErrMissingCameraDirectory      = errors.New("missing spec.conference.cameras.directory string")
+
 	ErrMissingJoinPolicyConcurrency  = errors.New("missing spec.conference.joinPolicy.concurrency integer")
 	ErrNegativeJoinPolicyConcurrency = errors.New("invalid spec.conference.joinPolicy.concurrency, must be >= 0")
 	ErrNegativeJoinStartSpacing      = errors.New("invalid spec.conference.joinPolicy.joinStartSpacing, must be >= 0")
@@ -50,7 +59,6 @@ var (
 	ErrInvalidClientIP = errors.New("invalid spec.network.clientIP address")
 
 	ErrMissingLoggingDirectory = errors.New("missing spec.logging.directory pathname")
-	ErrInvalidLoggingDirectory = errors.New("invalid spec.logging.directory pathname")
 
 	ErrMissingLogStreamName  = errors.New("missing spec.logging.streams[#].name string")
 	ErrInvalidLogStreamName  = errors.New("invalid spec.logging.streams[#].name string")
@@ -62,6 +70,9 @@ var (
 
 	// logLevelRegex must be one of the following lowercase levels
 	logLevelRegex = regexp.MustCompile("^(info|debug|error)$")
+
+	SupportedCameraVideoCodecs = []string{"vp9"}
+	SupportedCameraFileTypes   = []string{"ivf"}
 )
 
 type Config struct {
@@ -235,6 +246,7 @@ type ConferenceConfig struct {
 	Name       string
 	Viewers    int
 	TotalRooms int
+	Cameras    CameraConfig
 	JoinPolicy JoinPolicyConfig
 	Recording  RecordingConfig
 }
@@ -245,7 +257,9 @@ type YAMLConferenceConfig struct {
 	// Viewers number of viewers per conference room
 	Viewers *int `yaml:"viewers,omitempty"`
 	// TotalRooms defaults to 1
-	TotalRooms *int                  `yaml:"totalRooms,omitempty"`
+	TotalRooms *int `yaml:"totalRooms,omitempty"`
+	// Cameras optional config for some (or all) viewers to turn on their cameras
+	Cameras    *YAMLCameraConfig     `yaml:"cameras,omitempty"`
 	JoinPolicy *YAMLJoinPolicyConfig `yaml:"joinPolicy,omitempty"`
 	// Recording optional section, defaults to disabled
 	Recording *YAMLRecordingConfig `yaml:"recording,omitempty"`
@@ -256,6 +270,7 @@ func (yc *YAMLConferenceConfig) validate() error {
 		errs          []error
 		joinPolicyErr error
 		recordingErr  error
+		camerasErr    error
 	)
 	if yc.Name == nil {
 		// return early as every conference is identified by a name
@@ -272,6 +287,12 @@ func (yc *YAMLConferenceConfig) validate() error {
 	}
 	if yc.TotalRooms != nil && *yc.TotalRooms < 1 {
 		errs = append(errs, ErrNonPositiveTotalRooms)
+	}
+	if yc.Cameras != nil {
+		camerasErr = yc.Cameras.validate()
+	}
+	if camerasErr != nil {
+		errs = append(errs, camerasErr)
 	}
 	if yc.JoinPolicy == nil {
 		errs = append(errs, ErrMissingJoinPolicy)
@@ -307,6 +328,64 @@ func (yc *YAMLConferenceConfig) mustConvert() ConferenceConfig {
 			Directory: "",
 		}
 	}
+	if yc.Cameras == nil {
+		c.Cameras = CameraConfig{
+			PerRoom:    0,
+			FileType:   "",
+			VideoCodec: "",
+			Directory:  "",
+		}
+	} else {
+		c.Cameras = yc.Cameras.mustConvert()
+	}
+	return c
+}
+
+type CameraConfig struct {
+	PerRoom    int
+	FileType   string
+	VideoCodec string
+	Directory  string
+}
+
+type YAMLCameraConfig struct {
+	PerRoom    *int    `yaml:"perRoom,omitempty"`
+	FileType   *string `yaml:"fileType,omitempty"`
+	VideoCodec *string `yaml:"videoCodec,omitempty"`
+	Directory  *string `yaml:"directory,omitempty"`
+}
+
+func (yc *YAMLCameraConfig) validate() error {
+	var errs []error
+	if yc.PerRoom == nil {
+		errs = append(errs, ErrMissingCameraCountPerRoom)
+	} else if *yc.PerRoom == 0 {
+		return nil
+	} else if *yc.PerRoom < 0 {
+		errs = append(errs, ErrInvalidCameraCountPerRoom)
+	}
+	if yc.FileType == nil {
+		errs = append(errs, ErrMissingCameraFileType)
+	} else if !slices.Contains(SupportedCameraFileTypes, strings.ToLower(*yc.FileType)) {
+		errs = append(errs, ErrUnsupportedCameraFileType)
+	}
+	if yc.VideoCodec == nil {
+		errs = append(errs, ErrMissingCameraVideoCodec)
+	} else if !slices.Contains(SupportedCameraVideoCodecs, strings.ToLower(*yc.VideoCodec)) {
+		errs = append(errs, ErrUnsupportedCameraVideoCodec)
+	}
+	if yc.Directory == nil || strings.TrimSpace(*yc.Directory) == "" {
+		errs = append(errs, ErrMissingCameraDirectory)
+	}
+	return errors.Join(errs...)
+}
+
+func (yc *YAMLCameraConfig) mustConvert() CameraConfig {
+	var c CameraConfig
+	c.PerRoom = *yc.PerRoom
+	c.FileType = *yc.FileType
+	c.VideoCodec = *yc.VideoCodec
+	c.Directory = *yc.Directory
 	return c
 }
 
@@ -435,10 +514,8 @@ func (yc *YAMLLoggingConfig) validate() error {
 		errs       []error
 		streamErrs []error
 	)
-	if yc.Directory == nil {
+	if yc.Directory == nil || strings.TrimSpace(*yc.Directory) == "" {
 		errs = append(errs, ErrMissingLoggingDirectory)
-	} else if strings.TrimSpace(*yc.Directory) == "" {
-		errs = append(errs, ErrInvalidLoggingDirectory)
 	}
 	for i, stream := range yc.Streams {
 		streamErr := stream.validate()
