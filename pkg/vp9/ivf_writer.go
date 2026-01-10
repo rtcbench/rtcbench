@@ -224,8 +224,8 @@ func (w *IvfWriter) writeHeader() error {
 
 	binary.LittleEndian.PutUint16(hdr[12:14], w.width)
 	binary.LittleEndian.PutUint16(hdr[14:16], w.height)
-	binary.LittleEndian.PutUint32(hdr[16:20], w.tbNum)
-	binary.LittleEndian.PutUint32(hdr[20:24], w.tbDen)
+	binary.LittleEndian.PutUint32(hdr[16:20], w.tbDen)
+	binary.LittleEndian.PutUint32(hdr[20:24], w.tbNum)
 
 	_, err := w.f.Write(hdr[:])
 	return err
