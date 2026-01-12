@@ -11,6 +11,9 @@ spec:
     joinPolicy:
       concurrency: 10
       viewersAlwaysRetry: true
+    recording:
+      enabled: true
+      directory: './vp9_ivf_files'
   network:
     serverIP: 10.99.0.210
     clientIP: 10.99.0.2

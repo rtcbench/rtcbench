@@ -40,6 +40,8 @@ var (
 	ErrMissingJoinPolicyConcurrency  = errors.New("missing spec.conference.joinPolicy.concurrency integer")
 	ErrNegativeJoinPolicyConcurrency = errors.New("invalid spec.conference.joinPolicy.concurrency, must be >= 0")
 
+	ErrMissingRecordingDirectory = errors.New("missing spec.conference.recording.directory pathname")
+
 	ErrMissingServerIP = errors.New("missing spec.network.serverIP address")
 	ErrInvalidServerIP = errors.New("invalid spec.network.serverIP address")
 	ErrMissingClientIP = errors.New("missing spec.network.clientIP address")
@@ -232,6 +234,7 @@ type ConferenceConfig struct {
 	Viewers    int
 	TotalRooms int
 	JoinPolicy JoinPolicyConfig
+	Recording  RecordingConfig
 }
 
 type YAMLConferenceConfig struct {
@@ -242,12 +245,15 @@ type YAMLConferenceConfig struct {
 	// TotalRooms defaults to 1
 	TotalRooms *int                  `yaml:"totalRooms,omitempty"`
 	JoinPolicy *YAMLJoinPolicyConfig `yaml:"joinPolicy,omitempty"`
+	// Recording optional section, defaults to disabled
+	Recording *YAMLRecordingConfig `yaml:"recording,omitempty"`
 }
 
 func (yc *YAMLConferenceConfig) validate() error {
 	var (
 		errs          []error
 		joinPolicyErr error
+		recordingErr  error
 	)
 	if yc.Name == nil {
 		// return early as every conference is identified by a name
@@ -273,6 +279,12 @@ func (yc *YAMLConferenceConfig) validate() error {
 	if joinPolicyErr != nil {
 		errs = append(errs, joinPolicyErr)
 	}
+	if yc.Recording != nil {
+		recordingErr = yc.Recording.validate()
+	}
+	if recordingErr != nil {
+		errs = append(errs, recordingErr)
+	}
 	return errors.Join(errs...)
 }
 
@@ -285,6 +297,14 @@ func (yc *YAMLConferenceConfig) mustConvert() ConferenceConfig {
 		c.TotalRooms = *yc.TotalRooms
 	}
 	c.JoinPolicy = yc.JoinPolicy.mustConvert()
+	if yc.Recording != nil {
+		c.Recording = yc.Recording.mustConvert()
+	} else {
+		c.Recording = RecordingConfig{
+			Enabled:   false,
+			Directory: "",
+		}
+	}
 	return c
 }
 
@@ -312,6 +332,37 @@ func (yc *YAMLJoinPolicyConfig) mustConvert() JoinPolicyConfig {
 	var c JoinPolicyConfig
 	c.Concurrency = *yc.Concurrency
 	c.ViewersAlwaysRetry = yc.ViewersAlwaysRetry
+	return c
+}
+
+type RecordingConfig struct {
+	Enabled   bool
+	Directory string
+}
+
+type YAMLRecordingConfig struct {
+	Enabled   *bool   `yaml:"enabled,omitempty"`
+	Directory *string `yaml:"directory,omitempty"`
+}
+
+func (yc *YAMLRecordingConfig) validate() error {
+	if yc.Enabled == nil || *yc.Enabled == false {
+		return nil
+	}
+	if yc.Directory == nil || strings.TrimSpace(*yc.Directory) == "" {
+		return ErrMissingRecordingDirectory
+	}
+	return nil
+}
+
+func (yc *YAMLRecordingConfig) mustConvert() RecordingConfig {
+	var c RecordingConfig
+	c.Enabled = false
+	c.Directory = ""
+	if yc.Enabled != nil && *yc.Enabled {
+		c.Enabled = true
+		c.Directory = *yc.Directory
+	}
 	return c
 }
 
