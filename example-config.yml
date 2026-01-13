@@ -3,7 +3,7 @@ kind: VideoCallStressTest
 metadata:
   name: stress-test-1
 spec:
-  plugin: jitsi
+  plugin: $env:PLUGIN_NAME=jitsi
   conference:
     name: test
     viewers: 25
