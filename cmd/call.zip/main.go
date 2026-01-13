@@ -67,13 +67,21 @@ func loadYAMLConfig(yamlFile string) (*call.Config, error) {
 		yamlConfig call.YAMLConfig
 		err        error
 	)
+
 	bytes, err = os.ReadFile(yamlFile)
 	if err != nil {
 		return nil, err
 	}
+
+	bytes, err = RenderEnvYAML(bytes)
+	if err != nil {
+		return nil, err
+	}
+
 	err = yaml.Unmarshal(bytes, &yamlConfig)
 	if err != nil {
 		return nil, err
 	}
+
 	return yamlConfig.IntoConfig()
 }
