@@ -11,6 +11,7 @@ spec:
     joinPolicy:
       concurrency: 10
       viewersAlwaysRetry: true
+      joinStartSpacing: 2s
     recording:
       enabled: true
       directory: './vp9_ivf_files'

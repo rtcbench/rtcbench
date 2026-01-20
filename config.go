@@ -6,6 +6,7 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -39,6 +40,7 @@ var (
 
 	ErrMissingJoinPolicyConcurrency  = errors.New("missing spec.conference.joinPolicy.concurrency integer")
 	ErrNegativeJoinPolicyConcurrency = errors.New("invalid spec.conference.joinPolicy.concurrency, must be >= 0")
+	ErrNegativeJoinStartSpacing      = errors.New("invalid spec.conference.joinPolicy.joinStartSpacing, must be >= 0")
 
 	ErrMissingRecordingDirectory = errors.New("missing spec.conference.recording.directory pathname")
 
@@ -311,11 +313,14 @@ func (yc *YAMLConferenceConfig) mustConvert() ConferenceConfig {
 type JoinPolicyConfig struct {
 	Concurrency        int
 	ViewersAlwaysRetry bool
+	JoinStartSpacing   time.Duration
 }
 
 type YAMLJoinPolicyConfig struct {
 	Concurrency        *int `yaml:"concurrency,omitempty"`
 	ViewersAlwaysRetry bool `yaml:"viewersAlwaysRetry,omitempty"`
+	// JoinStartSpacing optional duration parsed with time.ParseDuration (e.g. "2s")
+	JoinStartSpacing *string `yaml:"joinStartSpacing,omitempty"`
 }
 
 func (yc *YAMLJoinPolicyConfig) validate() error {
@@ -325,6 +330,14 @@ func (yc *YAMLJoinPolicyConfig) validate() error {
 	} else if *yc.Concurrency < 0 {
 		errs = append(errs, ErrNegativeJoinPolicyConcurrency)
 	}
+	if yc.JoinStartSpacing != nil {
+		dur, durErr := time.ParseDuration(*yc.JoinStartSpacing)
+		if durErr != nil {
+			errs = append(errs, durErr)
+		} else if dur < 0 {
+			errs = append(errs, ErrNegativeJoinStartSpacing)
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -332,6 +345,13 @@ func (yc *YAMLJoinPolicyConfig) mustConvert() JoinPolicyConfig {
 	var c JoinPolicyConfig
 	c.Concurrency = *yc.Concurrency
 	c.ViewersAlwaysRetry = yc.ViewersAlwaysRetry
+	if yc.JoinStartSpacing != nil {
+		dur, durErr := time.ParseDuration(*yc.JoinStartSpacing)
+		if durErr != nil {
+			panic(durErr)
+		}
+		c.JoinStartSpacing = dur
+	}
 	return c
 }
 
