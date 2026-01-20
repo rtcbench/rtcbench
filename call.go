@@ -117,7 +117,7 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 		}
 		go func() {
 			log.Printf("[cli-main] joining room %q (%d viewers)", fmtRoomName, c.config.Spec.Conference.Viewers)
-			c.joinRoomByName(fmtRoomName)
+			c.joinRoomByName(ctx, fmtRoomName)
 			log.Printf("[cli-main] finished joining room %q", fmtRoomName)
 			wg.Done()
 		}()
@@ -126,12 +126,12 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) joinRoomByName(roomName string) {
+func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 	if c.config.Spec.Conference.JoinPolicy.ViewersAlwaysRetry {
 		nViewersRemaining := c.config.Spec.Conference.Viewers
 		var errs []wrappedSignalingError
 		for {
-			errs = c.joinRoom(joinRoomConfig{
+			errs = c.joinRoom(ctx, joinRoomConfig{
 				roomName:   roomName,
 				viewerBots: nViewersRemaining,
 				signaling: signalingConfig{
@@ -142,12 +142,19 @@ func (c *Client) joinRoomByName(roomName string) {
 				log.Println("[viewers-always-retry] Finished joining room", roomName)
 				break
 			}
-			log.Printf("[viewers-always-retry] %d errors occurred, will retry in 1 second\n", len(errs))
+
+			retryDelay := c.config.Spec.Conference.JoinPolicy.JoinStartSpacing
+			if retryDelay < 1*time.Second {
+				retryDelay = 1 * time.Second
+			}
+
+			log.Printf("[viewers-always-retry] %d errors occurred, will retry in %s\n", len(errs), retryDelay.String())
 			nViewersRemaining = len(errs)
-			time.Sleep(1 * time.Second)
+
+			time.Sleep(retryDelay)
 		}
 	} else {
-		if errs := c.joinRoom(joinRoomConfig{
+		if errs := c.joinRoom(ctx, joinRoomConfig{
 			roomName:   roomName,
 			viewerBots: c.config.Spec.Conference.Viewers,
 			signaling: signalingConfig{
@@ -159,20 +166,27 @@ func (c *Client) joinRoomByName(roomName string) {
 	}
 }
 
-func (c *Client) joinRoom(cfg joinRoomConfig) []wrappedSignalingError {
+func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSignalingError {
 	size := cfg.viewerBots
 	if size < 1 {
 		return nil
 	}
 
-	cfgCh := make(chan viewerConfig, size)
-	for i := 0; i < cfg.viewerBots; i++ {
-		cfgCh <- viewerConfig{
-			roomID: cfg.roomName,
-			userID: "viewer-" + uuid.NewString(),
+	cfgCh := make(chan viewerConfig)
+	go func() {
+		defer close(cfgCh)
+
+		spacing := c.config.Spec.Conference.JoinPolicy.JoinStartSpacing
+		for i := 0; i < cfg.viewerBots; i++ {
+			if i > 0 && spacing > 0 {
+				time.Sleep(spacing)
+			}
+			cfgCh <- viewerConfig{
+				roomID: cfg.roomName,
+				userID: "viewer-" + uuid.NewString(),
+			}
 		}
-	}
-	close(cfgCh)
+	}()
 
 	errCh := make(chan wrappedSignalingError, size)
 
@@ -189,7 +203,7 @@ func (c *Client) joinRoom(cfg joinRoomConfig) []wrappedSignalingError {
 		go func(workerID int) {
 			defer wg.Done()
 			for vc := range cfgCh {
-				if err := c.plugin.JoinRoom(context.Background(), Viewer, vc.roomID, vc.userID); err != nil {
+				if err := c.plugin.JoinRoom(ctx, Viewer, vc.roomID, vc.userID); err != nil {
 					errCh <- wrappedSignalingError{
 						error:    fmt.Errorf("cannot join %q to room %q: %w", vc.userID, cfg.roomName, err),
 						roomName: cfg.roomName,
