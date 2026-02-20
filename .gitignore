@@ -9,12 +9,20 @@ scripts/venv
 .idea
 *.pem
 
+# cztest ignores
+cztest-config.yml
+cztest-downloads/
+
 # Binary name from "go build"
 call.zip
-call.zip.linux
-call.zip.macos
 call.zip.exe
+cztest-client
+cztest-client.exe
+cztest-server
+cztest-server.exe
 !cmd/call.zip
+!cmd/cztest-client
+!cmd/cztest-server
 
 # Go specific
 *.exe
