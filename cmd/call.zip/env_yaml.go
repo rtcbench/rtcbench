@@ -189,10 +189,6 @@ func coerceScalar(raw string) any {
 		return true
 	case "false":
 		return false
-	case "1":
-		return true
-	case "0":
-		return false
 	case "null", "~":
 		return nil
 	}
