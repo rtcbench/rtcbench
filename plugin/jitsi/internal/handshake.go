@@ -18,21 +18,29 @@ func initialRid() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
-func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string, ivf *vp9.IvfSegmenter) error {
+func (c *Client) performHandshake(
+	aof *aofconf.Config,
+	room string,
+	nickname string,
+	ivf *vp9.IvfSegmenter,
+	senderIVFPaths []string,
+) error {
 	state := &model.ConnectionState{
-		StepsAOF:    aof.Steps,
-		PionAOF:     aof.Pion,
-		PktRecvAOF:  aof.PktRecv,
-		NetStatsAOF: aof.NetStats,
-		BOSHSender:  httpxml.NewBOSHSender(aof.BOSH),
-		BoshURL:     fmt.Sprintf("https://%s/http-bind", c.serverIP),
-		RoomName:    room,
-		MachineUID:  uuid.NewString(),
-		RID:         initialRid(),
-		Nickname:    nickname,
-		LANServerIP: c.serverIP,
-		LANClientIP: c.clientIP,
-		LogsDir:     aof.LogsDir,
+		Sender:         len(senderIVFPaths) > 0,
+		SenderIVFPaths: senderIVFPaths,
+		StepsAOF:       aof.Steps,
+		PionAOF:        aof.Pion,
+		PktRecvAOF:     aof.PktRecv,
+		NetStatsAOF:    aof.NetStats,
+		BOSHSender:     httpxml.NewBOSHSender(aof.BOSH),
+		BoshURL:        fmt.Sprintf("https://%s/http-bind", c.serverIP),
+		RoomName:       room,
+		MachineUID:     uuid.NewString(),
+		RID:            initialRid(),
+		Nickname:       nickname,
+		LANServerIP:    c.serverIP,
+		LANClientIP:    c.clientIP,
+		LogsDir:        aof.LogsDir,
 	}
 
 	u, _ := url.Parse(state.BoshURL)
@@ -66,6 +74,7 @@ func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string, iv
 		ICEUfrag:    state.ICEUfrag,
 		ICEPwd:      state.ICEPwd,
 		Fingerprint: state.Fingerprint,
+		Sender:      state.Sender,
 	})
 	if err != nil {
 		aof.Handshake.LogPrintf("SDP conversion failed: %v", err)
@@ -82,9 +91,20 @@ func (c *Client) performHandshake(aof *aofconf.Config, room, nickname string, iv
 	// pionConnection generates local SDP (answer) with real ICE creds.
 	state.LocalSDP = pionConnection.LocalDescription().SDP
 
-	if err := steps.Step10_SendSessionAccept(state); err != nil {
-		aof.Handshake.LogPrintf("Step10 failed: %v", err)
-		return err
+	if state.Sender {
+		if err := steps.Step10_Sender_SendSessionAccept(state); err != nil {
+			aof.Handshake.LogPrintf("Step10_Sender failed: %v", err)
+			return err
+		}
+		if err := steps.Step11_Sender_AnnounceCameraSource(state); err != nil {
+			aof.Handshake.LogPrintf("Step11_Sender failed: %v", err)
+			return err
+		}
+	} else {
+		if err := steps.Step10_SendSessionAccept(state); err != nil {
+			aof.Handshake.LogPrintf("Step10 failed: %v", err)
+			return err
+		}
 	}
 
 	// TODO send xmpp heartbeats (BROKEN)

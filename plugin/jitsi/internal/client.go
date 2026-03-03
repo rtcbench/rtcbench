@@ -37,9 +37,9 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 	}
 }
 
-func (c *Client) ConnectViewer(roomID, userID string, ivf *vp9.IvfSegmenter) error {
+func (c *Client) ConnectViewer(roomID, userID string, ivf *vp9.IvfSegmenter, ivfPathsToStream []string) error {
 	aof := buildAOFConfig(c.serverIP, c.clientIP, roomID, userID)
-	return c.performHandshake(aof, roomID, userID, ivf)
+	return c.performHandshake(aof, roomID, userID, ivf, ivfPathsToStream)
 }
 
 func (c *Client) Shutdown() {

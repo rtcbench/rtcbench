@@ -21,7 +21,7 @@ a=extmap:5 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extension
 
 a=setup:actpass
 a=mid:0
-a=recvonly
+a={{if .Sender}}sendrecv{{else}}recvonly{{end}}
 a=ice-ufrag:{{.ICEUfrag}}
 a=ice-pwd:{{.ICEPwd}}
 a=fingerprint:sha-256 {{.Fingerprint}}
