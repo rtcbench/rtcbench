@@ -14,6 +14,7 @@ type SDPState struct {
 	ICEUfrag    string
 	ICEPwd      string
 	Fingerprint string
+	Sender      bool
 }
 
 var (
