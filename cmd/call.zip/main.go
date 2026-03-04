@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"call.zip"
+	"call.zip/internal/netutil"
 	"call.zip/plugin/jitsi"
 	"github.com/goccy/go-yaml"
 )
@@ -19,6 +20,7 @@ func main() {
 		err                           error
 		cfg                           *call.Config
 		client                        *call.Client
+		detectedClientIP              string
 		sigtermCtx, shutdownCtx       context.Context
 		sigtermCancel, shutdownCancel context.CancelFunc
 	)
@@ -30,6 +32,15 @@ func main() {
 	cfg, err = loadYAMLConfig(os.Args[1])
 	if err != nil {
 		log.Fatalf("Failed to load YAML config file: %v", err)
+	}
+
+	if cfg.Spec.Network.ClientIP == "" {
+		detectedClientIP, err = netutil.DetectClientIP(cfg.Spec.Network.ServerIP)
+		if err != nil {
+			log.Fatalf("Failed to detect client IP, please manually configure it: %v", err)
+		}
+		log.Printf("Detected client IP: %s", detectedClientIP)
+		cfg.Spec.Network.ClientIP = detectedClientIP
 	}
 
 	client = call.NewClient(cfg)
