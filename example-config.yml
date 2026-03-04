@@ -3,13 +3,13 @@ kind: VideoCallStressTest
 metadata:
   name: stress-test-1
 spec:
-  plugin: $env:PLUGIN_NAME=jitsi
+  plugin: $env:PLUGIN_NAME=janus
   conference:
-    name: test
-    viewers: 25
-    totalRooms: 10
+    name: room-1234
+    viewers: 1
+    totalRooms: 1
     cameras:
-      perRoom: 5
+      perRoom: 0
       fileType: ivf
       videoCodec: vp9
       directory: '~/vp9_ivf_videos'
@@ -18,15 +18,18 @@ spec:
       viewersAlwaysRetry: true
       joinStartSpacing: 2s
     recording:
-      enabled: true
+      enabled: false
       directory: './vp9_ivf_files'
   network:
-    serverIP: 10.99.0.210
+    serverIP: $env:SERVER_IP=10.99.0.209
     # clientIP: 10.99.0.2  # omitted for auto-detection
   pluginConfig:  # plugin-specific internal configuration
     jitsi:
       boshURL: 'https://10.99.0.210/http-bind'
       domain: '10.99.0.210'
+    janus:
+      serverRoot: 'https://10.99.0.209/janus'
+      allowInsecureHttps: true
   logging:
     console: true
     directory: '/var/log/call-zip'
