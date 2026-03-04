@@ -55,7 +55,6 @@ var (
 
 	ErrMissingServerIP = errors.New("missing spec.network.serverIP address")
 	ErrInvalidServerIP = errors.New("invalid spec.network.serverIP address")
-	ErrMissingClientIP = errors.New("missing spec.network.clientIP address")
 	ErrInvalidClientIP = errors.New("invalid spec.network.clientIP address")
 
 	ErrMissingLoggingDirectory = errors.New("missing spec.logging.directory pathname")
@@ -482,9 +481,7 @@ func (yc *YAMLNetworkConfig) validate() error {
 	} else if net.ParseIP(*yc.ServerIP) == nil {
 		errs = append(errs, ErrInvalidServerIP)
 	}
-	if yc.ClientIP == nil {
-		errs = append(errs, ErrMissingClientIP)
-	} else if net.ParseIP(*yc.ClientIP) == nil {
+	if yc.ClientIP != nil && *yc.ClientIP != "" && net.ParseIP(*yc.ClientIP) == nil {
 		errs = append(errs, ErrInvalidClientIP)
 	}
 	return errors.Join(errs...)
@@ -493,7 +490,9 @@ func (yc *YAMLNetworkConfig) validate() error {
 func (yc *YAMLNetworkConfig) mustConvert() NetworkConfig {
 	var c NetworkConfig
 	c.ServerIP = *yc.ServerIP
-	c.ClientIP = *yc.ClientIP
+	if yc.ClientIP != nil {
+		c.ClientIP = *yc.ClientIP
+	}
 	return c
 }
 
