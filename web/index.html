@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>call.zip — Low-Cost Video Conference Testing at Scale</title>
+  <meta name="description" content="A lightweight, extensible stress-testing framework for SFU-based video conferencing systems. Replace ChromeDriver bots with thin Go clients that speak WebRTC natively." />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+<nav>
+  <span class="nav-logo">call.zip</span>
+  <div class="nav-links">
+    <a href="#how-it-works">How it works</a>
+    <a href="#quickstart">Quick start</a>
+    <a href="#paper">Paper</a>
+    <a href="https://github.com/ioqr/call.zip">GitHub</a>
+  </div>
+</nav>
+
+<div id="hero">
+  <div class="container">
+    <p class="hero-eyebrow">SigComm Workshop 2026</p>
+    <h1><span class="mono">call.zip</span><br>Video conference testing<br>at scale.</h1>
+    <p class="hero-sub">
+      A lightweight, open-source stress-testing framework for SFU-based video conferencing.
+      Replace CPU-heavy browser bots with thin Go clients that speak WebRTC natively —
+      one machine, hundreds of sessions.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#quickstart">Get started</a>
+      <a class="btn btn-secondary" href="#paper">Read the paper</a>
+      <a class="btn btn-secondary" href="https://github.com/ioqr/call.zip">GitHub</a>
+    </div>
+  </div>
+</div>
+
+<section id="problem">
+  <div class="container">
+    <h2>The problem with browser-based testing</h2>
+    <p>
+      The standard approach to end-to-end SFU evaluation uses ChromeDriver or similar browser
+      automation to simulate real participants. It works — but it burns CPU at a rate that
+      makes large-scale tests prohibitively expensive.
+    </p>
+    <p>
+      A single ChromeDriver instance handling one video session consumes a disproportionate
+      share of a CPU core. Scaling to hundreds of concurrent sessions requires a rack of
+      bare-metal machines, just for the client side.
+    </p>
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-number">~1</div>
+        <div class="stat-label">ChromeDriver session per CPU core before saturation</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">10×+</div>
+        <div class="stat-label">More sessions per core with call.zip thin clients</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">2</div>
+        <div class="stat-label">SFU platforms supported today — Jitsi and Janus</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how-it-works">
+  <div class="container">
+    <h2>How it works</h2>
+    <p>
+      call.zip replaces the browser with a minimal Go process that implements just enough
+      of the WebRTC stack to look like a real participant to the SFU. No rendering,
+      no JavaScript engine, no DOM — only signaling, ICE, DTLS, and RTP.
+    </p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>Configure a test</h3>
+          <p>Describe the room topology, participant counts, roles, and SFU target in a single YAML file.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>Thin senders publish VP9</h3>
+          <p>
+            Sender bots read pre-encoded IVF files and stream VP9 over WebRTC — no encoder running,
+            no GPU required. The SFU sees a real media stream.
+          </p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>Thin receivers subscribe</h3>
+          <p>
+            Viewer bots complete the full ICE/DTLS/SRTP handshake and receive RTP,
+            measuring per-packet arrival time, jitter, and VP9 frame statistics —
+            without ever decoding video.
+          </p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <h3>Collect metrics</h3>
+          <p>
+            Structured logs capture video quality samples, connection state transitions, and
+            signaling latency. Pipe them to your analysis tool of choice.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="container">
+    <h2>Features</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="feature-icon">&#9881;</div>
+        <h3>Plugin-based SFU support</h3>
+        <p>Each SFU is a plugin. Add a new platform by implementing a three-method Go interface.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128260;</div>
+        <h3>Native WebRTC via Pion</h3>
+        <p>Full ICE, DTLS, and SRTP — no browser, no Electron, no Node. Pure Go.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128249;</div>
+        <h3>Realistic VP9 traffic</h3>
+        <p>Pre-encoded IVF clips are paced at real frame timings, producing authentic bitrate and packetization patterns.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128196;</div>
+        <h3>YAML configuration</h3>
+        <p>Room count, viewers per room, sender count, join spacing, retry policy — all in one file.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#128202;</div>
+        <h3>Video quality metrics</h3>
+        <p>Per-frame VP9 statistics, RTP sequence tracking, and jitter measurement built in.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">&#127757;</div>
+        <h3>Auto client IP detection</h3>
+        <p>Determines the correct local IP for ICE by routing toward the server — no manual network config needed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="container">
+    <h2>Quick start</h2>
+    <p>Requires Go 1.24+. Clone, build, and point it at your SFU.</p>
+
+    <div class="install-strip">
+      <span>$</span>
+      go install call.zip/cmd/call.zip@latest
+    </div>
+
+    <p>Write a config file:</p>
+
+<pre><code><span class="comment"># config.yml</span>
+<span class="key">apiVersion</span>: <span class="str">call.zip/v1</span>
+<span class="key">kind</span>: <span class="str">VideoCallStressTest</span>
+<span class="key">metadata</span>:
+  <span class="key">name</span>: <span class="str">stress-test-1</span>
+<span class="key">spec</span>:
+  <span class="key">plugin</span>: <span class="str">janus</span>          <span class="comment"># or: jitsi</span>
+  <span class="key">conference</span>:
+    <span class="key">name</span>: <span class="str">1234</span>           <span class="comment"># Janus room ID</span>
+    <span class="key">viewers</span>: <span class="val">25</span>
+    <span class="key">totalRooms</span>: <span class="val">10</span>
+    <span class="key">cameras</span>:
+      <span class="key">perRoom</span>: <span class="val">5</span>
+      <span class="key">fileType</span>: <span class="str">ivf</span>
+      <span class="key">videoCodec</span>: <span class="str">vp9</span>
+      <span class="key">directory</span>: <span class="str">~/vp9_clips</span>
+    <span class="key">joinPolicy</span>:
+      <span class="key">concurrency</span>: <span class="val">10</span>
+      <span class="key">viewersAlwaysRetry</span>: <span class="val">true</span>
+      <span class="key">joinStartSpacing</span>: <span class="str">2s</span>
+  <span class="key">network</span>:
+    <span class="key">serverIP</span>: <span class="str">10.0.0.1</span>
+  <span class="key">pluginConfig</span>:
+    <span class="key">janus</span>:
+      <span class="key">serverRoot</span>: <span class="str">https://10.0.0.1/janus</span>
+      <span class="key">allowInsecureHttps</span>: <span class="val">true</span>
+  <span class="key">logging</span>:
+    <span class="key">console</span>: <span class="val">true</span>
+    <span class="key">directory</span>: <span class="str">/var/log/call-zip</span></code></pre>
+
+    <p>Run it:</p>
+
+<pre><code><span class="comment">$ </span>call.zip config.yml</code></pre>
+
+    <p>
+      Senders will publish VP9 streams and viewers will subscribe. Watch for
+      <code>ICEConnectionState: connected</code> in the logs to confirm media is flowing.
+    </p>
+  </div>
+</section>
+
+<section id="platforms">
+  <div class="container">
+    <h2>Supported platforms</h2>
+    <p>Each SFU plugin handles signaling and negotiation for its platform. The WebRTC media path is shared.</p>
+    <div class="platform-list">
+      <div class="platform">
+        <span class="platform-name">Janus</span>
+        <span class="platform-desc">
+          VideoRoom plugin over HTTP REST. Senders publish via offer/answer, viewers
+          subscribe using the multi-stream subscriber API. Static ICE candidate on port 10000.
+        </span>
+      </div>
+      <div class="platform">
+        <span class="platform-name">Jitsi</span>
+        <span class="platform-desc">
+          XMPP/BOSH signaling with Jingle for SDP exchange, targeting Jitsi Videobridge (JVB).
+          Full sender and viewer roles supported.
+        </span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="paper">
+  <div class="container">
+    <h2>Research</h2>
+    <p>call.zip is the subject of a workshop paper submitted to SigComm 2026.</p>
+    <div class="paper-card">
+      <div class="paper-meta">
+        <div class="paper-title">Call.ZIP: Low-Cost Video Conference Testing at Scale</div>
+        <div class="paper-venue">SigComm Workshop &rsquo;26 &mdash; under review</div>
+        <div class="paper-abstract">
+          We present call.zip, a lightweight and extensible framework for stress-testing
+          SFU-based video conferencing systems. By replacing browser-based bots with thin
+          Go clients that speak WebRTC natively, call.zip reduces client-side CPU overhead
+          by over an order of magnitude, enabling large-scale SFU evaluation on a single machine.
+          The framework supports multiple SFU platforms through a plugin interface and produces
+          realistic VP9 traffic from pre-encoded IVF clips.
+        </div>
+        <a class="btn btn-secondary" href="Call_ZIP.pdf" style="display:inline-flex;margin-top:0.25rem;">
+          Download PDF
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container" style="display:flex;justify-content:space-between;align-items:center;width:100%;flex-wrap:wrap;gap:0.5rem;">
+    <span>call.zip &mdash; open source under MIT license</span>
+    <span>
+      <a href="https://github.com/ioqr/call.zip">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      <a href="Call_ZIP.pdf">Paper</a>
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>
