@@ -35,7 +35,7 @@ func newPionAPI(clientIP string) (*webrtc.API, error) {
 			ClockRate:   90000,
 			SDPFmtpLine: "profile-id=0",
 		},
-		PayloadType: 101,
+		PayloadType: 98,
 	}, webrtc.RTPCodecTypeVideo)
 
 	return webrtc.NewAPI(
