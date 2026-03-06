@@ -46,7 +46,7 @@ func main() {
 
 	client = call.NewClient(cfg)
 	client.RegisterPlugin("jitsi", jitsi.NewPlugin)
-	client.RegisterPlugin("janus", janus.NewPlugin)
+	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
 
 	err = client.JoinAllRooms(context.Background())
 	if err != nil {
