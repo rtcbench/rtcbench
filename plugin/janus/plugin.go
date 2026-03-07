@@ -60,10 +60,9 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.serverIP = config.Spec.Network.ServerIP
 	p.clientIP = config.Spec.Network.ClientIP
 
-	// Validate that the conference name is a valid Janus room ID (integer).
-	if _, err := strconv.ParseInt(config.Spec.Conference.Name, 10, 64); err != nil {
-		return fmt.Errorf("janus: spec.conference.name %q must be a parseable integer room ID: %w",
-			config.Spec.Conference.Name, err)
+	// Validate that the conference name contains a parseable integer for the Janus room ID.
+	if _, err := roomIDFromName(config.Spec.Conference.Name); err != nil {
+		return err
 	}
 
 	// Pre-load IVF paths for senders.
@@ -88,14 +87,32 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	return nil
 }
 
+// roomIDFromName parses the trailing digits of name as the Janus room ID.
+// "room-1234" → 1234, "42" → 42, "42abc" → error, "nodigits" → error.
+func roomIDFromName(name string) (int64, error) {
+	end := len(name)
+	if end == 0 || name[end-1] < '0' || name[end-1] > '9' {
+		return 0, fmt.Errorf("janus: conference name %q must end with digits for room ID", name)
+	}
+	start := end - 1
+	for start > 0 && name[start-1] >= '0' && name[start-1] <= '9' {
+		start--
+	}
+	id, err := strconv.ParseInt(name[start:end], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("janus: could not parse room ID from %q: %w", name, err)
+	}
+	return id, nil
+}
+
 func (p *Plugin) Shutdown(ctx context.Context) error {
 	return nil
 }
 
 func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userID string) error {
-	roomInt, err := strconv.ParseInt(roomID, 10, 64)
+	roomInt, err := roomIDFromName(roomID)
 	if err != nil {
-		return fmt.Errorf("janus: invalid room ID %q: %w", roomID, err)
+		return err
 	}
 
 	logf := func(format string, args ...any) {
