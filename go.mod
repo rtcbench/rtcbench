@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	github.com/coder/websocket v1.8.14 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/pion/datachannel v1.5.10 // indirect
 	github.com/pion/ice/v2 v2.3.38 // indirect

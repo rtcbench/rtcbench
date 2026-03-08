@@ -77,6 +77,7 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
       <group xmlns="urn:xmpp:jingle:apps:grouping:0" semantics="BUNDLE">
         <content name="audio"/>
         <content name="video"/>
+        <content name="data"/>
       </group>
       <content creator="responder" name="audio" senders="responder">
         <description xmlns="urn:xmpp:jingle:apps:rtp:1" media="audio">
@@ -115,6 +116,12 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
           <candidate foundation="1" component="1" protocol="udp" ip="%s" port="%d" priority="%d" type="host"/>
         </transport>
       </content>
+      <content creator="responder" name="data">
+        <transport xmlns="urn:xmpp:jingle:transports:ice-udp:1" ufrag="%s" pwd="%s">
+          <sctpmap xmlns="urn:xmpp:jingle:transports:dtls-sctp:1" number="5000" protocol="webrtc-datachannel" streams="0"/>
+          <fingerprint xmlns="urn:xmpp:jingle:apps:dtls:0" hash="sha-256" setup="active">%s</fingerprint>
+        </transport>
+      </content>
     </jingle>
   </iq>
 </body>`,
@@ -125,6 +132,8 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
 		// video transport
 		videoSenders, videoSourcesXML,
 		ufrag, pwd, fingerprint, candidate.IP, candidate.Port, candidate.Priority,
+		// data transport
+		ufrag, pwd, fingerprint,
 	)
 
 	state.StepsAOF.LogPrintf("=== BEGIN session-accept ===\n%s\n=== END session-accept ===", requestBody)
