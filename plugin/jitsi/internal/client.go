@@ -7,11 +7,11 @@ import (
 	"call.zip/pkg/aofconf"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
-	"call.zip/plugin/jitsi/internal/bot"
+	"call.zip/pkg/viewer"
 )
 
 type Client struct {
-	botManager *bot.Manager
+	botManager *viewer.Manager
 	publisher  *vp9_stats.Publisher
 	serverIP   string
 	clientIP   string
@@ -19,7 +19,7 @@ type Client struct {
 
 func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 	input := make(chan vp9_stats.VideoQualitySample, inputChanSize)
-	botManager := bot.NewManager(input)
+	botManager := viewer.NewManager(input)
 	publisher := vp9_stats.NewPublisher(input)
 
 	publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
