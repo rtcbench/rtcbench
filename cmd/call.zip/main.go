@@ -13,6 +13,7 @@ import (
 	"call.zip/internal/netutil"
 	"call.zip/plugin/janus"
 	"call.zip/plugin/jitsi"
+	"call.zip/plugin/livekit"
 	"github.com/goccy/go-yaml"
 )
 
@@ -47,6 +48,7 @@ func main() {
 	client = call.NewClient(cfg)
 	client.RegisterPlugin("jitsi", jitsi.NewPlugin)
 	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
+	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
 
 	err = client.JoinAllRooms(context.Background())
 	if err != nil {
