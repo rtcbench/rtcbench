@@ -60,10 +60,13 @@ func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 				state.Candidates = append(state.Candidates, cand)
 			}
 
+			// Extract colibri WebSocket URL from the data content transport
+			state.ColibriWebSocketURL = util.ExtractAttrInTag(respXML, "web-socket", "url")
+
 			// Log full match values for session-accept
 			state.StepsAOF.LogPrintf(
-				"Step09_WaitForJingleOffer OK: SID=%s Initiator=%s ICEUfrag=%s Candidates=%d",
-				state.JingleSID, state.FocusJid, state.ICEUfrag, len(state.Candidates),
+				"Step09_WaitForJingleOffer OK: SID=%s Initiator=%s ICEUfrag=%s Candidates=%d ColibriWS=%s",
+				state.JingleSID, state.FocusJid, state.ICEUfrag, len(state.Candidates), state.ColibriWebSocketURL,
 			)
 
 			return nil

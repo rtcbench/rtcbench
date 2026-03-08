@@ -1,6 +1,7 @@
 package jitsi
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"time"
@@ -105,6 +106,10 @@ func (c *Client) performHandshake(
 			aof.Handshake.LogPrintf("Step10 failed: %v", err)
 			return err
 		}
+	}
+
+	if state.ColibriWebSocketURL != "" {
+		go runColibriWS(context.Background(), state.ColibriWebSocketURL, aof.KeepAlive)
 	}
 
 	// TODO send xmpp heartbeats (BROKEN)
