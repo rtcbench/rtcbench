@@ -1,4 +1,4 @@
-package bot
+package viewer
 
 import (
 	"errors"
@@ -27,23 +27,23 @@ type Viewer struct {
 	receiver *webrtc.RTPReceiver
 	input    chan<- vp9_stats.VideoQualitySample
 	nickname string
-	config   ViewerConfig
+	config   Config
 	ivf      *vp9.IvfSegmenter
 }
 
-type ViewerConfig struct {
+type Config struct {
 	PacketsPerSample  int `json:"packets_per_sample"`
 	VP9RTPPayloadType int `json:"vp9_rtp_payload_type"`
 	TrackBufferSize   int `json:"track_buffer_size"`
 }
 
-func (c *ViewerConfig) verify() error {
+func (c *Config) verify() error {
 	if c.VP9RTPPayloadType < 0 || c.VP9RTPPayloadType > 255 {
-		return fmt.Errorf("invalid config: c.VP9RTPPayloadType (%d) out of range [0..255]",
+		return fmt.Errorf("invalid config: VP9RTPPayloadType (%d) out of range [0..255]",
 			c.VP9RTPPayloadType)
 	}
 	if c.TrackBufferSize < 100 || c.TrackBufferSize > 10_000 { // TODO artificial limit
-		return fmt.Errorf("invalid config: c.TrackBufferSize (%d) out of range [100..10000]", c.TrackBufferSize)
+		return fmt.Errorf("invalid config: TrackBufferSize (%d) out of range [100..10000]", c.TrackBufferSize)
 	}
 	return nil
 }
@@ -53,7 +53,7 @@ func newViewer(
 	receiver *webrtc.RTPReceiver,
 	input chan<- vp9_stats.VideoQualitySample,
 	nickname string,
-	config *ViewerConfig,
+	config *Config,
 	ivf *vp9.IvfSegmenter,
 ) (*Viewer, error) {
 	if err := config.verify(); err != nil {

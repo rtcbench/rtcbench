@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"log"
-	"os"
 	"path"
-	"path/filepath"
-	"sort"
 
 	"call.zip"
+	ivfpkg "call.zip/pkg/ivf"
 	"call.zip/pkg/vp9"
 	jitsi "call.zip/plugin/jitsi/internal"
 )
@@ -63,23 +61,10 @@ func (e *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 	}
 
 	if role == call.Sender { // TODO: add this to call.Config for multi-plugins, and to avoid sorting each time
-		ents, readErr := os.ReadDir(e.cameraDirectory)
+		var readErr error
+		senderIVFPaths, readErr = ivfpkg.LoadCameraPaths(e.cameraDirectory)
 		if readErr != nil {
 			return errors.Join(call.ErrCannotJoinRoom, readErr)
-		}
-
-		names := make([]string, 0, len(ents))
-		for _, ent := range ents {
-			if ent.Type().IsRegular() {
-				names = append(names, ent.Name())
-			}
-		}
-
-		sort.Strings(names)
-
-		senderIVFPaths = make([]string, 0, len(names))
-		for _, name := range names {
-			senderIVFPaths = append(senderIVFPaths, filepath.Join(e.cameraDirectory, name))
 		}
 	}
 
