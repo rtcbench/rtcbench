@@ -66,7 +66,8 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	}
 
 	// Pre-load IVF paths for senders.
-	if dir := config.Spec.Conference.Cameras.Directory; dir != "" {
+	if config.Spec.Conference.Cameras.PerRoom > 0 {
+		dir := config.Spec.Conference.Cameras.Directory
 		ents, err := os.ReadDir(dir)
 		if err != nil {
 			return fmt.Errorf("janus: reading camera directory %q: %w", dir, err)

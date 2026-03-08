@@ -5,11 +5,11 @@ metadata:
 spec:
   plugin: $env:PLUGIN_NAME=janus
   conference:
-    name: test
-    viewers: 25
-    totalRooms: 10
+    name: room-1234
+    viewers: 1
+    totalRooms: 1
     cameras:
-      perRoom: 5
+      perRoom: 0
       fileType: ivf
       videoCodec: vp9
       directory: '~/vp9_ivf_videos'
@@ -18,7 +18,7 @@ spec:
       viewersAlwaysRetry: true
       joinStartSpacing: 2s
     recording:
-      enabled: true
+      enabled: false
       directory: './vp9_ivf_files'
   network:
     serverIP: $env:SERVER_IP=10.99.0.209
