@@ -150,6 +150,9 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 			}
 
 			log.Printf("[viewers-always-retry] %d errors occurred, will retry in %s\n", len(errs), retryDelay.String())
+			for _, e := range errs {
+				log.Printf("[viewers-always-retry] error: %v", e.error)
+			}
 			nViewersRemaining = len(errs)
 
 			time.Sleep(retryDelay)
@@ -163,6 +166,9 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 			},
 		}); errs != nil {
 			log.Printf("[cli-main] %d errors from c.JoinRoom: %v", len(errs), errs)
+			for _, e := range errs {
+				log.Printf("[cli-main] error: %v", e.error)
+			}
 		}
 	}
 }
