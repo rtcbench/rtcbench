@@ -7,11 +7,14 @@ import (
 	"regexp"
 	"strings"
 
+	"call.zip/pkg/cc"
 	ivfpkg "call.zip/pkg/ivf"
+	pkgrtcp "call.zip/pkg/rtcp"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/viewer"
 	"call.zip/plugin/jitsi/internal/model"
 	"github.com/pion/dtls/v2"
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -82,9 +85,15 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		PayloadType: 101,
 	}, webrtc.RTPCodecTypeVideo)
 
+	ir := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(m, ir); err != nil {
+		return nil, fmt.Errorf("RegisterDefaultInterceptors: %w", err)
+	}
+
 	api := webrtc.NewAPI(
 		webrtc.WithSettingEngine(se),
 		webrtc.WithMediaEngine(m),
+		webrtc.WithInterceptorRegistry(ir),
 	)
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{})
@@ -191,7 +200,14 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 
 	// Start IVF pumping after local description is set.
 	if state.Sender && localVideoTrack != nil {
-		go ivfpkg.LoopIntoTrack(state.PionAOF.LogPrintf, localVideoTrack, state.SenderIVFPaths)
+		ctrl, ccErr := cc.New(c.ccAlgorithm)
+		if ccErr != nil {
+			return nil, fmt.Errorf("cc: %w", ccErr)
+		}
+		go ivfpkg.LoopIntoTrack(state.PionAOF.LogPrintf, localVideoTrack, state.SenderIVFPaths, ctrl)
+		for _, s := range pc.GetSenders() {
+			go pkgrtcp.DrainSender(state.PionAOF.LogPrintf, s, ctrl)
+		}
 	}
 
 	ufrag, pwd, fingerprint := parseIceCredentials(pc.LocalDescription().SDP)

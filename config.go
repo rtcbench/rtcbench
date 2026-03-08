@@ -21,6 +21,10 @@ var (
 	ErrMissingKind       = errors.New("missing kind, expected " + KindVideoCallStressTest)
 	ErrInvalidKind       = errors.New("invalid kind, expected " + KindVideoCallStressTest)
 
+	ErrInvalidCCAlgorithm = errors.New("invalid spec.congestionControl.algorithm, want remb, gcc, or none")
+
+	supportedCCAlgorithms = []string{"remb", "gcc", "none"}
+
 	ErrMissingMetadata = errors.New("missing metadata section")
 	ErrMissingName     = errors.New("missing metadata.name string")
 	ErrInvalidName     = errors.New("invalid metadata.name string")
@@ -169,19 +173,48 @@ func (yc *YAMLMetadataConfig) mustConvert() MetadataConfig {
 }
 
 type SpecConfig struct {
-	Plugin       string
-	Conference   ConferenceConfig
-	Network      NetworkConfig
-	PluginConfig map[string]any
-	Logging      LoggingConfig
+	Plugin             string
+	Conference         ConferenceConfig
+	Network            NetworkConfig
+	PluginConfig       map[string]any
+	Logging            LoggingConfig
+	CongestionControl  CongestionControlConfig
 }
 
 type YAMLSpecConfig struct {
-	Plugin       *string               `yaml:"plugin,omitempty"`
-	Conference   *YAMLConferenceConfig `yaml:"conference,omitempty"`
-	Network      *YAMLNetworkConfig    `yaml:"network,omitempty"`
-	PluginConfig map[string]any        `yaml:"pluginConfig,omitempty"`
-	Logging      *YAMLLoggingConfig    `yaml:"logging,omitempty"`
+	Plugin             *string                       `yaml:"plugin,omitempty"`
+	Conference         *YAMLConferenceConfig         `yaml:"conference,omitempty"`
+	Network            *YAMLNetworkConfig            `yaml:"network,omitempty"`
+	PluginConfig       map[string]any                `yaml:"pluginConfig,omitempty"`
+	Logging            *YAMLLoggingConfig            `yaml:"logging,omitempty"`
+	CongestionControl  *YAMLCongestionControlConfig  `yaml:"congestionControl,omitempty"`
+}
+
+// CongestionControlConfig describes which CC algorithm senders should use.
+type CongestionControlConfig struct {
+	// Algorithm is one of "remb", "gcc", or "none". Default is "remb".
+	Algorithm string
+}
+
+type YAMLCongestionControlConfig struct {
+	Algorithm *string `yaml:"algorithm,omitempty"`
+}
+
+func (yc *YAMLCongestionControlConfig) validate() error {
+	if yc.Algorithm == nil {
+		return nil // will default to "remb"
+	}
+	if !slices.Contains(supportedCCAlgorithms, *yc.Algorithm) {
+		return ErrInvalidCCAlgorithm
+	}
+	return nil
+}
+
+func (yc *YAMLCongestionControlConfig) mustConvert() CongestionControlConfig {
+	if yc.Algorithm == nil {
+		return CongestionControlConfig{Algorithm: "none"}
+	}
+	return CongestionControlConfig{Algorithm: *yc.Algorithm}
 }
 
 func (yc *YAMLSpecConfig) validate() error {
@@ -190,6 +223,7 @@ func (yc *YAMLSpecConfig) validate() error {
 		conferenceErr error
 		networkErr    error
 		loggingErr    error
+		ccErr         error
 	)
 	if yc.Plugin == nil {
 		// return early for crucial mistake
@@ -223,6 +257,12 @@ func (yc *YAMLSpecConfig) validate() error {
 	if loggingErr != nil {
 		errs = append(errs, loggingErr)
 	}
+	if yc.CongestionControl != nil {
+		ccErr = yc.CongestionControl.validate()
+	}
+	if ccErr != nil {
+		errs = append(errs, ccErr)
+	}
 	return errors.Join(errs...)
 }
 
@@ -238,6 +278,11 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 		}
 	}
 	c.Logging = yc.Logging.mustConvert()
+	if yc.CongestionControl != nil {
+		c.CongestionControl = yc.CongestionControl.mustConvert()
+	} else {
+		c.CongestionControl = CongestionControlConfig{Algorithm: "none"}
+	}
 	return c
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/pion/dtls/v2"
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -34,9 +35,15 @@ func newPionAPI(clientIP string) (*webrtc.API, error) {
 		PayloadType: 98,
 	}, webrtc.RTPCodecTypeVideo)
 
+	ir := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(m, ir); err != nil {
+		return nil, fmt.Errorf("RegisterDefaultInterceptors: %w", err)
+	}
+
 	return webrtc.NewAPI(
 		webrtc.WithSettingEngine(se),
 		webrtc.WithMediaEngine(m),
+		webrtc.WithInterceptorRegistry(ir),
 	), nil
 }
 

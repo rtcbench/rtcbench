@@ -4,19 +4,23 @@ import (
 	"os"
 	"time"
 
+	"call.zip/pkg/cc"
+	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
 	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
-
-	"github.com/pion/webrtc/v3"
 )
 
 // LoopIntoTrack continuously re-reads the IVF files in paths (cycling in order)
 // and writes VP9 frames into track, pacing by the IVF timestamps.
 // It runs forever; call from a goroutine.
+//
+// If ctrl is non-nil, the sleep between frames is scaled up when the controller's
+// TargetBitrate is below the frame's natural bitrate, reducing the effective send rate.
 func LoopIntoTrack(
 	logf func(string, ...any),
 	track *webrtc.TrackLocalStaticSample,
 	paths []string,
+	ctrl cc.Controller,
 ) {
 	defaultDur := 33 * time.Millisecond
 	idx := 0
@@ -62,12 +66,23 @@ func LoopIntoTrack(
 			ts := fh.Timestamp
 			prevTS = &ts
 
+			// Scale sleep up if the CC controller has set a target below the natural rate.
+			sleep := dur
+			if ctrl != nil {
+				if target := ctrl.TargetBitrate(); target > 0 {
+					naturalBps := uint64(len(frame)) * 8 * uint64(time.Second) / uint64(dur)
+					if target < naturalBps {
+						sleep = time.Duration(float64(dur) * float64(naturalBps) / float64(target))
+					}
+				}
+			}
+
 			if err := track.WriteSample(media.Sample{Data: frame, Duration: dur}); err != nil {
 				logf("[ivf] WriteSample: %v", err)
 				_ = f.Close()
 				return
 			}
-			time.Sleep(dur)
+			time.Sleep(sleep)
 		}
 
 		_ = f.Close()

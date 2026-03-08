@@ -70,6 +70,17 @@ func newViewer(
 }
 
 func (v *Viewer) run(done <-chan struct{}) error {
+	// Drain receiver RTCP (Sender Reports from the remote) to prevent buffer
+	// overflow and keep the interceptor pipeline healthy. The interceptor
+	// automatically generates and sends TWCC feedback back to the server.
+	go func() {
+		for {
+			if _, _, err := v.receiver.ReadRTCP(); err != nil {
+				return
+			}
+		}
+	}()
+
 	var (
 		pkt rtp.Packet
 		buf = make([]byte, v.config.TrackBufferSize)

@@ -10,7 +10,9 @@ import (
 	"sync"
 
 	"call.zip"
+	"call.zip/pkg/cc"
 	"call.zip/pkg/ivf"
+	pkgrtcp "call.zip/pkg/rtcp"
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9_stats"
 	janus "call.zip/plugin/janus/internal"
@@ -35,6 +37,7 @@ type Plugin struct {
 	client        *janus.Client
 	serverIP      string
 	clientIP      string
+	ccAlgorithm   string
 	ivfPaths      []string
 	viewerManager *viewer.Manager
 	publisher     *vp9_stats.Publisher
@@ -64,6 +67,7 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 
 	p.serverIP = config.Spec.Network.ServerIP
 	p.clientIP = config.Spec.Network.ClientIP
+	p.ccAlgorithm = config.Spec.CongestionControl.Algorithm
 
 	// Validate that the conference name contains a parseable integer for the Janus room ID.
 	if _, err := roomIDFromName(config.Spec.Conference.Name); err != nil {
@@ -208,7 +212,14 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 		return fmt.Errorf("%w: AddICECandidate: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	go ivf.LoopIntoTrack(logf, track, p.ivfPaths)
+	ctrl, err := cc.New(p.ccAlgorithm)
+	if err != nil {
+		return fmt.Errorf("%w: cc: %v", call.ErrCannotJoinRoom, err)
+	}
+	go ivf.LoopIntoTrack(logf, track, p.ivfPaths, ctrl)
+	for _, s := range pc.GetSenders() {
+		go pkgrtcp.DrainSender(logf, s, ctrl)
+	}
 
 	select {
 	case <-ctx.Done():

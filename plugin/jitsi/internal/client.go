@@ -11,10 +11,11 @@ import (
 )
 
 type Client struct {
-	botManager *viewer.Manager
-	publisher  *vp9_stats.Publisher
-	serverIP   string
-	clientIP   string
+	botManager  *viewer.Manager
+	publisher   *vp9_stats.Publisher
+	serverIP    string
+	clientIP    string
+	ccAlgorithm string
 }
 
 func NewClient(cfg *call.Config, inputChanSize int64) *Client {
@@ -30,10 +31,11 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 	go publisher.Run()
 
 	return &Client{
-		botManager: botManager,
-		publisher:  publisher,
-		serverIP:   cfg.Spec.Network.ServerIP,
-		clientIP:   cfg.Spec.Network.ClientIP,
+		botManager:  botManager,
+		publisher:   publisher,
+		serverIP:    cfg.Spec.Network.ServerIP,
+		clientIP:    cfg.Spec.Network.ClientIP,
+		ccAlgorithm: cfg.Spec.CongestionControl.Algorithm,
 	}
 }
 

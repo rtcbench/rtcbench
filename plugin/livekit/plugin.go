@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"call.zip"
+	"call.zip/pkg/cc"
 	"call.zip/pkg/ivf"
+	pkgrtcp "call.zip/pkg/rtcp"
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9_stats"
 	lk "call.zip/plugin/livekit/internal"
@@ -41,6 +43,7 @@ type Plugin struct {
 	apiSecret     string
 	allowInsecure bool
 	clientIP      string
+	ccAlgorithm   string
 	ivfPaths      []string
 	viewerManager *viewer.Manager
 	publisher     *vp9_stats.Publisher
@@ -60,6 +63,7 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	}
 
 	p.clientIP = config.Spec.Network.ClientIP
+	p.ccAlgorithm = config.Spec.CongestionControl.Algorithm
 
 	if config.Spec.Conference.Cameras.PerRoom > 0 {
 		paths, err := ivf.LoadCameraPaths(config.Spec.Conference.Cameras.Directory)
@@ -250,7 +254,14 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 		return ctx.Err()
 	}
 
-	go ivf.LoopIntoTrack(logf, track, p.ivfPaths)
+	ctrl, err := cc.New(p.ccAlgorithm)
+	if err != nil {
+		return fmt.Errorf("%w: cc: %v", call.ErrCannotJoinRoom, err)
+	}
+	go ivf.LoopIntoTrack(logf, track, p.ivfPaths, ctrl)
+	for _, s := range pc.GetSenders() {
+		go pkgrtcp.DrainSender(logf, s, ctrl)
+	}
 	logf("streaming IVF into room")
 
 	select {

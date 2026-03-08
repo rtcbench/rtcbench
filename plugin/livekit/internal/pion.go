@@ -6,6 +6,7 @@ import (
 
 	"github.com/livekit/protocol/livekit"
 	"github.com/pion/dtls/v2"
+	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -36,9 +37,15 @@ func newPionAPI(clientIP string) (*webrtc.API, error) {
 		return nil, fmt.Errorf("RegisterCodec VP9: %w", err)
 	}
 
+	ir := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(m, ir); err != nil {
+		return nil, fmt.Errorf("RegisterDefaultInterceptors: %w", err)
+	}
+
 	return webrtc.NewAPI(
 		webrtc.WithSettingEngine(se),
 		webrtc.WithMediaEngine(m),
+		webrtc.WithInterceptorRegistry(ir),
 	), nil
 }
 
