@@ -1,4 +1,4 @@
-package bot
+package viewer
 
 import (
 	"log"
@@ -30,11 +30,10 @@ func (m *Manager) SpawnViewer(
 	track *webrtc.TrackRemote,
 	receiver *webrtc.RTPReceiver,
 	nickname string,
-	config *ViewerConfig,
+	config *Config,
 	ivf *vp9.IvfSegmenter,
 ) (*Viewer, error) {
 	v, err := newViewer(track, receiver, m.input, nickname, config, ivf)
-
 	if err != nil {
 		return nil, err
 	}
