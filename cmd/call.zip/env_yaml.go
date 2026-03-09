@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +22,8 @@ func (e *MissingEnvError) Error() string {
 	return "missing required environment variables:\n  - " + strings.Join(cp, "\n  - ")
 }
 
+// RenderEnvYAML performs $env substitution first, then interpolates any _-prefixed keys.
+// Returns error if required env or interpolated config fields are missing.
 func RenderEnvYAML(in []byte) ([]byte, error) {
 	var v any
 	if err := yaml.Unmarshal(in, &v); err != nil {
@@ -28,10 +32,18 @@ func RenderEnvYAML(in []byte) ([]byte, error) {
 
 	var missing []string
 	v = renderEnv(v, "", &missing)
-
 	if len(missing) > 0 {
 		return nil, &MissingEnvError{Missing: missing}
 	}
+
+	// Interpolate _-prefixed keys
+	v, err := renderInterpolation(v, v)
+	if err != nil {
+		return nil, err
+	}
+
+	// Strip leading underscores from keys
+	v = stripUnderscoreKeys(v)
 
 	out, err := yaml.Marshal(v)
 	if err != nil {
@@ -49,8 +61,6 @@ func renderEnv(v any, path string, missing *[]string) any {
 			if path != "" {
 				childPath = path + "." + keyStr
 			}
-
-			t[i].Key = renderKeyIfNeeded(t[i].Key, childPath, missing)
 			t[i].Value = renderEnv(t[i].Value, childPath, missing)
 		}
 		return t
@@ -66,32 +76,13 @@ func renderEnv(v any, path string, missing *[]string) any {
 		return t
 
 	case map[any]any:
-		type keyChange struct {
-			old any
-			new any
-			val any
-		}
-		var changes []keyChange
-
 		for k, vv := range t {
 			keyStr := fmt.Sprint(k)
 			childPath := keyStr
 			if path != "" {
 				childPath = path + "." + keyStr
 			}
-
-			newV := renderEnv(vv, childPath, missing)
-			t[k] = newV
-
-			newK, changed := renderKeyIfNeededWithChanged(k, childPath, missing)
-			if changed {
-				changes = append(changes, keyChange{old: k, new: newK, val: newV})
-			}
-		}
-
-		for _, c := range changes {
-			delete(t, c.old)
-			t[c.new] = c.val
+			t[k] = renderEnv(vv, childPath, missing)
 		}
 		return t
 
@@ -122,38 +113,213 @@ func renderEnv(v any, path string, missing *[]string) any {
 	}
 }
 
-func renderKeyIfNeeded(k any, path string, missing *[]string) any {
-	newK, _ := renderKeyIfNeededWithChanged(k, path, missing)
-	return newK
-}
-
-func renderKeyIfNeededWithChanged(k any, path string, missing *[]string) (any, bool) {
-	ks, ok := k.(string)
-	if !ok {
-		return k, false
-	}
-
-	ok2, varName, def := parseEnvRef(ks)
-	if !ok2 {
-		return k, false
-	}
-
-	val, found := os.LookupEnv(varName)
-	if !found {
-		if def != nil {
-			return coerceScalar(*def), true
+func renderInterpolation(node, root any) (any, error) {
+	switch t := node.(type) {
+	case yaml.MapSlice:
+		for i := range t {
+			keyStr := fmt.Sprint(t[i].Key)
+			if strings.HasPrefix(keyStr, "_") {
+				if s, ok := t[i].Value.(string); ok {
+					s2, err := interpolateString(s, root)
+					if err != nil {
+						return nil, fmt.Errorf("interpolation error for key %s: %w", keyStr, err)
+					}
+					t[i].Value = s2
+				}
+			}
+			var err error
+			t[i].Value, err = renderInterpolation(t[i].Value, root)
+			if err != nil {
+				return nil, err
+			}
 		}
-		*missing = append(*missing, fmt.Sprintf("%s(key) -> %s", path, varName))
-		return k, false
+		return t, nil
+	case map[string]any:
+		for k, v := range t {
+			if strings.HasPrefix(k, "_") {
+				if s, ok := v.(string); ok {
+					s2, err := interpolateString(s, root)
+					if err != nil {
+						return nil, fmt.Errorf("interpolation error for key %s: %w", k, err)
+					}
+					t[k] = s2
+				}
+			}
+			var err error
+			t[k], err = renderInterpolation(t[k], root)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return t, nil
+	case map[any]any:
+		for k, v := range t {
+			ks := fmt.Sprint(k)
+			if strings.HasPrefix(ks, "_") {
+				if s, ok := v.(string); ok {
+					s2, err := interpolateString(s, root)
+					if err != nil {
+						return nil, fmt.Errorf("interpolation error for key %s: %w", ks, err)
+					}
+					t[k] = s2
+				}
+			}
+			var err error
+			t[k], err = renderInterpolation(t[k], root)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return t, nil
+	case []any:
+		for i := range t {
+			var err error
+			t[i], err = renderInterpolation(t[i], root)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return t, nil
+	default:
+		return node, nil
 	}
-
-	return coerceScalar(val), true
 }
 
-// Syntax:
-//
-//	$env:VAR_NAME
-//	$env:VAR_NAME=default value
+var interpolationRegex = regexp.MustCompile(`\{\{\s*([^{}]+)\s*\}\}`)
+
+func interpolateString(s string, root any) (string, error) {
+	var errs []error
+	replacedStr := interpolationRegex.ReplaceAllStringFunc(s, func(match string) string {
+		content := interpolationRegex.FindStringSubmatch(match)[1]
+		content = strings.TrimSpace(content)
+
+		if strings.HasPrefix(content, "env:") {
+			envVar := strings.TrimSpace(strings.TrimPrefix(content, "env:"))
+			val, ok := os.LookupEnv(envVar)
+			if !ok || val == "" {
+				errs = append(errs, fmt.Errorf("missing environment variable for interpolation: %s", envVar))
+				return ""
+			}
+			return coerceToString(val)
+		}
+
+		val, err := lookupPath(root, content)
+		if err != nil || val == "" {
+			errs = append(errs, fmt.Errorf("missing config path for interpolation: %s", content))
+			return ""
+		}
+		return coerceToString(val)
+	})
+	return replacedStr, errors.Join(errs...)
+}
+
+func stripUnderscoreKeys(node any) any {
+	switch t := node.(type) {
+	case yaml.MapSlice:
+		for i := range t {
+			keyStr := fmt.Sprint(t[i].Key)
+			t[i].Value = stripUnderscoreKeys(t[i].Value)
+			if strings.HasPrefix(keyStr, "_") {
+				t[i].Key = keyStr[1:]
+			}
+		}
+		return t
+	case map[string]any:
+		for k, v := range t {
+			t[k] = stripUnderscoreKeys(v)
+			if strings.HasPrefix(k, "_") {
+				newK := k[1:]
+				t[newK] = t[k]
+				delete(t, k)
+			}
+		}
+		return t
+	case map[any]any:
+		for k, v := range t {
+			t[k] = stripUnderscoreKeys(v)
+			ks := fmt.Sprint(k)
+			if strings.HasPrefix(ks, "_") {
+				newK := ks[1:]
+				t[newK] = t[k]
+				delete(t, k)
+			}
+		}
+		return t
+	case []any:
+		for i := range t {
+			t[i] = stripUnderscoreKeys(t[i])
+		}
+		return t
+	default:
+		return node
+	}
+}
+
+func coerceToString(val any) string {
+	if val == nil {
+		return ""
+	}
+	switch v := val.(type) {
+	case string:
+		return v
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%d", v)
+	case float32, float64:
+		return fmt.Sprintf("%v", v)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func lookupPath(node any, path string) (any, error) {
+	parts := strings.Split(path, ".")
+	curr := node
+
+	for _, part := range parts {
+		switch t := curr.(type) {
+		case yaml.MapSlice:
+			found := false
+			for _, item := range t {
+				if fmt.Sprint(item.Key) == part {
+					curr = item.Value
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("path not found: %s", path)
+			}
+		case map[string]any:
+			if v, ok := t[part]; ok {
+				curr = v
+			} else {
+				return nil, fmt.Errorf("path not found: %s", path)
+			}
+		case map[any]any:
+			found := false
+			for k, v := range t {
+				if fmt.Sprint(k) == part {
+					curr = v
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("path not found: %s", path)
+			}
+		default:
+			return nil, fmt.Errorf("path not found: %s", path)
+		}
+	}
+
+	return curr, nil
+}
+
 func parseEnvRef(s string) (ok bool, varName string, def *string) {
 	const prefix = "$env:"
 	if !strings.HasPrefix(s, prefix) {
@@ -167,7 +333,7 @@ func parseEnvRef(s string) (ok bool, varName string, def *string) {
 
 	if i := strings.Index(rest, "="); i >= 0 {
 		vn := strings.TrimSpace(rest[:i])
-		dv := rest[i+1:] // preserve spaces in default; coerceScalar trims as needed
+		dv := rest[i+1:]
 		if vn == "" {
 			return false, "", nil
 		}
