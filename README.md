@@ -9,7 +9,7 @@ Launch 250 viewer bots with:
 
 ```bash
 make
-./call.zip example-config.yml
+./call.zip example/jitsi/250-viewer-bots.yml
 ```
 
 [Go 1.24 or newer](https://go.dev) is required.
