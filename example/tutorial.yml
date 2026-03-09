@@ -1,0 +1,113 @@
+# This file "example/tutorial.yml" is a guide for writing your own Call.ZIP config file.
+# It is not meant to be executable, but you can refer to other examples for working versions.
+#
+# The top-level structure is similar to a Kubernetes manifest with `apiVersion`, `kind`,
+# `metadata`, and `spec`. Most edits will occur under `spec`.
+#
+# Key changes to standard YAML:
+#
+#   1. Environment variables
+#   ========================
+#      Use "$env:VAR_NAME=default" to inject environment variables.
+#      The "=default" part is optional if you don’t want a default value.
+#      Missing required environment variables without a default will cause an error.
+#      Environment variables are always substituted first, before any interpolation.
+#      Example: to set a server IP used in plugin URLs, do:
+#        serverIP: $env:SERVER_IP=10.99.0.209
+#      This ensures that plugin config strings like `_boshURL` can reference the server IP correctly.
+#
+#   2. Interpolation for plugin or other dynamic settings
+#   =====================================================
+#      Only fields prefixed with an underscore `_` support interpolation.
+#      - Use `{{my.config.field}}` to reference another field in the config.
+#      - Use `{{env:VAR_NAME}}` to reference an existing environment variable.
+#      Missing references (config paths or env vars) will produce an error.
+#      This is useful for dynamically generating URLs, server IPs, or other computed values.
+#      For more advanced substitutions, we recommend generating the YAML file with your own script.
+#
+#   3. Booleans
+#   ===========
+#      Only use the literals "true" or "false". Do not use 0 or 1.
+
+apiVersion: call.zip/v1
+kind: VideoCallStressTest
+
+metadata:
+  # You can set a config file name that will show up in the logs.
+  name: $env:CONFIG_NAME=tutorial-config-1
+
+spec:
+  # The plugin ID specifies which video conferencing platform to target (e.g. "jitsi" or "janus").
+  plugin: $env:PLUGIN_NAME=default-plugin-id-goes-here
+
+  # The "conference" holds cross-platform config related to joining a video conference.
+  conference:
+    # Name of the conference room to join. This is mostly cross-platform, but Janus will just parse the first number it
+    # sees, which is "1234" as Janus only supports numeric meeting room IDs.
+    name: room-1234
+
+    # How many participants there are per conference room. This includes video senders (cameras).
+    viewers: 1
+
+    # There can be multiple conference rooms joined.
+    # If you set "totalRooms" > 1, each room will be suffixed with "_0", "_1", "_2" and so on.
+    totalRooms: 1
+
+    # How many video senders (cameras) there are per conference room.
+    cameras:
+      perRoom: 0
+      fileType: ivf
+      videoCodec: vp9
+      directory: '~/vp9_ivf_videos'
+
+    # Specify the behavior upon each bot joining the server (global across all conference rooms).
+    joinPolicy:
+      # How many in-progress joins there can be (i.e. the bot is still signaling and has not connected to WebRTC yet).
+      concurrency: 10
+
+      # Should each join fail, we will infinitely retry until it connects (sleeping for max of joinStartSpacing or 1s).
+      viewersAlwaysRetry: true
+
+      # Gap between starting the next join.
+      joinStartSpacing: 2s
+
+    # We can record videos to IVF files. Note that these files may be large (~50MB), so please wait for the file to be
+    # done. This may take a few minutes per file. We recommend encoding your own videos for the sender via ffmpeg,
+    # but this feature can be used to later re-stream or offline analyze the video that was streamed.
+    recording:
+      enabled: false
+      directory: './vp9_ivf_recordings'
+
+  # General network configuration goes here.
+  network:
+    serverIP: $env:SERVER_IP
+    # You can optionally set a client IP address, but otherwise we will pick
+    # the client IP that is used by default to make an outbound connection
+    # based on the set server IP.
+    # -
+    # clientIP: 10.99.0.2
+
+  # Each plugin may have some ad-hoc settings that would be configured here with optional string interpolation.
+  pluginConfig:
+    jitsi:
+      _boshURL: 'https://{{spec.network.serverIP}}/http-bind'
+      _domain: '{{spec.network.serverIP}}'
+    janus:
+      _serverRoot: 'https://{{spec.network.serverIP}}/janus'
+      allowInsecureHttps: true
+
+  # Configure how logs are written here.
+  logging:
+    console: true
+    directory: '/var/log/call-zip'
+    streams:
+      - name: general
+        level: info
+      - name: signaling
+        level: debug
+      - name: media
+        level: info
+      - name: packets
+        level: info
+      - name: video_stats
+        level: info
