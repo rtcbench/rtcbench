@@ -192,6 +192,12 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	if err != nil {
 		return fmt.Errorf("%w: publish: %v", call.ErrCannotJoinRoom, err)
 	}
+	if configured.PluginData != nil {
+		if errMsg, ok := configured.PluginData.Data["error"].(string); ok {
+			errCode, _ := configured.PluginData.Data["error_code"].(float64)
+			return fmt.Errorf("%w: publish: janus error %d: %s", call.ErrCannotJoinRoom, int(errCode), errMsg)
+		}
+	}
 	if configured.JSEP == nil {
 		return fmt.Errorf("%w: publish response missing JSEP answer", call.ErrCannotJoinRoom)
 	}

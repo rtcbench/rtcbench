@@ -46,12 +46,21 @@ func (s *Session) Send(handleID int64, body map[string]any, jsep *JSEP) (*JanusM
 	s.pending[txn] = ch
 	s.mu.Unlock()
 
-	_, err := s.client.SendMessage(s.sessionID, handleID, body, jsep, txn)
+	resp, err := s.client.SendMessage(s.sessionID, handleID, body, jsep, txn)
 	if err != nil {
 		s.mu.Lock()
 		delete(s.pending, txn)
 		s.mu.Unlock()
 		return nil, err
+	}
+
+	// Janus can respond synchronously (not an "ack") for some operations.
+	// If so, use that response directly rather than waiting for long-poll.
+	if resp != nil && resp.Janus != "ack" {
+		s.mu.Lock()
+		delete(s.pending, txn)
+		s.mu.Unlock()
+		return resp, nil
 	}
 
 	select {
