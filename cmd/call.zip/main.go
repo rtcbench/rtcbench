@@ -14,6 +14,7 @@ import (
 	"call.zip/plugin/janus"
 	"call.zip/plugin/jitsi"
 	"github.com/goccy/go-yaml"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -29,6 +30,8 @@ func main() {
 	if len(os.Args) != 2 {
 		log.Fatalf("Usage: %s config.yml", os.Args[0])
 	}
+
+	_ = godotenv.Load()
 
 	cfg, err = loadYAMLConfig(os.Args[1])
 	if err != nil {
