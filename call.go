@@ -36,8 +36,8 @@ type PluginFactory func() Plugin
 type PluginRegistry map[string]PluginFactory
 
 type joinRoomConfig struct {
-	roomName   string
-	viewerBots int
+	roomName     string
+	usersPerRoom int
 
 	signaling signalingConfig
 }
@@ -117,7 +117,7 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 			fmtRoomName += "_" + strconv.Itoa(i)
 		}
 		go func() {
-			log.Printf("[cli-main] joining room %q (%d viewers)", fmtRoomName, c.config.Spec.Conference.Viewers)
+			log.Printf("[cli-main] joining room %q (%d users)", fmtRoomName, c.config.Spec.Conference.UsersPerRoom)
 			c.joinRoomByName(ctx, fmtRoomName)
 			log.Printf("[cli-main] finished joining room %q", fmtRoomName)
 			wg.Done()
@@ -128,19 +128,19 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 }
 
 func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
-	if c.config.Spec.Conference.JoinPolicy.ViewersAlwaysRetry {
-		nViewersRemaining := c.config.Spec.Conference.Viewers
+	if c.config.Spec.Conference.JoinPolicy.AlwaysRetryFailedJoins {
+		nUsersRemaining := c.config.Spec.Conference.UsersPerRoom - 1
 		var errs []wrappedSignalingError
 		for {
 			errs = c.joinRoom(ctx, joinRoomConfig{
-				roomName:   roomName,
-				viewerBots: nViewersRemaining,
+				roomName:     roomName,
+				usersPerRoom: nUsersRemaining,
 				signaling: signalingConfig{
 					concurrency: c.config.Spec.Conference.JoinPolicy.Concurrency,
 				},
 			})
 			if len(errs) == 0 {
-				log.Println("[viewers-always-retry] Finished joining room", roomName)
+				log.Println("[AlwaysRetryFailedJoins] Finished joining room", roomName)
 				break
 			}
 
@@ -149,18 +149,18 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 				retryDelay = 1 * time.Second
 			}
 
-			log.Printf("[viewers-always-retry] %d errors occurred, will retry in %s\n", len(errs), retryDelay.String())
+			log.Printf("[AlwaysRetryFailedJoins] %d errors occurred, will retry in %s\n", len(errs), retryDelay.String())
 			for _, e := range errs {
-				log.Printf("[viewers-always-retry] error: %v", e.error)
+				log.Printf("[AlwaysRetryFailedJoins] error: %v", e.error)
 			}
-			nViewersRemaining = len(errs)
+			nUsersRemaining = len(errs)
 
 			time.Sleep(retryDelay)
 		}
 	} else {
 		if errs := c.joinRoom(ctx, joinRoomConfig{
-			roomName:   roomName,
-			viewerBots: c.config.Spec.Conference.Viewers,
+			roomName:     roomName,
+			usersPerRoom: c.config.Spec.Conference.UsersPerRoom,
 			signaling: signalingConfig{
 				concurrency: c.config.Spec.Conference.JoinPolicy.Concurrency,
 			},
@@ -174,7 +174,7 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 }
 
 func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSignalingError {
-	size := cfg.viewerBots
+	size := cfg.usersPerRoom
 	if size < 1 {
 		return nil
 	}
@@ -186,7 +186,7 @@ func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSign
 		spacing := c.config.Spec.Conference.JoinPolicy.JoinStartSpacing
 		senders := c.config.Spec.Conference.Cameras.PerRoom
 
-		for i := 0; i < cfg.viewerBots; i++ {
+		for i := 0; i < cfg.usersPerRoom; i++ {
 			if i > 0 && spacing > 0 {
 				time.Sleep(spacing)
 			}
