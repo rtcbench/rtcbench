@@ -1,0 +1,42 @@
+apiVersion: call.zip/v1
+kind: VideoCallStressTest
+metadata:
+  name: 1-camera-5-viewers
+spec:
+  plugin: $env:PLUGIN_ID
+  conference:
+    name: $env:ROOM_ID
+    usersPerRoom: 6
+    totalRooms: 1
+    cameras:
+      perRoom: 1
+      fileType: ivf
+      videoCodec: vp9
+      directory: '/Users/m1-03/vp9_ivf_videos'
+    joinPolicy:
+      concurrency: 10
+      alwaysRetryFailedJoins: true
+      joinStartSpacing: 2s
+  network:
+    serverIP: $env:SERVER_IP
+  pluginConfig:
+    jitsi:
+      _boshURL: 'https://{{spec.network.serverIP}}/http-bind'
+      _domain: '{{spec.network.serverIP}}'
+    janus:
+      _serverRoot: 'https://{{spec.network.serverIP}}/janus'
+      allowInsecureHttps: true
+  logging:
+    console: true
+    directory: '/var/log/call-zip'
+    streams:
+      - name: general
+        level: info
+      - name: signaling
+        level: debug
+      - name: media
+        level: info
+      - name: packets
+        level: info
+      - name: video_stats
+        level: info
