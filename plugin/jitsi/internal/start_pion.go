@@ -120,7 +120,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 				SDPFmtpLine: "profile-id=0",
 			},
 			"video",
-			"ivf",
+			state.Nickname, // unique per sender; avoids "MSID already used" rejection from Jicofo
 		)
 		if err != nil {
 			return nil, fmt.Errorf("NewTrackLocalStaticSample failed: %w", err)
