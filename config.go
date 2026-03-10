@@ -64,8 +64,8 @@ var (
 	ErrMissingLogStreamLevel = errors.New("missing spec.logging.streams[#].level string")
 	ErrInvalidLogStreamLevel = errors.New("invalid spec.logging.streams[#].level string, must match " + logLevelRegex.String())
 
-	// nameRegex starts with a letter, then has letters numbers underscores and dashes, and ends with a letter or number
-	nameRegex = regexp.MustCompile("^[a-zA-Z][a-zA-Z0-9_-]+[a-zA-Z0-9]$")
+	// nameRegex starts with an alphanumeric, then has letters numbers _'s and -'s, and ends with an alphanumeric
+	nameRegex = regexp.MustCompile("^[a-zA-Z0-9][a-zA-Z0-9_-]+[a-zA-Z0-9]$")
 
 	// logLevelRegex must be one of the following lowercase levels
 	logLevelRegex = regexp.MustCompile("^(info|debug|error)$")
