@@ -66,9 +66,9 @@ func ExtractAttrInTag(xml, tagName, attr string) string {
 	return ExtractAttr(tagContent, attr)
 }
 
-// ExtractMultipleTags returns all matches for <tagName>...</tagName>
+// ExtractMultipleTags returns all matches for <tagName>...</tagName> or self-closing <tagName ... />.
 func ExtractMultipleTags(xml, tag string) []string {
-	re := regexp.MustCompile(fmt.Sprintf(`<%s[^>]*>.*?</%s>`, tag, tag))
+	re := regexp.MustCompile(fmt.Sprintf(`(?s)<%s(?:[^>]*/>|[^>]*>.*?</%s>)`, tag, tag))
 	return re.FindAllString(xml, -1)
 }
 
