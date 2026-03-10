@@ -56,6 +56,12 @@ type ConnectionState struct {
 	RemoteSDP string // Raw Jingle offer
 	LocalSDP  string // Generated SDP
 
+	// PendingBOSHResponse holds the raw response from the most recent BOSH
+	// request (typically Step08's presence response) so that Step09 can
+	// inspect it for stanzas (e.g. disco#info) that arrived before polling
+	// began, rather than discarding them.
+	PendingBOSHResponse string
+
 	// === Optional ===
 	ColibriWebSocketURL string // For optional low-level stats
 
