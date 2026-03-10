@@ -183,9 +183,11 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	// Keep this if you’ve actually observed "actpass" leaking into an answer in your environment.
 	answer.SDP = strings.Replace(answer.SDP, "a=setup:actpass", "a=setup:active", 1)
 
+	gatherComplete := webrtc.GatheringCompletePromise(pc)
 	if err := pc.SetLocalDescription(answer); err != nil {
 		return nil, fmt.Errorf("SetLocalDescription failed: %w", err)
 	}
+	<-gatherComplete
 
 	state.PionAOF.LogPrintf("[after SetLocalDescription] Generated SDP Answer:\n%s", pc.LocalDescription().SDP)
 
