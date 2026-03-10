@@ -1,0 +1,29 @@
+general: {
+	configs_folder = "/opt/janus/etc/janus"
+	plugins_folder = "/opt/janus/lib/janus/plugins"
+	transports_folder = "/opt/janus/lib/janus/transports"
+	events_folder = "/opt/janus/lib/janus/events"
+	loggers_folder = "/opt/janus/lib/janus/loggers"
+
+	log_to_stdout = true
+	debug_level = 4
+
+	server_name = "callzip-janus"
+	session_timeout = 60
+	candidates_timeout = 45
+	no_webrtc_encryption = false
+	ignore_unreachable_ice_server = true
+}
+
+media: {
+	# Must include 10000 - that's the port used by AddStaticCandidate in the client.
+	rtp_port_range = "10000-10200"
+	dtls_timeout = 500
+}
+
+nat: {
+	# ICE lite: Janus responds to binding requests rather than initiating them.
+	# Works well with Pion (full-ICE) clients in a Docker network.
+	ice_lite = true
+	ignore_mdns = true
+}

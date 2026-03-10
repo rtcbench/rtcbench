@@ -1,0 +1,139 @@
+package metricsserver
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"call.zip/pkg/vp9_stats"
+)
+
+const activeViewerWindow = 30 * time.Second
+
+type viewerState struct {
+	Nickname         string
+	SmoothBitrateBps float32
+	SmoothFPS        float32
+	SampleCount      int64
+	LastSeenAt       time.Time
+}
+
+// Server is a lightweight HTTP metrics server that tracks per-viewer stats.
+type Server struct {
+	port    int
+	mu      sync.RWMutex
+	viewers map[string]*viewerState
+}
+
+// New creates a Server that will listen on the given port.
+func New(port int) *Server {
+	return &Server{
+		port:    port,
+		viewers: make(map[string]*viewerState),
+	}
+}
+
+// Subscriber returns a func compatible with vp9_stats.Publisher.AddSubscriber.
+func (s *Server) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySample) {
+	return func(_ vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		vs, ok := s.viewers[sample.Nickname]
+		if !ok {
+			vs = &viewerState{Nickname: sample.Nickname}
+			s.viewers[sample.Nickname] = vs
+		}
+		vs.SmoothBitrateBps = sample.SmoothBitrate
+		vs.SmoothFPS = sample.SmoothFPS
+		vs.SampleCount++
+		vs.LastSeenAt = time.Now()
+	}
+}
+
+// ListenAndServe starts the HTTP server and blocks until ctx is cancelled.
+func (s *Server) ListenAndServe(ctx context.Context) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", s.handleHealth)
+
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", s.port),
+		Handler: mux,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
+}
+
+type healthResponse struct {
+	Status               string         `json:"status"`
+	ViewersTotal         int            `json:"viewers_total"`
+	ViewersActive        int            `json:"viewers_active"`
+	AggregateBitrateMbps float32        `json:"aggregate_bitrate_mbps"`
+	Viewers              []viewerReport `json:"viewers"`
+}
+
+type viewerReport struct {
+	Nickname        string  `json:"nickname"`
+	SmoothBitrateBps float32 `json:"smooth_bitrate_bps"`
+	SmoothFPS       float32 `json:"smooth_fps"`
+	SampleCount     int64   `json:"sample_count"`
+	LastSeenAgoMs   int64   `json:"last_seen_ago_ms"`
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	reports := make([]viewerReport, 0, len(s.viewers))
+	var totalBitrate float32
+	activeCount := 0
+
+	for _, vs := range s.viewers {
+		agoMs := now.Sub(vs.LastSeenAt).Milliseconds()
+		reports = append(reports, viewerReport{
+			Nickname:         vs.Nickname,
+			SmoothBitrateBps: vs.SmoothBitrateBps,
+			SmoothFPS:        vs.SmoothFPS,
+			SampleCount:      vs.SampleCount,
+			LastSeenAgoMs:    agoMs,
+		})
+		if now.Sub(vs.LastSeenAt) <= activeViewerWindow {
+			activeCount++
+			totalBitrate += vs.SmoothBitrateBps
+		}
+	}
+
+	status := "no_data"
+	if activeCount > 0 && totalBitrate > 0 {
+		status = "ok"
+	}
+
+	resp := healthResponse{
+		Status:               status,
+		ViewersTotal:         len(s.viewers),
+		ViewersActive:        activeCount,
+		AggregateBitrateMbps: totalBitrate / 1_000_000,
+		Viewers:              reports,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

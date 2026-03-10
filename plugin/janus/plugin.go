@@ -85,6 +85,9 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
 		log.Printf("[sub-data-v1] bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
+	for _, consumer := range config.StatsConsumers {
+		p.publisher.AddSubscriber(consumer)
+	}
 	go p.publisher.Run()
 
 	return nil

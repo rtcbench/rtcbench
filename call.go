@@ -129,7 +129,7 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 
 func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 	if c.config.Spec.Conference.JoinPolicy.AlwaysRetryFailedJoins {
-		nUsersRemaining := c.config.Spec.Conference.UsersPerRoom - 1
+		nUsersRemaining := c.config.Spec.Conference.UsersPerRoom
 		var errs []wrappedSignalingError
 		for {
 			errs = c.joinRoom(ctx, joinRoomConfig{
