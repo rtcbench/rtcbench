@@ -158,6 +158,10 @@ func Step10_Sender_SendSessionAccept(state *model.ConnectionState) error {
 		return fmt.Errorf("session-accept (sender, no-rtx) failed: %w", err)
 	}
 
+	if strings.Contains(respXML, "type='error'") || strings.Contains(respXML, `type="error"`) {
+		return fmt.Errorf("session-accept rejected by Jicofo: %s", respXML)
+	}
+
 	state.StepsAOF.LogPrintf("[Step10_Sender] ✅ session-accept sent OK: %s", respXML)
 	return nil
 }
