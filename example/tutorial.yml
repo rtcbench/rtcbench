@@ -96,6 +96,11 @@ spec:
       _serverRoot: 'https://{{spec.network.serverIP}}/janus'
       allowInsecureHttps: true
 
+  # Expose a /health HTTP endpoint reporting live VP9 bitrate and FPS per viewer.
+  # Set port: 0 or omit this section to disable.
+  metrics:
+    port: 9090
+
   # Configure how logs are written here.
   logging:
     console: true

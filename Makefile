@@ -1,4 +1,4 @@
-.PHONY: all clean install test cztest-client cztest-server cztest-payload-zip
+.PHONY: all clean clean-ci install test smoke-janus smoke-jitsi ci cztest-client cztest-server cztest-payload-zip
 
 all:
 	go build -v ./cmd/call.zip
@@ -24,6 +24,33 @@ cztest-payload:
 
 test:
 	go test -v ./...
+
+smoke-janus:
+	docker build -t callzip:latest .
+	docker build -t callzip-janus:latest docker/janus
+	docker compose --profile janus up --exit-code-from janus-smoke-test --abort-on-container-exit
+	docker compose --profile janus down -v
+
+smoke-jitsi:
+	docker build -t callzip:latest .
+	docker build -t callzip-jitsi-web:latest docker/jitsi
+	docker compose --profile jitsi up --exit-code-from jitsi-smoke-test --abort-on-container-exit
+	docker compose --profile jitsi down -v
+
+ci:
+	@if $(MAKE) --no-print-directory test smoke-janus smoke-jitsi; then \
+		echo ""; \
+		echo "PASS"; \
+	else \
+		echo ""; \
+		echo "FAIL"; \
+		exit 1; \
+	fi
+
+clean-ci:
+	docker compose --profile janus down -v --remove-orphans 2>/dev/null || true
+	docker compose --profile jitsi down -v --remove-orphans 2>/dev/null || true
+	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest 2>/dev/null || true
 
 clean:
 	rm -f call.zip call.zip.exe cztest-client cztest-client.exe cztest-server cztest-server.exe

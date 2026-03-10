@@ -1,0 +1,14 @@
+general: {
+	videocodec = "vp9"
+}
+
+room-1234: {
+	description = "Demo Room"
+	secret = "adminpwd"
+	publishers = 6
+	bitrate = 4000000
+	bitrate_cap = true
+	fir_freq = 10
+	videocodec = "vp9"
+	record = false
+}

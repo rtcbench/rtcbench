@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"call.zip/pkg/vp9_stats"
 )
 
 const (
@@ -75,10 +77,11 @@ var (
 )
 
 type Config struct {
-	APIVersion string
-	Kind       string
-	Metadata   MetadataConfig
-	Spec       SpecConfig
+	APIVersion     string
+	Kind           string
+	Metadata       MetadataConfig
+	Spec           SpecConfig
+	StatsConsumers []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
 }
 
 type YAMLConfig struct {
@@ -174,6 +177,7 @@ type SpecConfig struct {
 	Network      NetworkConfig
 	PluginConfig map[string]any
 	Logging      LoggingConfig
+	Metrics      MetricsConfig
 }
 
 type YAMLSpecConfig struct {
@@ -182,6 +186,15 @@ type YAMLSpecConfig struct {
 	Network      *YAMLNetworkConfig    `yaml:"network,omitempty"`
 	PluginConfig map[string]any        `yaml:"pluginConfig,omitempty"`
 	Logging      *YAMLLoggingConfig    `yaml:"logging,omitempty"`
+	Metrics      *YAMLMetricsConfig    `yaml:"metrics,omitempty"`
+}
+
+type MetricsConfig struct {
+	Port int
+}
+
+type YAMLMetricsConfig struct {
+	Port *int `yaml:"port,omitempty"`
 }
 
 func (yc *YAMLSpecConfig) validate() error {
@@ -238,6 +251,9 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 		}
 	}
 	c.Logging = yc.Logging.mustConvert()
+	if yc.Metrics != nil && yc.Metrics.Port != nil {
+		c.Metrics.Port = *yc.Metrics.Port
+	}
 	return c
 }
 

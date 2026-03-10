@@ -26,6 +26,9 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 		// TODO: use logging framework not log.Printf
 		log.Printf("[sub-data-v1] bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
+	for _, consumer := range cfg.StatsConsumers {
+		publisher.AddSubscriber(consumer)
+	}
 
 	go publisher.Run()
 

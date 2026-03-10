@@ -11,6 +11,7 @@ import (
 
 	"call.zip"
 	"call.zip/internal/netutil"
+	"call.zip/pkg/metricsserver"
 	"call.zip/plugin/janus"
 	"call.zip/plugin/jitsi"
 	"github.com/goccy/go-yaml"
@@ -45,6 +46,19 @@ func main() {
 		}
 		log.Printf("Detected client IP: %s", detectedClientIP)
 		cfg.Spec.Network.ClientIP = detectedClientIP
+	}
+
+	if cfg.Spec.Metrics.Port > 0 {
+		ms := metricsserver.New(cfg.Spec.Metrics.Port)
+		cfg.StatsConsumers = append(cfg.StatsConsumers, ms.Subscriber())
+		metricsCtx, metricsCancel := context.WithCancel(context.Background())
+		defer metricsCancel()
+		go func() {
+			log.Printf("[metrics] starting on :%d", cfg.Spec.Metrics.Port)
+			if err := ms.ListenAndServe(metricsCtx); err != nil {
+				log.Printf("[metrics] server error: %v", err)
+			}
+		}()
 	}
 
 	client = call.NewClient(cfg)
