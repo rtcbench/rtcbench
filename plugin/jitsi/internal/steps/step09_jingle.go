@@ -10,11 +10,15 @@ import (
 )
 
 func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
-	var respXML string
 	var err error
 
+	// Start with whatever Step08 already received — Jicofo may have included
+	// a disco#info query in that same BOSH response body.
+	respXML := state.PendingBOSHResponse
+
 	for {
-		if !strings.Contains(respXML, "<jingle") {
+		// Only poll for a fresh response when we have nothing to process.
+		if respXML == "" {
 			state.RID++
 			requestBody := fmt.Sprintf(`
 <body xmlns="http://jabber.org/protocol/httpbind"
@@ -72,10 +76,12 @@ func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 			return nil
 		}
 
-		// Handle disco#info requests while waiting
+		// Handle disco#info requests while waiting.
+		// After replying, loop immediately to check the response for a Jingle
+		// without sleeping — Jicofo often sends the offer right after.
 		if strings.Contains(respXML, "<query xmlns='http://jabber.org/protocol/disco#info'") {
-			from := util.ExtractAttr(respXML, "from")
-			id := util.ExtractAttr(respXML, "id")
+			from := util.ExtractAttrInTag(respXML, "iq", "from")
+			id := util.ExtractAttrInTag(respXML, "iq", "id")
 
 			state.RID++
 			response := fmt.Sprintf(`<body xmlns="http://jabber.org/protocol/httpbind"
@@ -88,6 +94,14 @@ func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
     <query xmlns="http://jabber.org/protocol/disco#info">
       <identity category="client" type="bot" name="%s"/>
       <feature var="http://jabber.org/protocol/muc"/>
+      <feature var="urn:xmpp:jingle:1"/>
+      <feature var="urn:xmpp:jingle:apps:rtp:1"/>
+      <feature var="urn:xmpp:jingle:apps:rtp:audio"/>
+      <feature var="urn:xmpp:jingle:apps:rtp:video"/>
+      <feature var="urn:xmpp:jingle:apps:dtls:0"/>
+      <feature var="urn:xmpp:jingle:transports:ice-udp:1"/>
+      <feature var="urn:ietf:rfc:5761"/>
+      <feature var="urn:ietf:rfc:5888"/>
     </query>
   </iq>
 </body>`, state.RID, state.Sid, state.Jid, from, id, state.Nickname)
@@ -96,12 +110,13 @@ func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 			if err != nil {
 				return fmt.Errorf("failed to send disco#info result: %w", err)
 			}
+			// Don't sleep — re-evaluate respXML immediately.
+			continue
 		}
 
-		// Loop again until <jingle> is found
-		if !strings.Contains(respXML, "<jingle") {
-			state.StepsAOF.LogPrintln("[Step09_WaitForJingleOffer] sleep 1 second...")
-			time.Sleep(1 * time.Second)
-		}
+		// Nothing useful yet; sleep and let the next poll deliver more stanzas.
+		state.StepsAOF.LogPrintln("[Step09_WaitForJingleOffer] sleep 1 second...")
+		time.Sleep(1 * time.Second)
+		respXML = "" // force a fresh poll next iteration
 	}
 }
