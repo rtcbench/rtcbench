@@ -25,9 +25,8 @@ const (
 
 	videoroomPlugin = "janus.plugin.videoroom"
 
-	viewerPacketsPerSample  = 1000
-	viewerVP9PayloadType    = 98
-	viewerTrackBufferSize   = 1500
+	viewerPacketsPerSample = 1000
+	viewerTrackBufferSize  = 1500
 	statsInputChanSize      = 128
 )
 
@@ -296,10 +295,10 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 	}
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		logf("[pion] OnTrack: %s %s", track.Kind(), track.Codec().MimeType)
+		logf("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
 		cfg := &viewer.Config{
 			PacketsPerSample:  viewerPacketsPerSample,
-			VP9RTPPayloadType: viewerVP9PayloadType,
+			VP9RTPPayloadType: int(track.PayloadType()),
 			TrackBufferSize:   viewerTrackBufferSize,
 		}
 		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, nil); err != nil {
