@@ -34,11 +34,11 @@ kind: VideoCallStressTest
 
 metadata:
   # You can set a config file name that will show up in the logs.
-  name: $env:CONFIG_NAME=tutorial-config-1
+  name: tutorial-config-1
 
 spec:
   # The plugin ID specifies which video conferencing platform to target (e.g. "jitsi" or "janus").
-  plugin: $env:PLUGIN_NAME=default-plugin-id-goes-here
+  plugin: $env:PLUGIN_ID=default-plugin-id-goes-here
 
   # The "conference" holds cross-platform config related to joining a video conference.
   conference:
@@ -46,14 +46,14 @@ spec:
     # sees, which is "1234" as Janus only supports numeric meeting room IDs.
     name: room-1234
 
-    # How many participants there are per conference room. This includes video senders (cameras).
-    viewers: 1
+    # How many users (i.e. participants, members) there are per conference room. This includes enabled cameras (videos).
+    usersPerRoom: 1
 
     # There can be multiple conference rooms joined.
     # If you set "totalRooms" > 1, each room will be suffixed with "_0", "_1", "_2" and so on.
     totalRooms: 1
 
-    # How many video senders (cameras) there are per conference room.
+    # How many enabled cameras (videos) there are per conference room.
     cameras:
       perRoom: 0
       fileType: ivf
@@ -66,7 +66,7 @@ spec:
       concurrency: 10
 
       # Should each join fail, we will infinitely retry until it connects (sleeping for max of joinStartSpacing or 1s).
-      viewersAlwaysRetry: true
+      alwaysRetryFailedJoins: true
 
       # Gap between starting the next join.
       joinStartSpacing: 2s

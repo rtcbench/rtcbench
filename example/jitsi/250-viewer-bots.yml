@@ -6,7 +6,7 @@ spec:
   plugin: jitsi
   conference:
     name: test
-    viewers: 10
+    usersPerRoom: 10
     totalRooms: 25
     cameras:
       perRoom: 0
@@ -15,13 +15,13 @@ spec:
       directory: '~/vp9_ivf_videos'
     joinPolicy:
       concurrency: 10
-      viewersAlwaysRetry: true
+      alwaysRetryFailedJoins: true
       joinStartSpacing: 2s
     recording:
       enabled: false
       directory: './vp9_ivf_videos'
   network:
-    serverIP: $env:SERVER_IP=10.99.0.209
+    serverIP: $env:SERVER_IP
   pluginConfig:  # plugin-specific internal configuration
     jitsi:
       _boshURL: 'https://{{spec.network.serverIP}}/http-bind'

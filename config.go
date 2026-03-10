@@ -32,12 +32,12 @@ var (
 	ErrMissingNetwork    = errors.New("missing spec.network section")
 	ErrMissingLogging    = errors.New("missing spec.logging section")
 
-	ErrMissingConferenceName = errors.New("missing spec.conference.name string")
-	ErrInvalidConferenceName = errors.New("invalid spec.conference.name string")
-	ErrMissingViewers        = errors.New("missing spec.conference.viewers integer")
-	ErrNonPositiveViewers    = errors.New("invalid spec.conference.viewers integer, must be >= 1")
-	ErrNonPositiveTotalRooms = errors.New("invalid spec.conference.totalRooms integer, must be >= 1")
-	ErrMissingJoinPolicy     = errors.New("missing spec.conference.joinPolicy section")
+	ErrMissingConferenceName   = errors.New("missing spec.conference.name string")
+	ErrInvalidConferenceName   = errors.New("invalid spec.conference.name string")
+	ErrMissingUsersPerRoom     = errors.New("missing spec.conference.usersPerRoom integer")
+	ErrNonPositiveUsersPerRoom = errors.New("invalid spec.conference.usersPerRoom integer, must be >= 1")
+	ErrNonPositiveTotalRooms   = errors.New("invalid spec.conference.totalRooms integer, must be >= 1")
+	ErrMissingJoinPolicy       = errors.New("missing spec.conference.joinPolicy section")
 
 	ErrMissingCameraCountPerRoom   = errors.New("missing spec.conference.cameras.perRoom integer")
 	ErrInvalidCameraCountPerRoom   = errors.New("invalid spec.conference.cameras.perRoom integer, must be >= 0")
@@ -242,22 +242,22 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 }
 
 type ConferenceConfig struct {
-	Name       string
-	Viewers    int
-	TotalRooms int
-	Cameras    CameraConfig
-	JoinPolicy JoinPolicyConfig
-	Recording  RecordingConfig
+	Name         string
+	UsersPerRoom int
+	TotalRooms   int
+	Cameras      CameraConfig
+	JoinPolicy   JoinPolicyConfig
+	Recording    RecordingConfig
 }
 
 type YAMLConferenceConfig struct {
 	// Name conference room identifier
 	Name *string `yaml:"name,omitempty"`
-	// Viewers number of viewers per conference room
-	Viewers *int `yaml:"viewers,omitempty"`
+	// UsersPerRoom number of users per conference room
+	UsersPerRoom *int `yaml:"usersPerRoom,omitempty"`
 	// TotalRooms defaults to 1
 	TotalRooms *int `yaml:"totalRooms,omitempty"`
-	// Cameras optional config for some (or all) viewers to turn on their cameras
+	// Cameras optional config for some (or all) users to turn on their cameras
 	Cameras    *YAMLCameraConfig     `yaml:"cameras,omitempty"`
 	JoinPolicy *YAMLJoinPolicyConfig `yaml:"joinPolicy,omitempty"`
 	// Recording optional section, defaults to disabled
@@ -279,10 +279,10 @@ func (yc *YAMLConferenceConfig) validate() error {
 		// return early cannot create a conference with invalid name
 		return ErrInvalidConferenceName
 	}
-	if yc.Viewers == nil {
-		errs = append(errs, ErrMissingViewers)
-	} else if *yc.Viewers < 1 {
-		errs = append(errs, ErrNonPositiveViewers)
+	if yc.UsersPerRoom == nil {
+		errs = append(errs, ErrMissingUsersPerRoom)
+	} else if *yc.UsersPerRoom < 1 {
+		errs = append(errs, ErrNonPositiveUsersPerRoom)
 	}
 	if yc.TotalRooms != nil && *yc.TotalRooms < 1 {
 		errs = append(errs, ErrNonPositiveTotalRooms)
@@ -313,7 +313,7 @@ func (yc *YAMLConferenceConfig) validate() error {
 func (yc *YAMLConferenceConfig) mustConvert() ConferenceConfig {
 	var c ConferenceConfig
 	c.Name = *yc.Name
-	c.Viewers = *yc.Viewers
+	c.UsersPerRoom = *yc.UsersPerRoom
 	c.TotalRooms = 1
 	if yc.TotalRooms != nil {
 		c.TotalRooms = *yc.TotalRooms
@@ -389,14 +389,14 @@ func (yc *YAMLCameraConfig) mustConvert() CameraConfig {
 }
 
 type JoinPolicyConfig struct {
-	Concurrency        int
-	ViewersAlwaysRetry bool
-	JoinStartSpacing   time.Duration
+	Concurrency            int
+	AlwaysRetryFailedJoins bool
+	JoinStartSpacing       time.Duration
 }
 
 type YAMLJoinPolicyConfig struct {
-	Concurrency        *int `yaml:"concurrency,omitempty"`
-	ViewersAlwaysRetry bool `yaml:"viewersAlwaysRetry,omitempty"`
+	Concurrency            *int `yaml:"concurrency,omitempty"`
+	AlwaysRetryFailedJoins bool `yaml:"alwaysRetryFailedJoins,omitempty"`
 	// JoinStartSpacing optional duration parsed with time.ParseDuration (e.g. "2s")
 	JoinStartSpacing *string `yaml:"joinStartSpacing,omitempty"`
 }
@@ -422,7 +422,7 @@ func (yc *YAMLJoinPolicyConfig) validate() error {
 func (yc *YAMLJoinPolicyConfig) mustConvert() JoinPolicyConfig {
 	var c JoinPolicyConfig
 	c.Concurrency = *yc.Concurrency
-	c.ViewersAlwaysRetry = yc.ViewersAlwaysRetry
+	c.AlwaysRetryFailedJoins = yc.AlwaysRetryFailedJoins
 	if yc.JoinStartSpacing != nil {
 		dur, durErr := time.ParseDuration(*yc.JoinStartSpacing)
 		if durErr != nil {
