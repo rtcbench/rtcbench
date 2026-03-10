@@ -5,9 +5,9 @@ import (
 
 	"call.zip"
 	"call.zip/pkg/aofconf"
+	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
-	"call.zip/pkg/viewer"
 )
 
 type Client struct {
@@ -24,7 +24,7 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 
 	publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
 		// TODO: use logging framework not log.Printf
-		log.Printf("[sub-data-v1] period=%s,sample=%s", period.String(), sample.String())
+		log.Printf("[sub-data-v1] bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
 
 	go publisher.Run()

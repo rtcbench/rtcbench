@@ -286,3 +286,8 @@ func (sample *VideoQualitySample) String() string {
 	b, _ := json.Marshal(sample)
 	return fmt.Sprintf("vp9.VideoQualitySample[%s]", string(b))
 }
+
+// Mbps returns the smooth bitrate formatted as megabits per second, e.g. "1.23 Mbps"
+func (sample *VideoQualitySample) Mbps() string {
+	return fmt.Sprintf("%0.2f Mbps", sample.SmoothBitrate/1_000_000)
+}

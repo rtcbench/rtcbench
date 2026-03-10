@@ -27,7 +27,7 @@ const (
 
 	viewerPacketsPerSample = 1000
 	viewerTrackBufferSize  = 1500
-	statsInputChanSize      = 128
+	statsInputChanSize     = 128
 )
 
 type Plugin struct {
@@ -83,7 +83,7 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.viewerManager = viewer.NewManager(statsInput)
 	p.publisher = vp9_stats.NewPublisher(statsInput)
 	p.publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
-		log.Printf("[sub-data-v1] period=%s,sample=%s", period.String(), sample.String())
+		log.Printf("[sub-data-v1] bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
 	go p.publisher.Run()
 
