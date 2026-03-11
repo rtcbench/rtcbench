@@ -70,6 +70,11 @@ func newViewer(
 }
 
 func (v *Viewer) run(done <-chan struct{}) error {
+	// Each incoming track has a unique SSRC; qualify the nickname so that a
+	// receiver bot with multiple incoming streams produces a separate metrics
+	// entry per stream rather than overwriting a single entry.
+	trackNickname := fmt.Sprintf("%s[%d]", v.nickname, v.track.SSRC())
+
 	var (
 		pkt rtp.Packet
 		buf = make([]byte, v.config.TrackBufferSize)
@@ -146,7 +151,7 @@ loop:
 		if packetsInSample == packetsPerSample {
 			packetsInSample = 0
 			vp9FrameStats.TakeSample(&vp9QualitySample)
-			vp9QualitySample.Nickname = v.nickname
+			vp9QualitySample.Nickname = trackNickname
 			select {
 			case v.input <- vp9QualitySample:
 				vp9FrameStats.EndSample()
