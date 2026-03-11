@@ -153,7 +153,7 @@ func ParseVP9PayloadDescriptor(payload []byte, desc *PayloadDescriptor) error {
 				pgByte := payload[ptr]
 				ptr++
 
-				r := (pgByte >> 1) & 0x03
+				r := (pgByte >> 2) & 0x03
 				if ptr+int(r) > len(payload) {
 					desc.ByteLength = ptr
 					return nil
