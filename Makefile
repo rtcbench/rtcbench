@@ -1,4 +1,7 @@
-.PHONY: all clean clean-ci install test smoke-janus smoke-jitsi ci cztest-client cztest-server cztest-payload-zip
+.PHONY: all clean clean-ci install test \
+	e2e e2e-janus e2e-jitsi \
+	_build-all _build-janus _build-jitsi \
+	ci cztest-client cztest-server cztest-payload-zip
 
 all:
 	go build -v ./cmd/call.zip
@@ -25,31 +28,48 @@ cztest-payload:
 test:
 	go test -v ./...
 
-smoke-janus:
+# ---------------------------------------------------------------------------
+# e2e tests (Python/pytest)
+# ---------------------------------------------------------------------------
+# Infrastructure (janus/jitsi) runs in Docker Compose; call.zip runs as a
+# per-test Docker container managed by pytest fixtures. New scenarios are
+# discovered automatically — no Makefile changes required.
+
+e2e: _build-all
+	pip install -q -r e2e/requirements.txt
+	python -m pytest e2e/ -v -n auto --dist=loadgroup
+
+e2e-janus: _build-janus
+	pip install -q -r e2e/requirements.txt
+	python -m pytest e2e/ -v -k janus
+
+e2e-jitsi: _build-jitsi
+	pip install -q -r e2e/requirements.txt
+	python -m pytest e2e/ -v -k jitsi
+
+_build-all:
 	docker build -t callzip:latest .
 	docker build -t callzip-janus:latest docker/janus
-	docker compose --profile janus up --exit-code-from janus-smoke-test --abort-on-container-exit
-	docker compose --profile janus down -v
+	docker build -t callzip-jitsi-web:latest docker/jitsi
 
-smoke-jitsi:
+_build-janus:
+	docker build -t callzip:latest .
+	docker build -t callzip-janus:latest docker/janus
+
+_build-jitsi:
 	docker build -t callzip:latest .
 	docker build -t callzip-jitsi-web:latest docker/jitsi
-	docker compose --profile jitsi up --exit-code-from jitsi-smoke-test --abort-on-container-exit
-	docker compose --profile jitsi down -v
+
+# ---------------------------------------------------------------------------
+# CI
+# ---------------------------------------------------------------------------
 
 ci:
-	@if $(MAKE) --no-print-directory test smoke-janus smoke-jitsi; then \
-		echo ""; \
-		echo "PASS"; \
-	else \
-		echo ""; \
-		echo "FAIL"; \
-		exit 1; \
-	fi
+	$(MAKE) test e2e
 
 clean-ci:
-	docker compose --profile janus down -v --remove-orphans 2>/dev/null || true
-	docker compose --profile jitsi down -v --remove-orphans 2>/dev/null || true
+	docker compose --project-name callzip --profile janus --profile jitsi \
+		down -v --remove-orphans 2>/dev/null || true
 	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest 2>/dev/null || true
 
 clean:

@@ -17,6 +17,7 @@ RUN apt-get update \
       ffmpeg \
       ca-certificates \
       curl \
+      jq \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /call.zip /usr/local/bin/call.zip

@@ -1,0 +1,45 @@
+apiVersion: call.zip/v1
+kind: VideoCallStressTest
+metadata:
+  name: janus-smoke-2s3v
+spec:
+  plugin: janus
+  conference:
+    name: room-1234
+    usersPerRoom: 5
+    totalRooms: 1
+    cameras:
+      perRoom: 2
+      fileType: ivf
+      videoCodec: vp9
+      directory: /test-videos
+    joinPolicy:
+      concurrency: 5
+      alwaysRetryFailedJoins: true
+      joinStartSpacing: 2s
+    recording:
+      enabled: false
+      directory: /tmp/recordings
+  metrics:
+    port: 9090
+
+  network:
+    serverIP: 172.20.0.10
+  pluginConfig:
+    janus:
+      serverRoot: http://172.20.0.10:8088/janus
+      allowInsecureHttps: false
+  logging:
+    console: true
+    directory: /var/log/call-zip
+    streams:
+      - name: general
+        level: info
+      - name: signaling
+        level: debug
+      - name: media
+        level: info
+      - name: packets
+        level: info
+      - name: video_stats
+        level: info
