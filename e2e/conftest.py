@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from helpers import REPO_ROOT, _compose, get_delivery_results
+from helpers import REPO_ROOT, JANUS_PROJECT, JITSI_PROJECT, _compose, get_delivery_results
 
 
 # ---------------------------------------------------------------------------
@@ -39,13 +39,13 @@ def ensure_docker_images():
 def janus_infra(ensure_docker_images):
     """Start the Janus stack and wait for it to be healthy."""
     subprocess.run(
-        _compose("up", "-d", "--wait", profiles=("janus",)),
+        _compose("up", "-d", "--wait", project=JANUS_PROJECT, profiles=("janus",)),
         check=True,
         cwd=REPO_ROOT,
     )
     yield
     subprocess.run(
-        _compose("down", "-v", profiles=("janus",)),
+        _compose("down", "-v", project=JANUS_PROJECT, profiles=("janus",)),
         check=True,
         cwd=REPO_ROOT,
     )
@@ -55,13 +55,13 @@ def janus_infra(ensure_docker_images):
 def jitsi_infra(ensure_docker_images):
     """Start the Jitsi stack (prosody, jicofo, jvb, web) and wait for healthy."""
     subprocess.run(
-        _compose("up", "-d", "--wait", profiles=("jitsi",)),
+        _compose("up", "-d", "--wait", project=JITSI_PROJECT, profiles=("jitsi",)),
         check=True,
         cwd=REPO_ROOT,
     )
     yield
     subprocess.run(
-        _compose("down", "-v", profiles=("jitsi",)),
+        _compose("down", "-v", project=JITSI_PROJECT, profiles=("jitsi",)),
         check=True,
         cwd=REPO_ROOT,
     )

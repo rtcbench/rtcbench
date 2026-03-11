@@ -24,6 +24,9 @@ cztest-server.exe
 !cmd/cztest-client
 !cmd/cztest-server
 
+# Python
+__pycache__/
+
 # Go specific
 *.exe
 *.exe~

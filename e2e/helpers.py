@@ -16,8 +16,13 @@ import requests
 import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
-COMPOSE_PROJECT = "callzip"
-NETWORK = f"{COMPOSE_PROJECT}_callzip-net"
+
+# Each plugin gets its own compose project so parallel runs don't fight over
+# the same project state or network.
+JANUS_PROJECT = "callzip-janus"
+JITSI_PROJECT = "callzip-jitsi"
+JANUS_NETWORK = f"{JANUS_PROJECT}_callzip-net"          # 172.20.0.0/24
+JITSI_NETWORK = f"{JITSI_PROJECT}_callzip-jitsi-net"   # 172.21.0.0/24
 
 # Accumulated delivery results for the terminal summary (populated by record_result).
 _delivery_results: list[tuple[str, dict]] = []
@@ -37,8 +42,8 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _compose(*args, profiles: tuple = ()) -> list[str]:
-    cmd = ["docker", "compose", "--project-name", COMPOSE_PROJECT]
+def _compose(*args, project: str, profiles: tuple = ()) -> list[str]:
+    cmd = ["docker", "compose", "--project-name", project]
     for p in profiles:
         cmd += ["--profile", p]
     return cmd + list(args)
@@ -85,13 +90,14 @@ def poll_health(
 
 
 @contextlib.contextmanager
-def callzip_run(config, video_dir: Path, recording_dir: Path = None):
+def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = None):
     """
-    Start call.zip in a Docker container joined to the compose network.
+    Start call.zip in a Docker container joined to the given Docker network.
 
     config: str filename (resolved under ci/, e.g. "janus-smoke.yml")
             OR absolute Path to a YAML file (used for recording tests with overrides).
     video_dir: host directory mounted read-only as /test-videos inside the container.
+    network: Docker network name to join (JANUS_NETWORK or JITSI_NETWORK).
     recording_dir: if given, mounted as /tmp/recordings (write).
 
     Yields (health_url, proc) where health_url is http://localhost:<port>/health.
@@ -110,7 +116,7 @@ def callzip_run(config, video_dir: Path, recording_dir: Path = None):
 
     cmd = [
         "docker", "run", "--rm", "--name", name,
-        "--network", NETWORK,
+        "--network", network,
         "-p", f"{host_port}:9090",
         "-v", f"{video_dir}:/test-videos:ro",
         *ci_mounts,
@@ -141,7 +147,7 @@ def build_recording_config(base_config_name: str) -> Path:
     cfg["spec"]["conference"]["recording"]["enabled"] = True
     cfg["spec"]["conference"]["recording"]["directory"] = "/tmp/recordings"
     tmp = tempfile.NamedTemporaryFile(
-        suffix=".yml", delete=False, mode="w", prefix="callzip-e2e-"
+        suffix=".yml", delete=False, mode="w", prefix="callzip-e2e-", dir="/tmp"
     )
     yaml.dump(cfg, tmp)
     tmp.close()

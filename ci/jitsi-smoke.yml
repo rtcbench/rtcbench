@@ -24,7 +24,7 @@ spec:
     port: 9090
 
   network:
-    serverIP: 172.20.0.20  # Jitsi web container - also used as XMPP domain
+    serverIP: 172.21.0.20  # Jitsi web container - also used as XMPP domain
   pluginConfig:
     jitsi:
       _boshURL: 'https://{{spec.network.serverIP}}/http-bind'

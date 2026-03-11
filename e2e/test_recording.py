@@ -29,7 +29,10 @@ import time
 
 import pytest
 
-from helpers import callzip_run, poll_health, build_recording_config
+from helpers import (
+    JANUS_NETWORK, JITSI_NETWORK,
+    callzip_run, poll_health, build_recording_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +184,7 @@ def _assert_frame_fidelity(source_ivf, recorded_ivf, min_match_rate: float = 0.9
 
 def _assert_recordings(recording_dir, source_ivf):
     """Run all integrity and fidelity checks on every IVF file in recording_dir."""
-    ivf_files = sorted(recording_dir.glob("*.ivf"))
+    ivf_files = sorted(recording_dir.glob("**/*.ivf"))
     assert ivf_files, f"no IVF files written to {recording_dir}"
 
     for ivf in ivf_files:
@@ -199,7 +202,7 @@ def test_janus_recording(janus_infra, test_video_dir, tmp_path):
     recording_dir.mkdir()
     cfg = build_recording_config("janus-smoke.yml")
     try:
-        with callzip_run(cfg, test_video_dir, recording_dir=recording_dir) as (url, _proc):
+        with callzip_run(cfg, test_video_dir, network=JANUS_NETWORK, recording_dir=recording_dir) as (url, _proc):
             try:
                 poll_health(url, timeout=120, min_active=1)
             except TimeoutError as e:
@@ -216,7 +219,7 @@ def test_jitsi_recording(jitsi_infra, test_video_dir, tmp_path):
     recording_dir.mkdir()
     cfg = build_recording_config("jitsi-smoke.yml")
     try:
-        with callzip_run(cfg, test_video_dir, recording_dir=recording_dir) as (url, _proc):
+        with callzip_run(cfg, test_video_dir, network=JITSI_NETWORK, recording_dir=recording_dir) as (url, _proc):
             try:
                 poll_health(url, timeout=300, min_active=1)
             except TimeoutError as e:
