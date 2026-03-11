@@ -39,6 +39,7 @@ VENV := .venv
 $(VENV)/bin/activate: e2e/requirements.txt
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install -q -r e2e/requirements.txt
+	$(VENV)/bin/playwright install --with-deps chromium
 
 e2e: _build-all $(VENV)/bin/activate
 	$(VENV)/bin/python -m pytest e2e/ -v -n auto --dist=loadgroup --basetemp=/tmp/pytest-callzip

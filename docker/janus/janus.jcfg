@@ -9,7 +9,7 @@ general: {
 	debug_level = 4
 
 	server_name = "callzip-janus"
-	session_timeout = 60
+	session_timeout = 10
 	candidates_timeout = 45
 	no_webrtc_encryption = false
 	ignore_unreachable_ice_server = true
