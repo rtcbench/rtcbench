@@ -1,10 +1,20 @@
 networks:
+  # Janus uses 172.20.0.0/24 — project callzip-janus creates callzip-janus_callzip-net
   callzip-net:
     driver: bridge
     ipam:
       driver: default
       config:
         - subnet: 172.20.0.0/24
+
+  # Jitsi uses 172.21.0.0/24 — project callzip-jitsi creates callzip-jitsi_callzip-jitsi-net
+  # Separate subnet so both stacks can run in parallel without address conflicts.
+  callzip-jitsi-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/24
 
 services:
   janus:
@@ -15,9 +25,6 @@ services:
     networks:
       callzip-net:
         ipv4_address: 172.20.0.10
-    # Expose media ports so ICE UDP packets reach Janus from the client container.
-    ports:
-      - "10000-10200:10000-10200/udp"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8088/janus/info"]
       interval: 5s
@@ -25,11 +32,11 @@ services:
       start_period: 20s
       retries: 24
 
-# Network layout (172.20.0.20/24):
-#   172.20.0.20  jitsi-web      (nginx + BOSH proxy)  <- serverIP for call.zip
-#   172.20.0.21  jitsi-prosody  (XMPP)
-#   172.20.0.22  jitsi-jicofo   (focus component)
-#   172.20.0.23  jitsi-jvb      (video bridge)
+# Network layout (172.21.0.0/24):
+#   172.21.0.20  jitsi-web      (nginx + BOSH proxy)  <- serverIP for call.zip
+#   172.21.0.21  jitsi-prosody  (XMPP)
+#   172.21.0.22  jitsi-jicofo   (focus component)
+#   172.21.0.23  jitsi-jvb      (video bridge)
 #
 # The call.zip client hardcodes MUC as conference.<domain> and focus as focus.<domain>,
 # so XMPP_MUC_DOMAIN and the focus component must follow that pattern.
@@ -42,17 +49,17 @@ services:
       - AUTH_TYPE=internal
       - ENABLE_AUTH=0
       - ENABLE_GUESTS=1
-      - XMPP_DOMAIN=172.20.0.20
-      - XMPP_AUTH_DOMAIN=auth.172.20.0.20
-      - XMPP_MUC_DOMAIN=conference.172.20.0.20
-      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.172.20.0.20
-      - XMPP_RECORDER_DOMAIN=recorder.172.20.0.20
+      - XMPP_DOMAIN=172.21.0.20
+      - XMPP_AUTH_DOMAIN=auth.172.21.0.20
+      - XMPP_MUC_DOMAIN=conference.172.21.0.20
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.172.21.0.20
+      - XMPP_RECORDER_DOMAIN=recorder.172.21.0.20
       - JICOFO_AUTH_PASSWORD=jicofosecret
       - JVB_AUTH_PASSWORD=jvbsecret
       - TZ=UTC
     networks:
-      callzip-net:
-        ipv4_address: 172.20.0.21
+      callzip-jitsi-net:
+        ipv4_address: 172.21.0.21
     healthcheck:
       test: ["CMD-SHELL", "timeout 3 bash -c 'echo > /dev/tcp/localhost/5222' 2>/dev/null || exit 1"]
       interval: 5s
@@ -70,18 +77,18 @@ services:
     environment:
       - AUTH_TYPE=internal
       - ENABLE_AUTH=0
-      - XMPP_SERVER=172.20.0.21
-      - XMPP_DOMAIN=172.20.0.20
-      - XMPP_AUTH_DOMAIN=auth.172.20.0.20
-      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.172.20.0.20
+      - XMPP_SERVER=172.21.0.21
+      - XMPP_DOMAIN=172.21.0.20
+      - XMPP_AUTH_DOMAIN=auth.172.21.0.20
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.172.21.0.20
       - XMPP_PORT=5222
       - JICOFO_AUTH_USER=focus
       - JICOFO_AUTH_PASSWORD=jicofosecret
       - JICOFO_ENABLE_HEALTH_CHECKS=true
       - TZ=UTC
     networks:
-      callzip-net:
-        ipv4_address: 172.20.0.22
+      callzip-jitsi-net:
+        ipv4_address: 172.21.0.22
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8888/about/health || exit 1"]
       interval: 5s
@@ -97,24 +104,22 @@ services:
       jitsi-prosody:
         condition: service_healthy
       jitsi-jicofo:
-        condition: service_healthy
+        condition: service_started
     environment:
-      - XMPP_SERVER=172.20.0.21
-      - XMPP_DOMAIN=172.20.0.20
-      - XMPP_AUTH_DOMAIN=auth.172.20.0.20
-      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.172.20.0.20
+      - XMPP_SERVER=172.21.0.21
+      - XMPP_DOMAIN=172.21.0.20
+      - XMPP_AUTH_DOMAIN=auth.172.21.0.20
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.172.21.0.20
       - XMPP_PORT=5222
       - JVB_AUTH_USER=jvb
       - JVB_AUTH_PASSWORD=jvbsecret
-      - JVB_ADVERTISE_IPS=172.20.0.23
+      - JVB_ADVERTISE_IPS=172.21.0.23
       - JVB_PORT=10000
       - JVB_TCP_HARVESTER_DISABLED=true
       - TZ=UTC
     networks:
-      callzip-net:
-        ipv4_address: 172.20.0.23
-    ports:
-      - "10000:10000/udp"
+      callzip-jitsi-net:
+        ipv4_address: 172.21.0.23
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/about/health || exit 1"]
       interval: 5s
@@ -136,16 +141,16 @@ services:
     environment:
       - ENABLE_AUTH=0
       - ENABLE_GUESTS=1
-      - XMPP_SERVER=172.20.0.21
-      - XMPP_DOMAIN=172.20.0.20
-      - XMPP_AUTH_DOMAIN=auth.172.20.0.20
-      - XMPP_MUC_DOMAIN=conference.172.20.0.20
-      - XMPP_BOSH_URL_BASE=http://172.20.0.21:5280
-      - PUBLIC_URL=https://172.20.0.20
+      - XMPP_SERVER=172.21.0.21
+      - XMPP_DOMAIN=172.21.0.20
+      - XMPP_AUTH_DOMAIN=auth.172.21.0.20
+      - XMPP_MUC_DOMAIN=conference.172.21.0.20
+      - XMPP_BOSH_URL_BASE=http://172.21.0.21:5280
+      - PUBLIC_URL=https://172.21.0.20
       - TZ=UTC
     networks:
-      callzip-net:
-        ipv4_address: 172.20.0.20
+      callzip-jitsi-net:
+        ipv4_address: 172.21.0.20
     healthcheck:
       test: ["CMD-SHELL", "curl -kso /dev/null -w '%{http_code}' https://localhost/ | grep -q '200'"]
       interval: 10s

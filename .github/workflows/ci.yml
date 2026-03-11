@@ -57,15 +57,15 @@ jobs:
         run: pip install -r e2e/requirements.txt
 
       - name: Run Janus e2e tests
-        run: python -m pytest e2e/ -v -k janus
+        run: python -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-callzip
 
       - name: Show Docker logs on failure
         if: failure()
-        run: docker compose --project-name callzip --profile janus logs
+        run: docker compose --project-name callzip-janus --profile janus logs
 
       - name: Cleanup
         if: always()
-        run: docker compose --project-name callzip --profile janus down -v
+        run: docker compose --project-name callzip-janus --profile janus down -v
 
   e2e-jitsi:
     name: e2e – Jitsi
@@ -99,12 +99,12 @@ jobs:
         run: pip install -r e2e/requirements.txt
 
       - name: Run Jitsi e2e tests
-        run: python -m pytest e2e/ -v -k jitsi
+        run: python -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-callzip
 
       - name: Show Docker logs on failure
         if: failure()
-        run: docker compose --project-name callzip --profile jitsi logs
+        run: docker compose --project-name callzip-jitsi --profile jitsi logs
 
       - name: Cleanup
         if: always()
-        run: docker compose --project-name callzip --profile jitsi down -v
+        run: docker compose --project-name callzip-jitsi --profile jitsi down -v

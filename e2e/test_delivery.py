@@ -10,7 +10,10 @@ No Makefile changes needed — pytest discovers and names the test automatically
 """
 import pytest
 
-from helpers import callzip_run, poll_health, record_result
+from helpers import (
+    JANUS_NETWORK, JITSI_NETWORK,
+    callzip_run, poll_health, record_result,
+)
 
 JANUS_SCENARIOS = [
     ("janus-smoke.yml",      1, 120),
@@ -32,7 +35,7 @@ JITSI_SCENARIOS = [
     ids=[s[0].removesuffix(".yml") for s in JANUS_SCENARIOS],
 )
 def test_janus_delivery(janus_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir) as (url, _proc):
+    with callzip_run(config, test_video_dir, network=JANUS_NETWORK) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:
@@ -56,7 +59,7 @@ def test_janus_delivery(janus_infra, test_video_dir, config, min_active, timeout
     ids=[s[0].removesuffix(".yml") for s in JITSI_SCENARIOS],
 )
 def test_jitsi_delivery(jitsi_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir) as (url, _proc):
+    with callzip_run(config, test_video_dir, network=JITSI_NETWORK) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:

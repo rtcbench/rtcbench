@@ -36,16 +36,16 @@ test:
 # discovered automatically — no Makefile changes required.
 
 e2e: _build-all
-	pip install -q -r e2e/requirements.txt
-	python -m pytest e2e/ -v -n auto --dist=loadgroup
+	pip3 install -q -r e2e/requirements.txt
+	python3 -m pytest e2e/ -v -n auto --dist=loadgroup --basetemp=/tmp/pytest-callzip
 
 e2e-janus: _build-janus
-	pip install -q -r e2e/requirements.txt
-	python -m pytest e2e/ -v -k janus
+	pip3 install -q -r e2e/requirements.txt
+	python3 -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-callzip
 
 e2e-jitsi: _build-jitsi
-	pip install -q -r e2e/requirements.txt
-	python -m pytest e2e/ -v -k jitsi
+	pip3 install -q -r e2e/requirements.txt
+	python3 -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-callzip
 
 _build-all:
 	docker build -t callzip:latest .
@@ -68,9 +68,10 @@ ci:
 	$(MAKE) test e2e
 
 clean-ci:
-	docker compose --project-name callzip --profile janus --profile jitsi \
-		down -v --remove-orphans 2>/dev/null || true
+	docker compose --project-name callzip-janus --profile janus down -v --remove-orphans 2>/dev/null || true
+	docker compose --project-name callzip-jitsi --profile jitsi down -v --remove-orphans 2>/dev/null || true
 	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest 2>/dev/null || true
+	rm -rf /tmp/pytest-callzip
 
 clean:
 	rm -f call.zip call.zip.exe cztest-client cztest-client.exe cztest-server cztest-server.exe
