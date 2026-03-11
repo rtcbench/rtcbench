@@ -12,9 +12,11 @@ import (
 	"call.zip"
 	"call.zip/pkg/ivf"
 	"call.zip/pkg/viewer"
+	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	janus "call.zip/plugin/janus/internal"
 	"github.com/pion/webrtc/v3"
+	"path"
 )
 
 const (
@@ -31,12 +33,14 @@ const (
 )
 
 type Plugin struct {
-	client        *janus.Client
-	serverIP      string
-	clientIP      string
-	ivfPaths      []string
-	viewerManager *viewer.Manager
-	publisher     *vp9_stats.Publisher
+	client             *janus.Client
+	serverIP           string
+	clientIP           string
+	ivfPaths           []string
+	enableRecording    bool
+	recordingDirectory string
+	viewerManager      *viewer.Manager
+	publisher          *vp9_stats.Publisher
 }
 
 func NewPlugin() call.Plugin {
@@ -63,6 +67,8 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 
 	p.serverIP = config.Spec.Network.ServerIP
 	p.clientIP = config.Spec.Network.ClientIP
+	p.enableRecording = config.Spec.Conference.Recording.Enabled
+	p.recordingDirectory = config.Spec.Conference.Recording.Directory
 
 	// Validate that the conference name contains a parseable integer for the Janus room ID.
 	if _, err := roomIDFromName(config.Spec.Conference.Name); err != nil {
@@ -304,7 +310,19 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 			VP9RTPPayloadType: int(track.PayloadType()),
 			TrackBufferSize:   viewerTrackBufferSize,
 		}
-		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, nil); err != nil {
+		var seg *vp9.IvfSegmenter
+		if p.enableRecording {
+			recDir := path.Join(p.recordingDirectory, fmt.Sprintf("/room=%d/user=%s", roomID, userID))
+			var recErr error
+			seg, recErr = vp9.NewIvfSegmenter(recDir)
+			if recErr != nil {
+				logf("[viewer] IvfSegmenter failed: %v", recErr)
+			} else {
+				seg.Enable()
+				log.Printf("Enabled IVF file writing for room=%d user=%s", roomID, userID)
+			}
+		}
+		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, seg); err != nil {
 			logf("[viewer] SpawnViewer failed: %v", err)
 		}
 	})
