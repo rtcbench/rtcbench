@@ -2,3 +2,5 @@ pytest>=8.0
 pytest-xdist>=3.5
 requests>=2.31
 pyyaml>=6.0
+playwright>=1.40
+PyJWT>=2.0
