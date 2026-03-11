@@ -16,6 +16,14 @@ networks:
       config:
         - subnet: 172.21.0.0/24
 
+  # LiveKit uses 172.22.0.0/24 — project callzip-livekit creates callzip-livekit_callzip-livekit-net
+  callzip-livekit-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.22.0.0/24
+
 services:
   janus:
     profiles: [janus]
@@ -157,3 +165,18 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 18
+
+  livekit:
+    profiles: [livekit]
+    build:
+      context: docker/livekit
+    image: callzip-livekit:latest
+    networks:
+      callzip-livekit-net:
+        ipv4_address: 172.22.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "curl -so /dev/null http://localhost:7880/ 2>/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 12

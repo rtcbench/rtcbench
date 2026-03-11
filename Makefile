@@ -1,6 +1,6 @@
 .PHONY: all clean clean-ci install test \
-	e2e e2e-janus e2e-jitsi \
-	_build-all _build-janus _build-jitsi \
+	e2e e2e-janus e2e-jitsi e2e-livekit \
+	_build-all _build-janus _build-jitsi _build-livekit \
 	ci cztest-client cztest-server cztest-payload-zip
 
 all:
@@ -31,8 +31,8 @@ test:
 # ---------------------------------------------------------------------------
 # e2e tests (Python/pytest)
 # ---------------------------------------------------------------------------
-# Infrastructure (janus/jitsi) runs in Docker Compose; call.zip runs as a
-# per-test Docker container managed by pytest fixtures. New scenarios are
+# Infrastructure (janus/jitsi/livekit) runs in Docker Compose; call.zip runs
+# as a per-test Docker container managed by pytest fixtures. New scenarios are
 # discovered automatically — no Makefile changes required.
 
 e2e: _build-all
@@ -47,10 +47,15 @@ e2e-jitsi: _build-jitsi
 	pip3 install -q -r e2e/requirements.txt
 	python3 -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-callzip
 
+e2e-livekit: _build-livekit
+	pip3 install -q -r e2e/requirements.txt
+	python3 -m pytest e2e/ -v -k livekit --basetemp=/tmp/pytest-callzip
+
 _build-all:
 	docker build -t callzip:latest .
 	docker build -t callzip-janus:latest docker/janus
 	docker build -t callzip-jitsi-web:latest docker/jitsi
+	docker build -t callzip-livekit:latest docker/livekit
 
 _build-janus:
 	docker build -t callzip:latest .
@@ -59,6 +64,10 @@ _build-janus:
 _build-jitsi:
 	docker build -t callzip:latest .
 	docker build -t callzip-jitsi-web:latest docker/jitsi
+
+_build-livekit:
+	docker build -t callzip:latest .
+	docker build -t callzip-livekit:latest docker/livekit
 
 # ---------------------------------------------------------------------------
 # CI
@@ -70,7 +79,8 @@ ci:
 clean-ci:
 	docker compose --project-name callzip-janus --profile janus down -v --remove-orphans 2>/dev/null || true
 	docker compose --project-name callzip-jitsi --profile jitsi down -v --remove-orphans 2>/dev/null || true
-	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest 2>/dev/null || true
+	docker compose --project-name callzip-livekit --profile livekit down -v --remove-orphans 2>/dev/null || true
+	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest callzip-livekit:latest 2>/dev/null || true
 	rm -rf /tmp/pytest-callzip
 
 clean:

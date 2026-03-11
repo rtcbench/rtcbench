@@ -21,8 +21,10 @@ REPO_ROOT = Path(__file__).parent.parent
 # the same project state or network.
 JANUS_PROJECT = "callzip-janus"
 JITSI_PROJECT = "callzip-jitsi"
-JANUS_NETWORK = f"{JANUS_PROJECT}_callzip-net"          # 172.20.0.0/24
-JITSI_NETWORK = f"{JITSI_PROJECT}_callzip-jitsi-net"   # 172.21.0.0/24
+LIVEKIT_PROJECT = "callzip-livekit"
+JANUS_NETWORK = f"{JANUS_PROJECT}_callzip-net"              # 172.20.0.0/24
+JITSI_NETWORK = f"{JITSI_PROJECT}_callzip-jitsi-net"       # 172.21.0.0/24
+LIVEKIT_NETWORK = f"{LIVEKIT_PROJECT}_callzip-livekit-net"  # 172.22.0.0/24
 
 # Accumulated delivery results for the terminal summary (populated by record_result).
 _delivery_results: list[tuple[str, dict]] = []

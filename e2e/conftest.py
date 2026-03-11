@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from helpers import REPO_ROOT, JANUS_PROJECT, JITSI_PROJECT, _compose, get_delivery_results
+from helpers import REPO_ROOT, JANUS_PROJECT, JITSI_PROJECT, LIVEKIT_PROJECT, _compose, get_delivery_results
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +62,22 @@ def jitsi_infra(ensure_docker_images):
     yield
     subprocess.run(
         _compose("down", "-v", project=JITSI_PROJECT, profiles=("jitsi",)),
+        check=True,
+        cwd=REPO_ROOT,
+    )
+
+
+@pytest.fixture(scope="session")
+def livekit_infra(ensure_docker_images):
+    """Start the LiveKit stack and wait for it to be healthy."""
+    subprocess.run(
+        _compose("up", "-d", "--wait", project=LIVEKIT_PROJECT, profiles=("livekit",)),
+        check=True,
+        cwd=REPO_ROOT,
+    )
+    yield
+    subprocess.run(
+        _compose("down", "-v", project=LIVEKIT_PROJECT, profiles=("livekit",)),
         check=True,
         cwd=REPO_ROOT,
     )
