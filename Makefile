@@ -35,21 +35,22 @@ test:
 # as a per-test Docker container managed by pytest fixtures. New scenarios are
 # discovered automatically — no Makefile changes required.
 
-e2e: _build-all
-	pip3 install -q -r e2e/requirements.txt
-	python3 -m pytest e2e/ -v -n auto --dist=loadgroup --basetemp=/tmp/pytest-callzip
+VENV := .venv
+$(VENV)/bin/activate: e2e/requirements.txt
+	python3 -m venv $(VENV)
+	$(VENV)/bin/pip install -q -r e2e/requirements.txt
 
-e2e-janus: _build-janus
-	pip3 install -q -r e2e/requirements.txt
-	python3 -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-callzip
+e2e: _build-all $(VENV)/bin/activate
+	$(VENV)/bin/python -m pytest e2e/ -v -n auto --dist=loadgroup --basetemp=/tmp/pytest-callzip
 
-e2e-jitsi: _build-jitsi
-	pip3 install -q -r e2e/requirements.txt
-	python3 -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-callzip
+e2e-janus: _build-janus $(VENV)/bin/activate
+	$(VENV)/bin/python -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-callzip
 
-e2e-livekit: _build-livekit
-	pip3 install -q -r e2e/requirements.txt
-	python3 -m pytest e2e/ -v -k livekit --basetemp=/tmp/pytest-callzip
+e2e-jitsi: _build-jitsi $(VENV)/bin/activate
+	$(VENV)/bin/python -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-callzip
+
+e2e-livekit: _build-livekit $(VENV)/bin/activate
+	$(VENV)/bin/python -m pytest e2e/ -v -k livekit --basetemp=/tmp/pytest-callzip
 
 _build-all:
 	docker build -t callzip:latest .
@@ -85,7 +86,7 @@ clean-ci:
 
 clean:
 	rm -f call.zip call.zip.exe cztest-client cztest-client.exe cztest-server cztest-server.exe
-	rm -rf target/cztest-build target/cztest-payload.zip
+	rm -rf target/cztest-build target/cztest-payload.zip $(VENV)
 	go clean -cache
 	go clean -testcache
 	go clean -modcache

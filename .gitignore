@@ -6,6 +6,7 @@ logs/
 /bin
 scripts/venv
 /venv
+.venv
 .idea
 *.pem
 
