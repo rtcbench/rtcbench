@@ -30,7 +30,7 @@ import time
 import pytest
 
 from helpers import (
-    JANUS_NETWORK, JITSI_NETWORK,
+    JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK,
     callzip_run, poll_health, build_recording_config,
 )
 
@@ -222,6 +222,23 @@ def test_jitsi_recording(jitsi_infra, test_video_dir, tmp_path):
         with callzip_run(cfg, test_video_dir, network=JITSI_NETWORK, recording_dir=recording_dir) as (url, _proc):
             try:
                 poll_health(url, timeout=300, min_active=1)
+            except TimeoutError as e:
+                pytest.fail(str(e))
+            time.sleep(10)
+        _assert_recordings(recording_dir, test_video_dir / "test.ivf")
+    finally:
+        cfg.unlink(missing_ok=True)
+
+
+@pytest.mark.xdist_group("livekit")
+def test_livekit_recording(livekit_infra, test_video_dir, tmp_path):
+    recording_dir = tmp_path / "recordings"
+    recording_dir.mkdir()
+    cfg = build_recording_config("livekit-smoke.yml")
+    try:
+        with callzip_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, recording_dir=recording_dir) as (url, _proc):
+            try:
+                poll_health(url, timeout=120, min_active=1)
             except TimeoutError as e:
                 pytest.fail(str(e))
             time.sleep(10)
