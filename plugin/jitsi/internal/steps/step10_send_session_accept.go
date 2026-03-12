@@ -43,11 +43,9 @@ func extractHostCandidate(sdp string) HostCandidate {
 	return HostCandidate{}
 }
 
-func Step10_SendSessionAccept(state *model.ConnectionState) error {
-	state.RID++
-
+func buildSessionAcceptIQ(state *model.ConnectionState, videoSenders string, videoSources []RTPSource) (IQJingle, error) {
 	if state.LocalSDP == "" {
-		return fmt.Errorf("LocalSDP is empty")
+		return IQJingle{}, fmt.Errorf("LocalSDP is empty")
 	}
 
 	ufrag := extractSDPValue(state.LocalSDP, "a=ice-ufrag")
@@ -68,73 +66,140 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
 	state.StepsAOF.LogPrintf("[Step10] Using ufrag=%s pwd=%s fingerprint=%s hostIP=%s port=%d priority=%d",
 		ufrag, pwd, fingerprint, candidate.IP, candidate.Port, candidate.Priority)
 
-	videoSenders := "responder" // recvonly
-	videoSourcesXML := ""
+	candElem := &ICECandidateElem{
+		Foundation: "1",
+		Component:  "1",
+		Protocol:   "udp",
+		IP:         candidate.IP,
+		Port:       strconv.Itoa(candidate.Port),
+		Priority:   strconv.Itoa(candidate.Priority),
+		Type:       "host",
+	}
 
-	requestBody := fmt.Sprintf(`<body xmlns="http://jabber.org/protocol/httpbind" rid="%d" sid="%s">
-  <iq xmlns="jabber:client" id="session-accept" to="%s" type="set">
-    <jingle xmlns="urn:xmpp:jingle:1" action="session-accept" initiator="%s" responder="%s" sid="%s">
-      <group xmlns="urn:xmpp:jingle:apps:grouping:0" semantics="BUNDLE">
-        <content name="audio"/>
-        <content name="video"/>
-        <content name="data"/>
-      </group>
-      <content creator="responder" name="audio" senders="responder">
-        <description xmlns="urn:xmpp:jingle:apps:rtp:1" media="audio">
-          <payload-type id="111" name="opus" clockrate="48000" channels="2">
-            <parameter name="minptime" value="10"/>
-            <parameter name="useinbandfec" value="1"/>
-            <rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="transport-cc"/>
-          </payload-type>
-          <rtcp-mux/>
-          <rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="1" uri="urn:ietf:params:rtp-hdrext:ssrc-audio-level"/>
-          <rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="5" uri="http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"/>
-          <extmap-allow-mixed xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0"/>
-        </description>
-        <transport xmlns="urn:xmpp:jingle:transports:ice-udp:1" ufrag="%s" pwd="%s">
-          <fingerprint xmlns="urn:xmpp:jingle:apps:dtls:0" hash="sha-256" setup="active">%s</fingerprint>
-          <candidate foundation="1" component="1" protocol="udp" ip="%s" port="%d" priority="%d" type="host"/>
-        </transport>
-      </content>
-      <content creator="responder" name="video" senders="%s">
-        <description xmlns="urn:xmpp:jingle:apps:rtp:1" media="video">
-          <payload-type id="101" name="VP9" clockrate="90000">
-            <parameter name="profile-id" value="0"/>
-            <rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="transport-cc"/>
-            <rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="nack"/>
-            <rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="nack" subtype="pli"/>
-            <rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="ccm" subtype="fir"/>
-          </payload-type>
-          %s
-          <rtcp-mux/>
-          <rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="3" uri="http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time"/>
-          <rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="5" uri="http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"/>
-          <extmap-allow-mixed xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0"/>
-        </description>
-        <transport xmlns="urn:xmpp:jingle:transports:ice-udp:1" ufrag="%s" pwd="%s">
-          <fingerprint xmlns="urn:xmpp:jingle:apps:dtls:0" hash="sha-256" setup="active">%s</fingerprint>
-          <candidate foundation="1" component="1" protocol="udp" ip="%s" port="%d" priority="%d" type="host"/>
-        </transport>
-      </content>
-      <content creator="responder" name="data">
-        <transport xmlns="urn:xmpp:jingle:transports:ice-udp:1" ufrag="%s" pwd="%s">
-          <sctpmap xmlns="urn:xmpp:jingle:transports:dtls-sctp:1" number="5000" protocol="webrtc-datachannel" streams="0"/>
-          <fingerprint xmlns="urn:xmpp:jingle:apps:dtls:0" hash="sha-256" setup="active">%s</fingerprint>
-        </transport>
-      </content>
-    </jingle>
-  </iq>
-</body>`,
-		state.RID, state.Sid,
-		state.FocusJid, state.FocusJid, state.Jid, state.JingleSID,
-		// audio transport
-		ufrag, pwd, fingerprint, candidate.IP, candidate.Port, candidate.Priority,
-		// video transport
-		videoSenders, videoSourcesXML,
-		ufrag, pwd, fingerprint, candidate.IP, candidate.Port, candidate.Priority,
-		// data transport
-		ufrag, pwd, fingerprint,
-	)
+	fp := &DTLSFingerprint{Hash: "sha-256", Setup: "active", Value: fingerprint}
+
+	audioDesc := &RTPDescription{
+		Media: "audio",
+		PayloadTypes: []PayloadType{
+			{
+				ID: "111", Name: "opus", Clockrate: "48000", Channels: "2",
+				Parameters: []RTPParameter{
+					{Name: "minptime", Value: "10"},
+					{Name: "useinbandfec", Value: "1"},
+				},
+				RTCPFBs: []RTCPFeedback{
+					{Type: "transport-cc"},
+				},
+			},
+		},
+		RTCPMux: &RTCPMuxElem{},
+		HeaderExts: []RTPHeaderExt{
+			{ID: "1", URI: "urn:ietf:params:rtp-hdrext:ssrc-audio-level"},
+			{ID: "5", URI: "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"},
+		},
+		ExtmapAllowMixed: &ExtmapAllowMixed{},
+	}
+
+	videoDesc := &RTPDescription{
+		Media: "video",
+		PayloadTypes: []PayloadType{
+			{
+				ID: "101", Name: "VP9", Clockrate: "90000",
+				Parameters: []RTPParameter{
+					{Name: "profile-id", Value: "0"},
+				},
+				RTCPFBs: []RTCPFeedback{
+					{Type: "transport-cc"},
+					{Type: "nack"},
+					{Type: "nack", Subtype: "pli"},
+					{Type: "ccm", Subtype: "fir"},
+				},
+			},
+		},
+		Sources: videoSources,
+		RTCPMux: &RTCPMuxElem{},
+		HeaderExts: []RTPHeaderExt{
+			{ID: "3", URI: "http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time"},
+			{ID: "5", URI: "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"},
+		},
+		ExtmapAllowMixed: &ExtmapAllowMixed{},
+	}
+
+	iq := IQJingle{
+		ID:   "session-accept",
+		To:   state.FocusJid,
+		Type: "set",
+		Jingle: JingleElem{
+			Action:    "session-accept",
+			Initiator: state.FocusJid,
+			Responder: state.Jid,
+			SID:       state.JingleSID,
+			Group: JingleGroup{
+				Semantics: "BUNDLE",
+				Contents: []JingleGroupContent{
+					{Name: "audio"},
+					{Name: "video"},
+					{Name: "data"},
+				},
+			},
+			Contents: []JingleContent{
+				{
+					Creator:     "responder",
+					Name:        "audio",
+					Senders:     "responder",
+					Description: audioDesc,
+					Transport: ICETransport{
+						Ufrag:       ufrag,
+						Pwd:         pwd,
+						Fingerprint: fp,
+						Candidate:   candElem,
+					},
+				},
+				{
+					Creator:     "responder",
+					Name:        "video",
+					Senders:     videoSenders,
+					Description: videoDesc,
+					Transport: ICETransport{
+						Ufrag:       ufrag,
+						Pwd:         pwd,
+						Fingerprint: fp,
+						Candidate:   candElem,
+					},
+				},
+				{
+					Creator: "responder",
+					Name:    "data",
+					Transport: ICETransport{
+						Ufrag: ufrag,
+						Pwd:   pwd,
+						SCTPMap: &SCTPMapElem{
+							Number:   "5000",
+							Protocol: "webrtc-datachannel",
+							Streams:  "0",
+						},
+						Fingerprint: fp,
+					},
+				},
+			},
+		},
+	}
+
+	return iq, nil
+}
+
+func Step10_SendSessionAccept(state *model.ConnectionState) error {
+	state.RID++
+
+	iq, err := buildSessionAcceptIQ(state, "responder", nil)
+	if err != nil {
+		return err
+	}
+
+	requestBody, err := marshalBOSH(state.RID, state.Sid, nil, iq)
+	if err != nil {
+		return fmt.Errorf("marshal session-accept: %w", err)
+	}
 
 	state.StepsAOF.LogPrintf("=== BEGIN session-accept ===\n%s\n=== END session-accept ===", requestBody)
 
@@ -143,6 +208,6 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
 		return fmt.Errorf("session-accept failed: %w", err)
 	}
 
-	state.StepsAOF.LogPrintf("[Step10] ✅ session-accept sent OK: %s", respXML)
+	state.StepsAOF.LogPrintf("[Step10] session-accept sent OK: %s", respXML)
 	return nil
 }
