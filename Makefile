@@ -1,5 +1,5 @@
-.PHONY: all clean clean-ci install test \
-	e2e e2e-janus e2e-jitsi e2e-livekit \
+.PHONY: all clean clean-ci clean-screenshots install test \
+	e2e e2e-janus e2e-jitsi e2e-livekit screenshots \
 	_build-all _build-janus _build-jitsi _build-livekit \
 	ci cztest-client cztest-server cztest-payload-zip
 
@@ -53,6 +53,19 @@ e2e-jitsi: _build-jitsi $(VENV)/bin/activate
 e2e-livekit: _build-livekit $(VENV)/bin/activate
 	$(VENV)/bin/python -m pytest e2e/ -v -k livekit --basetemp=/tmp/pytest-callzip
 
+SCREENSHOTS_DIR := e2e/screenshots
+
+screenshots: _build-all $(VENV)/bin/activate
+	sudo rm -rf /tmp/pytest-callzip
+	$(VENV)/bin/python -m pytest e2e/test_screenshot.py -v -n auto --dist=loadgroup --basetemp=/tmp/pytest-callzip
+	$(eval FOLDER := $(shell date +%Y%m%d-%H%M%S))
+	mkdir -p $(SCREENSHOTS_DIR)/$(FOLDER)/janus $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi $(SCREENSHOTS_DIR)/$(FOLDER)/livekit
+	cp /tmp/pytest-callzip/popen-gw*/test_janus_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/janus/ 2>/dev/null || true
+	cp /tmp/pytest-callzip/popen-gw*/test_jitsi_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi/ 2>/dev/null || true
+	cp /tmp/pytest-callzip/popen-gw*/test_livekit_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/livekit/ 2>/dev/null || true
+	@echo "Screenshots saved to $(SCREENSHOTS_DIR)/$(FOLDER)/"
+	@echo "View at http://localhost:8099/verify.html?dir=$(FOLDER)"
+
 _build-all:
 	docker build -t callzip:latest .
 	docker build -t callzip-janus:latest docker/janus
@@ -84,6 +97,9 @@ clean-ci:
 	docker compose --project-name callzip-livekit --profile livekit down -v --remove-orphans 2>/dev/null || true
 	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest callzip-livekit:latest 2>/dev/null || true
 	rm -rf /tmp/pytest-callzip
+
+clean-screenshots:
+	rm -rf e2e/screenshots/*/
 
 clean:
 	rm -f call.zip call.zip.exe cztest-client cztest-client.exe cztest-server cztest-server.exe

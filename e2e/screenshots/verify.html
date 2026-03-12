@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Screenshot Verification</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #eee; }
+  header { background: #2a2a2a; padding: 12px 20px; display: flex; align-items: center; gap: 16px;
+           border-bottom: 1px solid #444; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 18px; white-space: nowrap; }
+  select { font-size: 14px; padding: 4px 8px; background: #333; color: #eee; border: 1px solid #555;
+           border-radius: 4px; }
+  .tabs { display: flex; gap: 2px; }
+  .tab { padding: 6px 16px; cursor: pointer; border-radius: 4px 4px 0 0; font-size: 14px;
+         font-weight: 600; border: 1px solid transparent; }
+  .tab:hover { background: #383838; }
+  .tab.active { background: #333; border-color: #555; border-bottom-color: #333; }
+  .tab[data-sfu="janus"] { color: #64B5F6; }
+  .tab[data-sfu="jitsi"] { color: #81C784; }
+  .tab[data-sfu="livekit"] { color: #FF8A65; }
+  main { padding: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 12px; }
+  .card { background: #252525; border-radius: 6px; overflow: hidden; border: 1px solid #333; }
+  .card img { width: 100%; display: block; cursor: pointer; }
+  .card .label { padding: 6px 10px; font-size: 12px; font-family: monospace; color: #aaa; }
+  .empty { padding: 40px; text-align: center; color: #666; font-size: 16px; }
+  /* lightbox */
+  .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.92);
+              z-index: 100; cursor: pointer; align-items: center; justify-content: center; }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; }
+  .nav-hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+              color: #888; font-size: 13px; z-index: 101; pointer-events: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Screenshots</h1>
+  <select id="dirSelect"><option value="">Loading...</option></select>
+  <div class="tabs" id="tabs"></div>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+</main>
+<div class="lightbox" id="lightbox">
+  <img id="lbImg" src="">
+  <div class="nav-hint">Click or Esc to close &middot; Arrow keys to navigate</div>
+</div>
+<script>
+const SFUS = ["janus", "jitsi", "livekit"];
+const dirSelect = document.getElementById("dirSelect");
+const tabs = document.getElementById("tabs");
+const grid = document.getElementById("grid");
+const lightbox = document.getElementById("lightbox");
+const lbImg = document.getElementById("lbImg");
+
+let currentImages = [];
+let lbIndex = -1;
+
+// Parse directory listing HTML from python -m http.server
+async function listDir(path) {
+  const r = await fetch(path);
+  const html = await r.text();
+  const matches = [...html.matchAll(/href="([^"]+)"/g)].map(m => decodeURIComponent(m[1]));
+  return matches.filter(m => m !== "../");
+}
+
+// Get ?dir= from URL
+function getParam(key) {
+  return new URLSearchParams(location.search).get(key);
+}
+function setParams(params) {
+  const u = new URL(location.href);
+  for (const [k, v] of Object.entries(params)) {
+    if (v) u.searchParams.set(k, v);
+    else u.searchParams.delete(k);
+  }
+  history.replaceState(null, "", u);
+}
+
+// Populate folder dropdown
+async function loadDirs() {
+  const all = await listDir("/");
+  const dirs = all.filter(d => d.endsWith("/")); // only directories
+  dirSelect.innerHTML = "";
+  if (dirs.length === 0) {
+    dirSelect.innerHTML = '<option value="">No folders found</option>';
+    return;
+  }
+  const sorted = dirs.sort().reverse(); // newest first
+  for (const d of sorted) {
+    const name = d.replace(/\/$/, "");
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    dirSelect.appendChild(opt);
+  }
+  const selected = getParam("dir") || sorted[0].replace(/\/$/, "");
+  dirSelect.value = selected;
+  loadFolder(selected);
+}
+
+// Build SFU tabs
+function buildTabs(available) {
+  tabs.innerHTML = "";
+  const activeSfu = getParam("sfu") || available[0] || SFUS[0];
+  for (const sfu of SFUS) {
+    const t = document.createElement("div");
+    t.className = "tab" + (sfu === activeSfu ? " active" : "");
+    t.dataset.sfu = sfu;
+    t.textContent = sfu;
+    if (!available.includes(sfu)) { t.style.opacity = "0.3"; t.style.pointerEvents = "none"; }
+    t.onclick = () => {
+      tabs.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+      t.classList.add("active");
+      setParams({ sfu });
+      showImages(dirSelect.value, sfu);
+    };
+    tabs.appendChild(t);
+  }
+  return activeSfu;
+}
+
+async function loadFolder(dir) {
+  setParams({ dir });
+  // Check which SFU subdirs exist
+  const subs = await listDir("/" + dir + "/");
+  const available = SFUS.filter(s => subs.some(sub => sub.replace(/\/$/, "") === s));
+  const activeSfu = buildTabs(available);
+  if (available.length > 0) {
+    showImages(dir, available.includes(activeSfu) ? activeSfu : available[0]);
+  } else {
+    grid.innerHTML = '<div class="empty">No SFU folders found in this directory</div>';
+  }
+}
+
+async function showImages(dir, sfu) {
+  grid.innerHTML = "";
+  const files = await listDir("/" + dir + "/" + sfu + "/");
+  const images = files.filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f)).sort();
+  currentImages = images.map(f => "/" + dir + "/" + sfu + "/" + f);
+
+  if (images.length === 0) {
+    grid.innerHTML = '<div class="empty">No images found</div>';
+    return;
+  }
+
+  for (let i = 0; i < images.length; i++) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const img = document.createElement("img");
+    img.src = currentImages[i];
+    img.loading = "lazy";
+    img.onclick = () => openLightbox(i);
+    card.appendChild(img);
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = images[i];
+    card.appendChild(label);
+    grid.appendChild(card);
+  }
+}
+
+dirSelect.onchange = () => loadFolder(dirSelect.value);
+
+// Lightbox
+function openLightbox(idx) {
+  lbIndex = idx;
+  lbImg.src = currentImages[idx];
+  lightbox.classList.add("open");
+}
+function closeLightbox() {
+  lightbox.classList.remove("open");
+  lbIndex = -1;
+}
+lightbox.onclick = closeLightbox;
+lbImg.onclick = (e) => e.stopPropagation();
+
+document.addEventListener("keydown", (e) => {
+  if (!lightbox.classList.contains("open")) return;
+  if (e.key === "Escape") closeLightbox();
+  else if (e.key === "ArrowRight" && lbIndex < currentImages.length - 1) {
+    lbIndex++;
+    lbImg.src = currentImages[lbIndex];
+  } else if (e.key === "ArrowLeft" && lbIndex > 0) {
+    lbIndex--;
+    lbImg.src = currentImages[lbIndex];
+  }
+});
+
+loadDirs();
+</script>
+</body>
+</html>
