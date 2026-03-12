@@ -92,7 +92,7 @@ def poll_health(
 
 
 @contextlib.contextmanager
-def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = None):
+def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = None, env: dict = None):
     """
     Start call.zip in a Docker container joined to the given Docker network.
 
@@ -101,6 +101,7 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
     video_dir: host directory mounted read-only as /test-videos inside the container.
     network: Docker network name to join (JANUS_NETWORK or JITSI_NETWORK).
     recording_dir: if given, mounted as /tmp/recordings (write).
+    env: if given, dict of environment variables passed to the container via -e flags.
 
     Yields (health_url, proc) where health_url is http://localhost:<port>/health.
     On exit: stops the container, waits for the process, prints captured output.
@@ -116,11 +117,17 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
         ci_mounts = ["-v", f"{REPO_ROOT / 'ci'}:/ci:ro"]
         container_config = f"/ci/{config}"
 
+    env_flags = []
+    if env:
+        for k, v in env.items():
+            env_flags += ["-e", f"{k}={v}"]
+
     cmd = [
         "docker", "run", "--rm", "--name", name,
         "--network", network,
         "-p", f"{host_port}:9090",
         "-v", f"{video_dir}:/test-videos:ro",
+        *env_flags,
         *ci_mounts,
     ]
     if recording_dir is not None:
