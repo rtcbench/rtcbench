@@ -96,7 +96,7 @@ clean-ci:
 	docker compose --project-name callzip-jitsi --profile jitsi down -v --remove-orphans 2>/dev/null || true
 	docker compose --project-name callzip-livekit --profile livekit down -v --remove-orphans 2>/dev/null || true
 	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest callzip-livekit:latest 2>/dev/null || true
-	rm -rf /tmp/pytest-callzip
+	sudo rm -rf /tmp/pytest-callzip
 
 clean-screenshots:
 	rm -rf e2e/screenshots/*/
