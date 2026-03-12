@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"encoding/xml"
 	"fmt"
 	"strings"
 
@@ -11,16 +12,14 @@ import (
 func Step03_RestartStream(state *model.ConnectionState) error {
 	state.RID++
 
-	requestBody := fmt.Sprintf(
-		`<body xmlns="http://jabber.org/protocol/httpbind"
-			rid="%d"
-			sid="%s"
-			to="%s"
-			xml:lang="en"
-			xmpp:restart="true"
-			xmlns:xmpp="urn:xmpp:xbosh" />`,
-		state.RID, state.Sid, state.LANServerIP,
-	)
+	requestBody, err := marshalBOSH(state.RID, state.Sid, []xml.Attr{
+		{Name: xml.Name{Local: "to"}, Value: state.LANServerIP},
+		{Name: xml.Name{Space: nsXML, Local: "lang"}, Value: "en"},
+		{Name: xml.Name{Space: nsXBOSH, Local: "restart"}, Value: "true"},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal restart stream: %w", err)
+	}
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
