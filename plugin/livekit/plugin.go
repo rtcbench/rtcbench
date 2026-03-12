@@ -116,8 +116,19 @@ func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 	}
 }
 
+func (p *Plugin) newFrameSource() ivf.FrameSource {
+	if p.ivfCameras != nil {
+		return ivf.NewMemSource(p.ivfCameras)
+	}
+	if len(p.ivfPaths) > 0 {
+		return ivf.NewDiskSource(p.ivfPaths)
+	}
+	return nil
+}
+
 func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomID, userID string) error {
-	if p.ivfCameras == nil && len(p.ivfPaths) == 0 {
+	src := p.newFrameSource()
+	if src == nil {
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
 
@@ -162,11 +173,7 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	}
 	logf("published VP9 track")
 
-	if p.ivfCameras != nil {
-		go ivf.LoopIntoTrackMem(logf, track, p.ivfCameras)
-	} else {
-		go ivf.LoopIntoTrack(logf, track, p.ivfPaths)
-	}
+	go ivf.LoopIntoTrack(logf, track, src)
 
 	select {
 	case <-ctx.Done():
