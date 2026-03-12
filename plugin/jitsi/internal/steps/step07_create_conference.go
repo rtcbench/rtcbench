@@ -11,28 +11,23 @@ import (
 func Step07_CreateConference(state *model.ConnectionState) error {
 	state.RID++
 
-	requestBody := fmt.Sprintf(`
-<body xmlns="http://jabber.org/protocol/httpbind"
-      rid="%d"
-      sid="%s">
-  <iq xmlns="jabber:client"
-      id="create-conference"
-      type="set"
-      to="focus.%s">
-    <conference xmlns="http://jitsi.org/protocol/focus"
-                room="%s@conference.%s"
-                machine-uid="%s">
-      <property name="visitors-version" value="1"/>
-    </conference>
-  </iq>
-</body>`,
-		state.RID,
-		state.Sid,
-		state.Domain,
-		state.RoomName,
-		state.Domain,
-		state.MachineUID,
+	requestBody, err := marshalBOSH(state.RID, state.Sid, nil,
+		IQConference{
+			ID:   "create-conference",
+			Type: "set",
+			To:   fmt.Sprintf("focus.%s", state.Domain),
+			Conference: FocusConference{
+				Room:       fmt.Sprintf("%s@conference.%s", state.RoomName, state.Domain),
+				MachineUID: state.MachineUID,
+				Properties: []FocusProperty{
+					{Name: "visitors-version", Value: "1"},
+				},
+			},
+		},
 	)
+	if err != nil {
+		return fmt.Errorf("marshal create conference: %w", err)
+	}
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
