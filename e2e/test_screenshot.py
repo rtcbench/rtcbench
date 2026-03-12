@@ -23,8 +23,7 @@ from helpers import (
 
 # 2 senders × 2 receivers = 4 active viewer entries in /health
 MIN_ACTIVE = 4
-SCREENSHOT_INTERVAL = 5
-SCREENSHOT_COUNT = 4  # at t=0, 5, 10, 15 s
+SCREENSHOT_TIMES = [0, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]  # seconds after join
 
 # ---------------------------------------------------------------------------
 # Browser HTML pages for Janus and LiveKit (Jitsi has its own web UI)
@@ -32,12 +31,40 @@ SCREENSHOT_COUNT = 4  # at t=0, 5, 10, 15 s
 
 _JANUS_HTML = """<!DOCTYPE html>
 <html><head><title>Janus Viewer</title></head>
-<body>
-<div id="videos" style="display:flex;flex-wrap:wrap;gap:8px;background:#222;
-     min-height:100vh;align-items:center;justify-content:center;"></div>
+<body style="margin:0;background:#222;">
+<div style="background:#1565C0;color:#fff;font:bold 20px sans-serif;padding:8px 16px;">janus</div>
+<div id="grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
+     padding:8px;min-height:calc(100vh - 40px);box-sizing:border-box;"></div>
 <script>
 const SERVER = "JANUS_SERVER_URL";
 const ROOM_ID = JANUS_ROOM_ID;
+const COLORS = ["#E57373","#64B5F6","#81C784","#FFD54F","#BA68C8","#4DD0E1","#FF8A65","#A1887F"];
+function dbg(msg) { console.log(msg); }
+
+function hc(s) { let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return h; }
+
+function makeTile(label) {
+    const t = document.createElement("div");
+    t.style.cssText = "position:relative;background:#1a1a1a;border-radius:8px;overflow:hidden;" +
+        "aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;";
+    const ph = document.createElement("div");
+    ph.className = "ph";
+    const c = document.createElement("div");
+    const col = COLORS[Math.abs(hc(label)) % COLORS.length];
+    c.style.cssText = "width:64px;height:64px;border-radius:50%;background:" + col +
+        ";display:flex;align-items:center;justify-content:center;font-size:22px;" +
+        "color:#fff;font-family:sans-serif;font-weight:bold;";
+    c.textContent = label.substring(0, 2).toUpperCase();
+    ph.appendChild(c);
+    t.appendChild(ph);
+    const b = document.createElement("div");
+    b.style.cssText = "position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,.6);" +
+        "color:#fff;padding:2px 6px;border-radius:4px;font:11px sans-serif;" +
+        "max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+    b.textContent = label;
+    t.appendChild(b);
+    return t;
+}
 
 async function post(path, body) {
     const r = await fetch(SERVER + path, {
@@ -49,48 +76,51 @@ async function post(path, body) {
 }
 
 async function main() {
-    // Create session
     const sess = await post("", {janus: "create"});
     const sid = sess.data.id;
 
-    // Attach to videoroom plugin
     const att = await post("/" + sid, {janus: "attach", plugin: "janus.plugin.videoroom"});
     const hid = att.data.id;
 
-    // Long-poll for async plugin events (join, start).
+    // Long-poll for async events (shared across all handles in this session).
     const events = {};
+    const unsolicitedHandlers = [];  // handlers for events not matched to a txn
     (async function poll() {
         while (true) {
             try {
-                const r = await fetch(SERVER + "/" + sid + "?maxev=1");
-                const d = await r.json();
-                if (d.transaction && events[d.transaction]) {
-                    events[d.transaction](d);
-                    delete events[d.transaction];
+                const r = await fetch(SERVER + "/" + sid + "?maxev=5");
+                const data = await r.json();
+                for (const d of (Array.isArray(data) ? data : [data])) {
+                    if (d.transaction && events[d.transaction]) {
+                        events[d.transaction](d);
+                        delete events[d.transaction];
+                    } else {
+                        for (const h of unsolicitedHandlers) h(d);
+                    }
                 }
-            } catch(e) { break; }
+            } catch(e) { await new Promise(r => setTimeout(r, 500)); }
         }
     })();
 
-    // Send a synchronous plugin message and return the HTTP response directly.
-    async function pluginMsg(body) {
+    function pluginMsg(handleId, body) {
         const txn = "t" + Math.random().toString(36).slice(2);
-        const r = await fetch(SERVER + "/" + sid + "/" + hid, {
+        return fetch(SERVER + "/" + sid + "/" + handleId, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({janus: "message", body, transaction: txn}),
-        });
-        return r.json();
+        }).then(r => r.json());
     }
 
-    // Send an async plugin message and wait for the event via long-poll.
-    function asyncMsg(body, jsep) {
+    function asyncMsg(handleId, body, jsep) {
         const txn = "t" + Math.random().toString(36).slice(2);
-        return new Promise(resolve => {
-            events[txn] = resolve;
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                delete events[txn]; reject(new Error("async timeout"));
+            }, 15000);
+            events[txn] = d => { clearTimeout(timer); resolve(d); };
             const msg = {janus: "message", body, transaction: txn};
             if (jsep) msg.jsep = jsep;
-            fetch(SERVER + "/" + sid + "/" + hid, {
+            fetch(SERVER + "/" + sid + "/" + handleId, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify(msg),
@@ -98,35 +128,130 @@ async function main() {
         });
     }
 
-    // List publishers (synchronous — result in HTTP response).
-    // Filter to participants with published streams — call.zip viewers join as
-    // "publisher" for discovery but never publish, so we must skip them.
-    const list = await pluginMsg({request: "listparticipants", room: ROOM_ID});
-    const all = list.plugindata.data.participants || [];
-    var pubs = all.filter(p => p.streams && p.streams.length > 0);
-    if (pubs.length === 0) pubs = all.filter(p => !p.display || !p.display.includes("-discovery"));
-    if (pubs.length === 0) { document.title = "ERROR: no publishers"; return; }
-    const streams = pubs.map(p => ({feed: p.id}));
-
-    // Subscribe (async — JSEP offer arrives via long-poll)
-    const joined = await asyncMsg({
-        request: "join", ptype: "subscriber", room: ROOM_ID, streams: streams,
+    // Step 1: Join as publisher to get the active publishers list.
+    // This mirrors the mvideoroom.html approach and triggers proper Janus
+    // publisher-notification flow (including keyframe requests).
+    const joined = await asyncMsg(hid, {
+        request: "join", ptype: "publisher", room: ROOM_ID,
+        display: "browser-viewer",
     });
-    // WebRTC answer
+    const pubData = joined.plugindata && joined.plugindata.data;
+    if (!pubData || pubData.videoroom !== "joined") {
+        document.title = "ERROR: publisher join failed"; return;
+    }
+    const publishers = pubData.publishers || [];
+    dbg("publishers=" + publishers.length + " ids=[" + publishers.map(p=>p.id).join(",") + "]");
+
+    // Step 2: Also get ALL participants (including non-publishing viewers)
+    // via listparticipants so we can show tiles for everyone.
+    const list = await pluginMsg(hid, {request: "listparticipants", room: ROOM_ID});
+    const allParts = list.plugindata.data.participants || [];
+    dbg("participants=" + allParts.length + " " + allParts.map(p=>(p.display||p.id)+"(pub="+!!p.publisher+")").join(", "));
+
+    // Build tile grid for ALL participants.
+    const grid = document.getElementById("grid");
+    const tileMap = {};
+    for (const p of allParts) {
+        const raw = p.display || ("id-" + p.id);
+        if (raw === "browser-viewer") continue;  // skip ourselves
+        const label = raw.replace(/-discovery$/, "");
+        const tile = makeTile(label);
+        grid.appendChild(tile);
+        tileMap[p.id] = tile;
+    }
+
+    // Step 3: Subscribe to all active publishers in a single multistream
+    // PeerConnection via a second handle (the standard Janus pattern).
+    if (publishers.length === 0) { document.title = "ERROR: no publishers"; return; }
+    const streams = publishers.map(p => ({feed: p.id}));
+
+    const subAtt = await post("/" + sid, {janus: "attach", plugin: "janus.plugin.videoroom"});
+    const subHid = subAtt.data.id;
+
+    const subJoined = await asyncMsg(subHid, {
+        request: "join", ptype: "subscriber", room: ROOM_ID,
+        streams: streams, private_id: pubData.private_id,
+    });
+    if (!subJoined.jsep) { document.title = "ERROR: no JSEP offer"; return; }
+
+    // Map mids to feed IDs so we can place video in the correct tile.
+    const midToFeed = {};
+    const subStreams = subJoined.plugindata &&
+        subJoined.plugindata.data && subJoined.plugindata.data.streams;
+    if (subStreams) {
+        for (const s of subStreams) {
+            if (s.type === "video") midToFeed[s.mid] = s.feed_id;
+        }
+    }
     const pc = new RTCPeerConnection();
     pc.ontrack = (ev) => {
-        if (ev.track.kind === "video") {
-            const v = document.createElement("video");
-            v.autoplay = true; v.muted = true; v.playsInline = true;
-            v.style.cssText = "width:480px;height:270px;background:#000;";
-            v.srcObject = new MediaStream([ev.track]);
-            document.getElementById("videos").appendChild(v);
-        }
+        if (ev.track.kind !== "video") return;
+        // Determine which publisher this track belongs to via mid mapping.
+        const mid = ev.transceiver && ev.transceiver.mid;
+        const feedId = midToFeed[mid];
+        dbg("ontrack video mid=" + mid + " feedId=" + feedId + " hasTile=" + !!tileMap[feedId]);
+        const tile = tileMap[feedId] ||
+            Object.values(tileMap).find(t => !t.querySelector("video"));
+        if (!tile) return;
+
+        const ph = tile.querySelector(".ph");
+        if (ph) ph.style.display = "none";
+        const v = document.createElement("video");
+        v.autoplay = true; v.muted = true; v.playsInline = true;
+        v.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;" +
+            "object-fit:cover;";
+        v.srcObject = new MediaStream([ev.track]);
+        tile.insertBefore(v, tile.firstChild);
+        v.play().catch(() => {});
     };
-    await pc.setRemoteDescription(new RTCSessionDescription(joined.jsep));
+
+    await pc.setRemoteDescription(new RTCSessionDescription(subJoined.jsep));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    await asyncMsg({request: "start"}, {type: "answer", sdp: answer.sdp});
+    await asyncMsg(subHid, {request: "start"}, {type: "answer", sdp: answer.sdp});
+    dbg("subscribed feeds=" + publishers.length + " midToFeed=" + JSON.stringify(midToFeed));
+
+    // Handle late-arriving publishers: subscribe dynamically and renegotiate.
+    const subscribedFeeds = new Set(publishers.map(p => p.id));
+    unsolicitedHandlers.push(async (ev) => {
+        const pd = ev.plugindata && ev.plugindata.data;
+        if (!pd || !pd.publishers) return;
+        const newPubs = pd.publishers.filter(p => !subscribedFeeds.has(p.id));
+        if (newPubs.length === 0) return;
+        dbg("NEW pubs arrived: " + newPubs.length + " ids=[" + newPubs.map(p=>p.id).join(",") + "]");
+        for (const p of newPubs) subscribedFeeds.add(p.id);
+
+        // Create tiles for new publishers if needed.
+        for (const p of newPubs) {
+            if (!tileMap[p.id]) {
+                const label = (p.display || ("id-" + p.id)).replace(/-discovery$/, "");
+                const tile = makeTile(label);
+                grid.appendChild(tile);
+                tileMap[p.id] = tile;
+            }
+        }
+
+        // Subscribe to new feeds on the existing subscriber handle.
+        const subResp = await asyncMsg(subHid,
+            {request: "subscribe", streams: newPubs.map(p => ({feed: p.id}))});
+        if (!subResp.jsep) { console.error("no offer for new feeds"); return; }
+
+        // Update mid→feed mapping from the updated response.
+        const ns = subResp.plugindata && subResp.plugindata.data &&
+            subResp.plugindata.data.streams;
+        if (ns) {
+            for (const s of ns) {
+                if (s.type === "video") midToFeed[s.mid] = s.feed_id;
+            }
+        }
+
+        // Renegotiate the PeerConnection.
+        await pc.setRemoteDescription(new RTCSessionDescription(subResp.jsep));
+        const ans = await pc.createAnswer();
+        await pc.setLocalDescription(ans);
+        await asyncMsg(subHid, {request: "start"}, {type: "answer", sdp: ans.sdp});
+        dbg("subscribed to " + newPubs.length + " new feeds, midToFeed=" + JSON.stringify(midToFeed));
+    });
 
     document.title = "JOINED";
 }
@@ -136,26 +261,81 @@ main().catch(e => { console.error(e); document.title = "ERROR: " + e.message; })
 
 _LIVEKIT_HTML = """<!DOCTYPE html>
 <html><head><title>LiveKit Viewer</title></head>
-<body>
-<div id="videos" style="display:flex;flex-wrap:wrap;gap:8px;background:#222;
-     min-height:100vh;align-items:center;justify-content:center;"></div>
+<body style="margin:0;background:#222;">
+<div style="background:#E65100;color:#fff;font:bold 20px sans-serif;padding:8px 16px;">livekit</div>
+<div id="grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
+     padding:8px;min-height:calc(100vh - 40px);box-sizing:border-box;"></div>
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
 <script>
-(async () => {
-    const WS_URL = "LIVEKIT_WS_URL";
-    const TOKEN  = "LIVEKIT_TOKEN";
+const WS_URL = "LIVEKIT_WS_URL";
+const TOKEN  = "LIVEKIT_TOKEN";
+const COLORS = ["#E57373","#64B5F6","#81C784","#FFD54F","#BA68C8","#4DD0E1","#FF8A65","#A1887F"];
 
+function hc(s) { let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return h; }
+
+function getOrCreateTile(identity) {
+    let t = document.getElementById("t-" + identity);
+    if (t) return t;
+    t = document.createElement("div");
+    t.id = "t-" + identity;
+    t.style.cssText = "position:relative;background:#1a1a1a;border-radius:8px;overflow:hidden;" +
+        "aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;";
+    const ph = document.createElement("div");
+    ph.className = "ph";
+    const c = document.createElement("div");
+    const col = COLORS[Math.abs(hc(identity)) % COLORS.length];
+    c.style.cssText = "width:64px;height:64px;border-radius:50%;background:" + col +
+        ";display:flex;align-items:center;justify-content:center;font-size:22px;" +
+        "color:#fff;font-family:sans-serif;font-weight:bold;";
+    c.textContent = identity.substring(0, 2).toUpperCase();
+    ph.appendChild(c);
+    t.appendChild(ph);
+    const b = document.createElement("div");
+    b.style.cssText = "position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,.6);" +
+        "color:#fff;padding:2px 6px;border-radius:4px;font:11px sans-serif;" +
+        "max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+    b.textContent = identity;
+    t.appendChild(b);
+    document.getElementById("grid").appendChild(t);
+    return t;
+}
+
+(async () => {
     const room = new LivekitClient.Room({adaptiveStream: false, dynacast: false});
 
     room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
         if (track.kind === "video") {
+            const tile = getOrCreateTile(participant.identity);
+            const ph = tile.querySelector(".ph");
+            if (ph) ph.style.display = "none";
             const el = track.attach();
-            el.style.cssText = "width:480px;height:270px;background:#000;";
-            document.getElementById("videos").appendChild(el);
+            el.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;" +
+                "object-fit:cover;";
+            tile.insertBefore(el, tile.firstChild);
         }
     });
 
+    room.on(LivekitClient.RoomEvent.ParticipantConnected, (p) => {
+        getOrCreateTile(p.identity);
+    });
+
     await room.connect(WS_URL, TOKEN);
+
+    // Create tiles for all participants already in the room.
+    room.remoteParticipants.forEach((p) => {
+        const tile = getOrCreateTile(p.identity);
+        p.videoTrackPublications.forEach((pub) => {
+            if (pub.track && pub.isSubscribed) {
+                const ph = tile.querySelector(".ph");
+                if (ph) ph.style.display = "none";
+                const el = pub.track.attach();
+                el.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;" +
+                    "object-fit:cover;";
+                tile.insertBefore(el, tile.firstChild);
+            }
+        });
+    });
+
     document.title = "JOINED";
 })().catch(e => { console.error(e); document.title = "ERROR: " + e.message; });
 </script>
@@ -212,6 +392,13 @@ def _join_jitsi(page, room_name: str):
     )
     page.goto(url, wait_until="load", timeout=60_000)
     page.wait_for_selector("video", timeout=60_000)
+    page.evaluate("""() => {
+        const h = document.createElement('div');
+        h.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#2E7D32;color:#fff;' +
+            'font:bold 20px sans-serif;padding:8px 16px;z-index:99999;';
+        h.textContent = 'jitsi';
+        document.body.prepend(h);
+    }""")
 
 
 def _join_janus(page, room_id: int):
@@ -222,7 +409,8 @@ def _join_janus(page, room_id: int):
         .replace("JANUS_ROOM_ID", str(room_id))
     )
     page.set_content(html, wait_until="load")
-    page.wait_for_function("document.title === 'JOINED' || document.title.startsWith('ERROR')", timeout=30_000)
+    # Longer timeout: publisher polling can take up to 15 s before subscribing.
+    page.wait_for_function("document.title === 'JOINED' || document.title.startsWith('ERROR')", timeout=60_000)
     title = page.title()
     assert not title.startswith("ERROR"), f"Janus join failed: {title}"
     page.wait_for_selector("video", timeout=30_000)
@@ -236,20 +424,22 @@ def _join_livekit(page, room_name: str):
         .replace("LIVEKIT_WS_URL", "ws://172.22.0.10:7880")
         .replace("LIVEKIT_TOKEN", token)
     )
-    page.set_content(html, wait_until="load", timeout=30_000)
-    page.wait_for_function("document.title === 'JOINED' || document.title.startsWith('ERROR')", timeout=30_000)
+    page.set_content(html, wait_until="load", timeout=60_000)
+    page.wait_for_function("document.title === 'JOINED' || document.title.startsWith('ERROR')", timeout=60_000)
     title = page.title()
     assert not title.startswith("ERROR"), f"LiveKit join failed: {title}"
     page.wait_for_selector("video", timeout=30_000)
 
 
 def _take_screenshots(page, sfu_name: str, out_dir):
-    """Take SCREENSHOT_COUNT screenshots at SCREENSHOT_INTERVAL second intervals."""
+    """Take screenshots at the times listed in SCREENSHOT_TIMES."""
     paths = []
-    for i in range(SCREENSHOT_COUNT):
-        if i > 0:
-            time.sleep(SCREENSHOT_INTERVAL)
-        path = out_dir / f"{sfu_name}-screenshot-{i * SCREENSHOT_INTERVAL:02d}s.png"
+    prev = 0
+    for t in SCREENSHOT_TIMES:
+        if t > prev:
+            time.sleep(t - prev)
+        prev = t
+        path = out_dir / f"{sfu_name}-screenshot-{t:02d}s.png"
         page.screenshot(path=path)
         paths.append(path)
         print(f"  screenshot: {path.name} ({path.stat().st_size:,} bytes)")
@@ -282,6 +472,7 @@ def _run_screenshot_test(sfu_name, config, network, join_fn, tmp_path, test_vide
                 viewport={"width": 1280, "height": 720},
             )
             page = context.new_page()
+            page.on("console", lambda msg: print(f"  [browser] {msg.text}"))
             try:
                 join_fn(page)
 
