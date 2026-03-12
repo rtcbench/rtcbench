@@ -25,13 +25,11 @@ func (c *Client) performHandshake(
 	room string,
 	nickname string,
 	ivf *vp9.IvfSegmenter,
-	senderIVFPaths []string,
-	preloadedCameras *ivfpkg.PreloadedCameras,
+	src ivfpkg.FrameSource,
 ) error {
 	state := &model.ConnectionState{
-		Sender:           len(senderIVFPaths) > 0 || preloadedCameras != nil,
-		SenderIVFPaths:   senderIVFPaths,
-		PreloadedCameras: preloadedCameras,
+		Sender:      src != nil,
+		FrameSource: src,
 		StepsAOF:       aof.Steps,
 		PionAOF:        aof.Pion,
 		PktRecvAOF:     aof.PktRecv,

@@ -22,10 +22,9 @@ type ConnectionState struct {
 	LogsDir     *string // e.g. "logs/e-2025XXXXXXXX/split/vbot-XXXXXXXX" or nil for no output
 
 	// sender related fields
-	SenderSSRC       *string
-	SenderMSID       *string
-	SenderIVFPaths   []string
-	PreloadedCameras *ivf.PreloadedCameras
+	SenderSSRC  *string
+	SenderMSID  *string
+	FrameSource ivf.FrameSource
 
 	// === Static config ===
 	BoshURL    string // e.g. https://10.99.0.210/http-bind

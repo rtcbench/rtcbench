@@ -5,10 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/pion/webrtc/v3/pkg/media"
 	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
-
-	"github.com/pion/webrtc/v3"
 )
 
 // Frame holds a single pre-parsed IVF frame ready for sending.
@@ -100,32 +97,3 @@ func loadOneFile(path string) ([]Frame, error) {
 	return frames, nil
 }
 
-// LoopIntoTrackMem continuously writes pre-loaded VP9 frames into track,
-// cycling through all files in order. It uses wall-clock-relative timing
-// to prevent accumulated drift across frames.
-// It runs forever; call from a goroutine.
-func LoopIntoTrackMem(
-	logf func(string, ...any),
-	track *webrtc.TrackLocalStaticSample,
-	cams *PreloadedCameras,
-) {
-	idx := 0
-	nextTime := time.Now()
-
-	for {
-		frames := cams.Files[idx]
-		for _, f := range frames {
-			nextTime = nextTime.Add(f.Duration)
-
-			if err := track.WriteSample(media.Sample{Data: f.Data, Duration: f.Duration}); err != nil {
-				logf("[ivf] WriteSample: %v", err)
-				return
-			}
-
-			if wait := time.Until(nextTime); wait > 0 {
-				time.Sleep(wait)
-			}
-		}
-		idx = (idx + 1) % len(cams.Files)
-	}
-}
