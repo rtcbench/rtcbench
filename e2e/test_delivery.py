@@ -12,25 +12,25 @@ import pytest
 
 from helpers import (
     JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK,
-    callzip_run, poll_health, record_result,
+    PLUGIN_ENV, callzip_run, poll_health, record_result,
 )
 
 JANUS_SCENARIOS = [
-    ("janus-smoke.yml",      1, 120),
-    ("janus-smoke-1s3v.yml", 3, 120),
-    ("janus-smoke-2s3v.yml", 6, 120),
+    ("smoke.yml",      1, 120),
+    ("smoke-1s3v.yml", 3, 120),
+    ("smoke-2s3v.yml", 6, 120),
 ]
 
 JITSI_SCENARIOS = [
-    ("jitsi-smoke.yml",      1, 300),
-    ("jitsi-smoke-1s3v.yml", 3, 300),
-    ("jitsi-smoke-2s3v.yml", 6, 300),
+    ("smoke.yml",      1, 300),
+    ("smoke-1s3v.yml", 3, 300),
+    ("smoke-2s3v.yml", 6, 300),
 ]
 
 LIVEKIT_SCENARIOS = [
-    ("livekit-smoke.yml",      1, 120),
-    ("livekit-smoke-1s3v.yml", 3, 120),
-    ("livekit-smoke-2s3v.yml", 6, 300),
+    ("smoke.yml",      1, 120),
+    ("smoke-1s3v.yml", 3, 120),
+    ("smoke-2s3v.yml", 6, 300),
 ]
 
 
@@ -38,16 +38,16 @@ LIVEKIT_SCENARIOS = [
 @pytest.mark.parametrize(
     "config,min_active,timeout",
     JANUS_SCENARIOS,
-    ids=[s[0].removesuffix(".yml") for s in JANUS_SCENARIOS],
+    ids=[f"janus-{s[0].removesuffix('.yml')}" for s in JANUS_SCENARIOS],
 )
 def test_janus_delivery(janus_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir, network=JANUS_NETWORK) as (url, _proc):
+    with callzip_run(config, test_video_dir, network=JANUS_NETWORK, env=PLUGIN_ENV["janus"]) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:
             pytest.fail(str(e))
 
-    record_result(config.removesuffix(".yml"), result)
+    record_result(f"janus-{config.removesuffix('.yml')}", result)
 
     active = [v for v in result["viewers"] if v["last_seen_ago_ms"] <= 30_000]
     assert result["viewers_active"] >= min_active
@@ -62,16 +62,16 @@ def test_janus_delivery(janus_infra, test_video_dir, config, min_active, timeout
 @pytest.mark.parametrize(
     "config,min_active,timeout",
     JITSI_SCENARIOS,
-    ids=[s[0].removesuffix(".yml") for s in JITSI_SCENARIOS],
+    ids=[f"jitsi-{s[0].removesuffix('.yml')}" for s in JITSI_SCENARIOS],
 )
 def test_jitsi_delivery(jitsi_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir, network=JITSI_NETWORK) as (url, _proc):
+    with callzip_run(config, test_video_dir, network=JITSI_NETWORK, env=PLUGIN_ENV["jitsi"]) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:
             pytest.fail(str(e))
 
-    record_result(config.removesuffix(".yml"), result)
+    record_result(f"jitsi-{config.removesuffix('.yml')}", result)
 
     active = [v for v in result["viewers"] if v["last_seen_ago_ms"] <= 30_000]
     assert result["viewers_active"] >= min_active
@@ -86,16 +86,16 @@ def test_jitsi_delivery(jitsi_infra, test_video_dir, config, min_active, timeout
 @pytest.mark.parametrize(
     "config,min_active,timeout",
     LIVEKIT_SCENARIOS,
-    ids=[s[0].removesuffix(".yml") for s in LIVEKIT_SCENARIOS],
+    ids=[f"livekit-{s[0].removesuffix('.yml')}" for s in LIVEKIT_SCENARIOS],
 )
 def test_livekit_delivery(livekit_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir, network=LIVEKIT_NETWORK) as (url, _proc):
+    with callzip_run(config, test_video_dir, network=LIVEKIT_NETWORK, env=PLUGIN_ENV["livekit"]) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:
             pytest.fail(str(e))
 
-    record_result(config.removesuffix(".yml"), result)
+    record_result(f"livekit-{config.removesuffix('.yml')}", result)
 
     active = [v for v in result["viewers"] if v["last_seen_ago_ms"] <= 30_000]
     assert result["viewers_active"] >= min_active
