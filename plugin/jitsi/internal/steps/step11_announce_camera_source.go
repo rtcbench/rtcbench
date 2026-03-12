@@ -18,26 +18,17 @@ func Step11_Sender_AnnounceCameraSource(state *model.ConnectionState) error {
 	// Jitsi Meet pattern: after session-accept, update SourceInfo to include "<endpoint>-v0"
 	sourceInfoJSON := fmt.Sprintf(`{"%s-v0":{"muted":false}}`, endpointID)
 
-	requestBody := fmt.Sprintf(`
-<body xmlns="http://jabber.org/protocol/httpbind"
-      rid="%d"
-      sid="%s">
-  <presence xmlns="jabber:client"
-            to="%s@conference.%s/%s">
-    <x xmlns="http://jabber.org/protocol/muc" />
-    <SourceInfo>%s</SourceInfo>
-    <jitsi_participant_codecList>vp9</jitsi_participant_codecList>
-    <nick xmlns="http://jabber.org/protocol/nick">%s</nick>
-  </presence>
-</body>`,
-		state.RID,
-		state.Sid,
-		state.RoomName,
-		state.Domain,
-		endpointID,
-		sourceInfoJSON,
-		state.Nickname,
+	requestBody, err := marshalBOSH(state.RID, state.Sid, nil,
+		MUCPresence{
+			To:         fmt.Sprintf("%s@conference.%s/%s", state.RoomName, state.Domain, endpointID),
+			SourceInfo: SourceInfoElem{Value: sourceInfoJSON},
+			CodecList:  CodecListElem{Value: "vp9"},
+			Nick:       NickElem{Value: state.Nickname},
+		},
 	)
+	if err != nil {
+		return fmt.Errorf("marshal camera source presence: %w", err)
+	}
 
 	state.StepsAOF.LogPrintf("=== BEGIN Step11 camera SourceInfo presence ===\n%s\n=== END Step11 ===", requestBody)
 
@@ -46,6 +37,6 @@ func Step11_Sender_AnnounceCameraSource(state *model.ConnectionState) error {
 		return fmt.Errorf("Step11_Sender_AnnounceCameraSource failed: %w", err)
 	}
 
-	state.StepsAOF.LogPrintf("[Step11] ✅ Sent camera SourceInfo presence update OK: %s", respXML)
+	state.StepsAOF.LogPrintf("[Step11] Sent camera SourceInfo presence update OK: %s", respXML)
 	return nil
 }
