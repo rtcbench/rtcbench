@@ -17,6 +17,7 @@ from helpers import (
     JANUS_NETWORK,
     JITSI_NETWORK,
     LIVEKIT_NETWORK,
+    PLUGIN_ENV,
     callzip_run,
     poll_health,
 )
@@ -446,7 +447,7 @@ def _take_screenshots(page, sfu_name: str, out_dir):
     return paths
 
 
-def _run_screenshot_test(sfu_name, config, network, join_fn, tmp_path, test_video_dir):
+def _run_screenshot_test(sfu_name, config, network, join_fn, tmp_path, test_video_dir, env=None):
     """
     Core screenshot smoke test logic shared across SFU backends.
 
@@ -457,7 +458,7 @@ def _run_screenshot_test(sfu_name, config, network, join_fn, tmp_path, test_vide
     """
     timeout = 300 if sfu_name == "jitsi" else 120
 
-    with callzip_run(config, test_video_dir, network=network) as (url, _proc):
+    with callzip_run(config, test_video_dir, network=network, env=env) as (url, _proc):
         # Wait for receivers to reach target bitrate before opening browser.
         try:
             poll_health(url, timeout, MIN_ACTIVE)
@@ -495,11 +496,12 @@ def _run_screenshot_test(sfu_name, config, network, join_fn, tmp_path, test_vide
 def test_janus_screenshot(janus_infra, test_video_dir, tmp_path):
     _run_screenshot_test(
         sfu_name="janus",
-        config="janus-smoke-2s2v.yml",
+        config="smoke-2s2v.yml",
         network=JANUS_NETWORK,
         join_fn=lambda page: _join_janus(page, room_id=1234),
         tmp_path=tmp_path,
         test_video_dir=test_video_dir,
+        env=PLUGIN_ENV["janus"],
     )
 
 
@@ -507,11 +509,12 @@ def test_janus_screenshot(janus_infra, test_video_dir, tmp_path):
 def test_jitsi_screenshot(jitsi_infra, test_video_dir, tmp_path):
     _run_screenshot_test(
         sfu_name="jitsi",
-        config="jitsi-smoke-2s2v.yml",
+        config="smoke-2s2v.yml",
         network=JITSI_NETWORK,
-        join_fn=lambda page: _join_jitsi(page, room_name="smoke-test-room"),
+        join_fn=lambda page: _join_jitsi(page, room_name="room-1234"),
         tmp_path=tmp_path,
         test_video_dir=test_video_dir,
+        env=PLUGIN_ENV["jitsi"],
     )
 
 
@@ -519,9 +522,10 @@ def test_jitsi_screenshot(jitsi_infra, test_video_dir, tmp_path):
 def test_livekit_screenshot(livekit_infra, test_video_dir, tmp_path):
     _run_screenshot_test(
         sfu_name="livekit",
-        config="livekit-smoke-2s2v.yml",
+        config="smoke-2s2v.yml",
         network=LIVEKIT_NETWORK,
-        join_fn=lambda page: _join_livekit(page, room_name="livekit-2s2v"),
+        join_fn=lambda page: _join_livekit(page, room_name="room-1234"),
         tmp_path=tmp_path,
         test_video_dir=test_video_dir,
+        env=PLUGIN_ENV["livekit"],
     )
