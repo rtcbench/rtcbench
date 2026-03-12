@@ -11,28 +11,17 @@ import (
 func Step08_JoinRoom(state *model.ConnectionState) error {
 	state.RID++
 
-	sourceInfoJSON := "{}"
-
-	requestBody := fmt.Sprintf(`
-<body xmlns="http://jabber.org/protocol/httpbind"
-      rid="%d"
-      sid="%s">
-  <presence xmlns="jabber:client"
-            to="%s@conference.%s/%s">
-    <x xmlns="http://jabber.org/protocol/muc" />
-    <SourceInfo>%s</SourceInfo>
-    <jitsi_participant_codecList>vp9</jitsi_participant_codecList>
-    <nick xmlns="http://jabber.org/protocol/nick">%s</nick>
-  </presence>
-</body>`,
-		state.RID,
-		state.Sid,
-		state.RoomName,
-		state.Domain,
-		state.Nickname,
-		sourceInfoJSON,
-		state.Nickname,
+	requestBody, err := marshalBOSH(state.RID, state.Sid, nil,
+		MUCPresence{
+			To: fmt.Sprintf("%s@conference.%s/%s", state.RoomName, state.Domain, state.Nickname),
+			SourceInfo: SourceInfoElem{Value: "{}"},
+			CodecList:  CodecListElem{Value: "vp9"},
+			Nick:       NickElem{Value: state.Nickname},
+		},
 	)
+	if err != nil {
+		return fmt.Errorf("marshal join room: %w", err)
+	}
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
