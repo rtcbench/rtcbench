@@ -1,4 +1,4 @@
-# [call.zip](https://call.zip)
+# [call.zip](https://call.zip) [![CI](https://github.com/ioqr/call.zip/actions/workflows/ci.yml/badge.svg)](https://github.com/ioqr/call.zip/actions/workflows/ci.yml)
 
 Stress test large video calls using lightweight viewer bots.  
 Compatible with Jicofo and JVB (using VP9 SVC codec) to test Jitsi Meet conferences over LAN.
