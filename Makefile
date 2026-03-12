@@ -64,7 +64,7 @@ screenshots: _build-all $(VENV)/bin/activate
 	cp /tmp/pytest-callzip/popen-gw*/test_jitsi_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi/ 2>/dev/null || true
 	cp /tmp/pytest-callzip/popen-gw*/test_livekit_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/livekit/ 2>/dev/null || true
 	@echo "Screenshots saved to $(SCREENSHOTS_DIR)/$(FOLDER)/"
-	@echo "View at http://localhost:8099/verify.html?dir=$(FOLDER)"
+	@echo "View at http://$$(hostname -I | awk '{print $$1}'):8099/verify.html?dir=$(FOLDER)"
 
 _build-all:
 	docker build -t callzip:latest .
