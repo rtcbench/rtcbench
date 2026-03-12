@@ -12,15 +12,16 @@ import (
 func Step06_DiscoverServices(state *model.ConnectionState) error {
 	state.RID++
 
-	requestBody := fmt.Sprintf(`
-<body xmlns="http://jabber.org/protocol/httpbind"
-      rid="%d"
-      sid="%s">
-  <iq xmlns="jabber:client" id="discover-services" type="get" to="%s">
-    <services xmlns="urn:xmpp:extdisco:2"/>
-  </iq>
-</body>`,
-		state.RID, state.Sid, state.Jid)
+	requestBody, err := marshalBOSH(state.RID, state.Sid, nil,
+		IQDiscoverServices{
+			ID:   "discover-services",
+			Type: "get",
+			To:   state.Jid,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("marshal discover services: %w", err)
+	}
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
