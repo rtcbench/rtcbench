@@ -32,8 +32,7 @@ type Plugin struct {
 	wsURL              string
 	apiKey             string
 	apiSecret          string
-	ivfPaths           []string
-	ivfCameras         *ivf.PreloadedCameras
+	cameras            *ivf.Cameras
 	enableRecording    bool
 	recordingDirectory string
 	viewerManager      *viewer.Manager
@@ -57,19 +56,11 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
 
 	if config.Spec.Conference.Cameras.PerRoom > 0 {
-		if config.Spec.Conference.Cameras.InMemory {
-			cams, err := ivf.LoadCameras(config.Spec.Conference.Cameras.Directory)
-			if err != nil {
-				return fmt.Errorf("livekit: %w", err)
-			}
-			p.ivfCameras = cams
-		} else {
-			paths, err := ivf.LoadCameraPaths(config.Spec.Conference.Cameras.Directory)
-			if err != nil {
-				return fmt.Errorf("livekit: %w", err)
-			}
-			p.ivfPaths = paths
+		cams, err := ivf.NewCameras(config.Spec.Conference.Cameras.Directory, config.Spec.Conference.Cameras.InMemory)
+		if err != nil {
+			return fmt.Errorf("livekit: %w", err)
 		}
+		p.cameras = cams
 	}
 
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
@@ -116,19 +107,8 @@ func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 	}
 }
 
-func (p *Plugin) newFrameSource() ivf.FrameSource {
-	if p.ivfCameras != nil {
-		return ivf.NewMemSource(p.ivfCameras)
-	}
-	if len(p.ivfPaths) > 0 {
-		return ivf.NewDiskSource(p.ivfPaths)
-	}
-	return nil
-}
-
 func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomID, userID string) error {
-	src := p.newFrameSource()
-	if src == nil {
+	if p.cameras == nil {
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
 
@@ -173,7 +153,7 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	}
 	logf("published VP9 track")
 
-	go ivf.LoopIntoTrack(logf, track, src)
+	go ivf.LoopIntoTrack(logf, track, p.cameras.NewSource())
 
 	select {
 	case <-ctx.Done():
