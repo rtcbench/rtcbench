@@ -39,6 +39,7 @@ type Plugin struct {
 	cameras            *ivf.Cameras
 	enableRecording    bool
 	recordingDirectory string
+	statsBufferSize    int
 	viewerManager      *viewer.Manager
 	publisher          *vp9_stats.Publisher
 }
@@ -69,6 +70,7 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.clientIP = config.Spec.Network.ClientIP
 	p.enableRecording = config.Spec.Conference.Recording.Enabled
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
+	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
 
 	// Validate that the conference name contains a parseable integer for the Janus room ID.
 	if _, err := roomIDFromName(config.Spec.Conference.Name); err != nil {
@@ -309,6 +311,7 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 			PacketsPerSample:  viewerPacketsPerSample,
 			VP9RTPPayloadType: int(track.PayloadType()),
 			TrackBufferSize:   viewerTrackBufferSize,
+			StatsBufferSize:   p.statsBufferSize,
 		}
 		var seg *vp9.IvfSegmenter
 		if p.enableRecording {

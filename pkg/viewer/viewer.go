@@ -35,6 +35,7 @@ type Config struct {
 	PacketsPerSample  int `json:"packets_per_sample"`
 	VP9RTPPayloadType int `json:"vp9_rtp_payload_type"`
 	TrackBufferSize   int `json:"track_buffer_size"`
+	StatsBufferSize   int `json:"stats_buffer_size"`
 }
 
 func (c *Config) verify() error {
@@ -44,6 +45,9 @@ func (c *Config) verify() error {
 	}
 	if c.TrackBufferSize < 100 || c.TrackBufferSize > 10_000 { // TODO artificial limit
 		return fmt.Errorf("invalid config: TrackBufferSize (%d) out of range [100..10000]", c.TrackBufferSize)
+	}
+	if c.StatsBufferSize < 64 || c.StatsBufferSize > 4096 {
+		return fmt.Errorf("invalid config: StatsBufferSize (%d) out of range [64..4096]", c.StatsBufferSize)
 	}
 	return nil
 }
@@ -86,7 +90,7 @@ func (v *Viewer) run(done <-chan struct{}) error {
 
 		vp9RTPPayloadType = v.config.VP9RTPPayloadType
 		vp9PayloadDesc    vp9.PayloadDescriptor
-		vp9FrameStats     vp9_stats.FrameStatistics
+		vp9FrameStats     = vp9_stats.NewFrameStatistics(v.config.StatsBufferSize)
 		vp9QualitySample  vp9_stats.VideoQualitySample
 
 		packetsInSample  int

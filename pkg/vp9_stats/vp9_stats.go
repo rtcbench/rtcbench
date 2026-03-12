@@ -15,13 +15,16 @@ const (
 	nSpatialLayers  = maxLayerSpatialID + 1
 	nTemporalLayers = maxLayerTemporalID + 1
 
-	StatsBufferSize = 768 // TODO: configurable buffer size (StatsBufferSize)
+	DefaultStatsBufferSize = 768
 
 	fpsEWMAAlpha     = float32(0.9)
 	bitrateEWMAAlpha = fpsEWMAAlpha
 )
 
 type FrameStatistics struct {
+	// bufferSize ring buffer capacity
+	bufferSize int
+
 	// sampleSequenceNo this sequence number counts the number of calls to TakeSample which writes it to each sample
 	sampleSequenceNo uint64
 
@@ -32,7 +35,7 @@ type FrameStatistics struct {
 	len int
 
 	// packets buffer of parsed frameInfo per VP9 payload
-	packets [StatsBufferSize]frameInfo
+	packets []frameInfo
 
 	// layers histogram of SID x TID counts
 	layers [nSpatialLayers][nTemporalLayers]int
@@ -126,6 +129,14 @@ type SVCData struct {
 	Layers [nSpatialLayers][nTemporalLayers]int `json:"layers"`
 }
 
+// NewFrameStatistics creates a FrameStatistics with the given ring buffer capacity.
+func NewFrameStatistics(bufferSize int) *FrameStatistics {
+	return &FrameStatistics{
+		bufferSize: bufferSize,
+		packets:    make([]frameInfo, bufferSize),
+	}
+}
+
 // AcceptPacket updates the stat tracker with information about the newly arrived VP9 RTP packet
 func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp uint32, nBytes int, payloadDesc *vp9.PayloadDescriptor) {
 	spatialID := payloadDesc.SID
@@ -148,7 +159,7 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 		temporalID:     temporalID,
 	}
 
-	if stats.len < StatsBufferSize {
+	if stats.len < stats.bufferSize {
 		stats.bufferGrowthPhase()
 		return
 	}
@@ -172,7 +183,7 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 		stats.uniqueRtpTimestamps++
 	}
 
-	elapsedUS := stats.packets[stats.pos].clientReadTime - stats.packets[(stats.pos+1)%StatsBufferSize].clientReadTime
+	elapsedUS := stats.packets[stats.pos].clientReadTime - stats.packets[(stats.pos+1)%stats.bufferSize].clientReadTime
 	if elapsedUS <= 0 {
 		elapsedUS = 1
 	}
@@ -189,7 +200,7 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 
 	stats.latestSmoothBitrate = bitrateEWMAAlpha*stats.latestSmoothBitrate + (1.0-bitrateEWMAAlpha)*bufferBitrate
 
-	stats.pos = (stats.pos + 1) % StatsBufferSize
+	stats.pos = (stats.pos + 1) % stats.bufferSize
 
 	// update sample data
 	stats.sample.TotalBytes += int64(nBytes)
@@ -202,7 +213,7 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 func (stats *FrameStatistics) bufferGrowthPhase() {
 	stats.pos++
 	stats.len++
-	if stats.len == StatsBufferSize { // stats initialization
+	if stats.len == stats.bufferSize { // stats initialization
 		stats.initBufferStats()
 	}
 }
@@ -210,7 +221,7 @@ func (stats *FrameStatistics) bufferGrowthPhase() {
 func (stats *FrameStatistics) initBufferStats() {
 	stats.rtpTimestamps = make(map[uint32]int) // TODO reuse map
 
-	for i := 0; i < StatsBufferSize; i++ {
+	for i := 0; i < stats.bufferSize; i++ {
 		stats.layers[stats.packets[i].spatialID][stats.packets[i].temporalID]++
 		if _, frameExists := stats.rtpTimestamps[stats.packets[i].rtpTimestamp]; !frameExists {
 			stats.uniqueRtpTimestamps++
@@ -219,7 +230,7 @@ func (stats *FrameStatistics) initBufferStats() {
 		stats.sumBytes += int64(stats.packets[i].nBytes)
 	}
 
-	elapsedUS := stats.packets[StatsBufferSize-1].clientReadTime - stats.packets[0].clientReadTime
+	elapsedUS := stats.packets[stats.bufferSize-1].clientReadTime - stats.packets[0].clientReadTime
 	if elapsedUS <= 0 {
 		elapsedUS = 1
 	}
@@ -230,7 +241,7 @@ func (stats *FrameStatistics) initBufferStats() {
 	bufferBitrate := float32(stats.sumBytes*8) / (float32(elapsedUS) / float32(1_000_000))
 	stats.latestSmoothBitrate = bufferBitrate
 
-	for i := 0; i < StatsBufferSize; i++ {
+	for i := 0; i < stats.bufferSize; i++ {
 		stats.packets[i].bufferFPS = bufferFPS
 		stats.packets[i].bufferBitrate = bufferBitrate
 	}
@@ -241,7 +252,7 @@ func (stats *FrameStatistics) initBufferStats() {
 
 // TakeSample copies the histogram and current FPS into sample (or copies zero's if sample is too small)
 func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
-	if stats.len < StatsBufferSize {
+	if stats.len < stats.bufferSize {
 		*sample = VideoQualitySample{
 			SequenceNo: stats.sampleSequenceNo,
 		}
@@ -260,7 +271,7 @@ func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
 	// use stats.pos-1 because stats.pos points to the next eviction (eldest member)
 	lastPos := stats.pos - 1
 	if lastPos < 0 {
-		lastPos = StatsBufferSize - 1
+		lastPos = stats.bufferSize - 1
 	}
 	sample.SmoothFPS = stats.latestSmoothFPS
 	sample.BufferFPS = stats.packets[lastPos].bufferFPS

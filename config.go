@@ -53,6 +53,7 @@ var (
 	ErrNegativeJoinPolicyConcurrency = errors.New("invalid spec.conference.joinPolicy.concurrency, must be >= 0")
 	ErrNegativeJoinStartSpacing      = errors.New("invalid spec.conference.joinPolicy.joinStartSpacing, must be >= 0")
 
+	ErrInvalidStatsBufferSize    = errors.New("invalid spec.conference.statsBufferSize integer, must be in range [64..4096]")
 	ErrMissingRecordingDirectory = errors.New("missing spec.conference.recording.directory pathname")
 
 	ErrMissingServerIP = errors.New("missing spec.network.serverIP address")
@@ -258,12 +259,13 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 }
 
 type ConferenceConfig struct {
-	Name         string
-	UsersPerRoom int
-	TotalRooms   int
-	Cameras      CameraConfig
-	JoinPolicy   JoinPolicyConfig
-	Recording    RecordingConfig
+	Name            string
+	UsersPerRoom    int
+	TotalRooms      int
+	StatsBufferSize int
+	Cameras         CameraConfig
+	JoinPolicy      JoinPolicyConfig
+	Recording       RecordingConfig
 }
 
 type YAMLConferenceConfig struct {
@@ -273,6 +275,8 @@ type YAMLConferenceConfig struct {
 	UsersPerRoom *int `yaml:"usersPerRoom,omitempty"`
 	// TotalRooms defaults to 1
 	TotalRooms *int `yaml:"totalRooms,omitempty"`
+	// StatsBufferSize optional ring buffer size for video quality stats (default 768)
+	StatsBufferSize *int `yaml:"statsBufferSize,omitempty"`
 	// Cameras optional config for some (or all) users to turn on their cameras
 	Cameras    *YAMLCameraConfig     `yaml:"cameras,omitempty"`
 	JoinPolicy *YAMLJoinPolicyConfig `yaml:"joinPolicy,omitempty"`
@@ -302,6 +306,9 @@ func (yc *YAMLConferenceConfig) validate() error {
 	}
 	if yc.TotalRooms != nil && *yc.TotalRooms < 1 {
 		errs = append(errs, ErrNonPositiveTotalRooms)
+	}
+	if yc.StatsBufferSize != nil && (*yc.StatsBufferSize < 64 || *yc.StatsBufferSize > 4096) {
+		errs = append(errs, ErrInvalidStatsBufferSize)
 	}
 	if yc.Cameras != nil {
 		camerasErr = yc.Cameras.validate()
@@ -333,6 +340,10 @@ func (yc *YAMLConferenceConfig) mustConvert() ConferenceConfig {
 	c.TotalRooms = 1
 	if yc.TotalRooms != nil {
 		c.TotalRooms = *yc.TotalRooms
+	}
+	c.StatsBufferSize = vp9_stats.DefaultStatsBufferSize
+	if yc.StatsBufferSize != nil {
+		c.StatsBufferSize = *yc.StatsBufferSize
 	}
 	c.JoinPolicy = yc.JoinPolicy.mustConvert()
 	if yc.Recording != nil {

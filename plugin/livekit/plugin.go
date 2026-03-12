@@ -35,6 +35,7 @@ type Plugin struct {
 	cameras            *ivf.Cameras
 	enableRecording    bool
 	recordingDirectory string
+	statsBufferSize    int
 	viewerManager      *viewer.Manager
 	publisher          *vp9_stats.Publisher
 
@@ -54,6 +55,7 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 
 	p.enableRecording = config.Spec.Conference.Recording.Enabled
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
+	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
 
 	if config.Spec.Conference.Cameras.PerRoom > 0 {
 		cams, err := ivf.NewCameras(config.Spec.Conference.Cameras.Directory, config.Spec.Conference.Cameras.InMemory)
@@ -179,6 +181,7 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 					PacketsPerSample:  viewerPacketsPerSample,
 					VP9RTPPayloadType: int(track.PayloadType()),
 					TrackBufferSize:   viewerTrackBufferSize,
+					StatsBufferSize:   p.statsBufferSize,
 				}
 				var seg *vp9.IvfSegmenter
 				if p.enableRecording {
