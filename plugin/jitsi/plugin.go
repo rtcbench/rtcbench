@@ -18,8 +18,7 @@ type Plugin struct {
 	client             *jitsi.Client
 	enableRecording    bool
 	recordingDirectory string
-	ivfPaths           []string
-	preloadedCameras   *ivfpkg.PreloadedCameras
+	cameras            *ivfpkg.Cameras
 }
 
 func NewPlugin() call.Plugin {
@@ -32,19 +31,11 @@ func (e *Plugin) Setup(_ context.Context, config *call.Config) error {
 	e.recordingDirectory = config.Spec.Conference.Recording.Directory
 
 	if config.Spec.Conference.Cameras.PerRoom > 0 {
-		if config.Spec.Conference.Cameras.InMemory {
-			cams, err := ivfpkg.LoadCameras(config.Spec.Conference.Cameras.Directory)
-			if err != nil {
-				return errors.Join(call.ErrCannotJoinRoom, err)
-			}
-			e.preloadedCameras = cams
-		} else {
-			paths, err := ivfpkg.LoadCameraPaths(config.Spec.Conference.Cameras.Directory)
-			if err != nil {
-				return errors.Join(call.ErrCannotJoinRoom, err)
-			}
-			e.ivfPaths = paths
+		cams, err := ivfpkg.NewCameras(config.Spec.Conference.Cameras.Directory, config.Spec.Conference.Cameras.InMemory)
+		if err != nil {
+			return errors.Join(call.ErrCannotJoinRoom, err)
 		}
+		e.cameras = cams
 	}
 
 	return nil
@@ -52,16 +43,6 @@ func (e *Plugin) Setup(_ context.Context, config *call.Config) error {
 
 func (e *Plugin) Shutdown(ctx context.Context) error {
 	e.client.Shutdown() // TODO: pass ctx
-	return nil
-}
-
-func (e *Plugin) newFrameSource() ivfpkg.FrameSource {
-	if e.preloadedCameras != nil {
-		return ivfpkg.NewMemSource(e.preloadedCameras)
-	}
-	if len(e.ivfPaths) > 0 {
-		return ivfpkg.NewDiskSource(e.ivfPaths)
-	}
 	return nil
 }
 
@@ -87,8 +68,8 @@ func (e *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 	}
 
 	var src ivfpkg.FrameSource
-	if role == call.Sender {
-		src = e.newFrameSource()
+	if role == call.Sender && e.cameras != nil {
+		src = e.cameras.NewSource()
 	}
 
 	err = e.client.ConnectViewer(roomID, userID, ivf, src) // TODO: pass ctx

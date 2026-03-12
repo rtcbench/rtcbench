@@ -56,7 +56,6 @@ func registerLoggingCallbacks(logf func(string, ...any), pc *webrtc.PeerConnecti
 func StartPionPublisher(
 	logf func(string, ...any),
 	clientIP string,
-	ivfPaths []string,
 ) (*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error) {
 	api, err := newPionAPI(clientIP)
 	if err != nil {
