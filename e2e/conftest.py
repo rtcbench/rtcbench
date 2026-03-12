@@ -104,6 +104,7 @@ def test_video_dir(tmp_path_factory, ensure_docker_images):
             "-t", "10",
             "-c:v", "libvpx-vp9", "-b:v", "3.5M",
             "-minrate", "3M", "-maxrate", "4M",
+            "-g", "25",  # keyframe every 1 s — essential for browser decoding
             "-deadline", "realtime",
             "-f", "ivf", "/output/test.ivf",
             "-y", "-loglevel", "warning",
