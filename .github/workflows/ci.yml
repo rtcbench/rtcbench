@@ -54,7 +54,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=janus
 
       - name: Install Python e2e dependencies
-        run: pip install -r e2e/requirements.txt
+        run: |
+          pip install -r e2e/requirements.txt
+          playwright install --with-deps chromium
 
       - name: Run Janus e2e tests
         run: python -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-callzip
@@ -96,7 +98,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=jitsi-web
 
       - name: Install Python e2e dependencies
-        run: pip install -r e2e/requirements.txt
+        run: |
+          pip install -r e2e/requirements.txt
+          playwright install --with-deps chromium
 
       - name: Run Jitsi e2e tests
         run: python -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-callzip
