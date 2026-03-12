@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"encoding/xml"
 	"fmt"
 	"strings"
 
@@ -12,21 +13,18 @@ import (
 func Step01_StartSession(state *model.ConnectionState) error {
 	state.RID++
 
-	// The initial request is mostly empty <body>
-	requestBody := fmt.Sprintf(
-		`<body xmlns="http://jabber.org/protocol/httpbind"
-			content="text/xml; charset=utf-8"
-			hold="1"
-			rid="%d"
-			to="%s"
-			ver="1.6"
-			wait="60"
-			xml:lang="en"
-			xmlns:xmpp="urn:xmpp:xbosh"
-			xmpp:version="1.0" />`,
-		state.RID,
-		state.Domain,
-	)
+	requestBody, err := marshalBOSH(state.RID, "", []xml.Attr{
+		{Name: xml.Name{Local: "content"}, Value: "text/xml; charset=utf-8"},
+		{Name: xml.Name{Local: "hold"}, Value: "1"},
+		{Name: xml.Name{Local: "to"}, Value: state.Domain},
+		{Name: xml.Name{Local: "ver"}, Value: "1.6"},
+		{Name: xml.Name{Local: "wait"}, Value: "60"},
+		{Name: xml.Name{Space: nsXML, Local: "lang"}, Value: "en"},
+		{Name: xml.Name{Space: nsXBOSH, Local: "version"}, Value: "1.0"},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal start session: %w", err)
+	}
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
