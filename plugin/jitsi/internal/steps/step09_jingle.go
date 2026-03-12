@@ -20,13 +20,10 @@ func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 		// Only poll for a fresh response when we have nothing to process.
 		if respXML == "" {
 			state.RID++
-			requestBody := fmt.Sprintf(`
-<body xmlns="http://jabber.org/protocol/httpbind"
-      rid="%d"
-      sid="%s"></body>`,
-				state.RID,
-				state.Sid,
-			)
+			requestBody, marshalErr := marshalBOSH(state.RID, state.Sid, nil)
+			if marshalErr != nil {
+				return fmt.Errorf("marshal poll body: %w", marshalErr)
+			}
 			respXML, err = state.BOSHSender.Send(state.BoshURL, requestBody)
 			if err != nil {
 				return fmt.Errorf("wait for Jingle offer failed: %w", err)
@@ -84,27 +81,33 @@ func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 			id := util.ExtractAttrInTag(respXML, "iq", "id")
 
 			state.RID++
-			response := fmt.Sprintf(`<body xmlns="http://jabber.org/protocol/httpbind"
-      rid="%d"
-      sid="%s">
-  <iq from="%s"
-      to="%s"
-      id="%s"
-      type="result">
-    <query xmlns="http://jabber.org/protocol/disco#info">
-      <identity category="client" type="bot" name="%s"/>
-      <feature var="http://jabber.org/protocol/muc"/>
-      <feature var="urn:xmpp:jingle:1"/>
-      <feature var="urn:xmpp:jingle:apps:rtp:1"/>
-      <feature var="urn:xmpp:jingle:apps:rtp:audio"/>
-      <feature var="urn:xmpp:jingle:apps:rtp:video"/>
-      <feature var="urn:xmpp:jingle:apps:dtls:0"/>
-      <feature var="urn:xmpp:jingle:transports:ice-udp:1"/>
-      <feature var="urn:ietf:rfc:5761"/>
-      <feature var="urn:ietf:rfc:5888"/>
-    </query>
-  </iq>
-</body>`, state.RID, state.Sid, state.Jid, from, id, state.Nickname)
+			response, marshalErr := marshalBOSH(state.RID, state.Sid, nil,
+				IQDiscoInfoResult{
+					From: state.Jid,
+					To:   from,
+					ID:   id,
+					Type: "result",
+					Query: DiscoInfoQuery{
+						Identities: []DiscoIdentity{
+							{Category: "client", Type: "bot", Name: state.Nickname},
+						},
+						Features: []DiscoFeature{
+							{Var: "http://jabber.org/protocol/muc"},
+							{Var: "urn:xmpp:jingle:1"},
+							{Var: "urn:xmpp:jingle:apps:rtp:1"},
+							{Var: "urn:xmpp:jingle:apps:rtp:audio"},
+							{Var: "urn:xmpp:jingle:apps:rtp:video"},
+							{Var: "urn:xmpp:jingle:apps:dtls:0"},
+							{Var: "urn:xmpp:jingle:transports:ice-udp:1"},
+							{Var: "urn:ietf:rfc:5761"},
+							{Var: "urn:ietf:rfc:5888"},
+						},
+					},
+				},
+			)
+			if marshalErr != nil {
+				return fmt.Errorf("marshal disco#info result: %w", marshalErr)
+			}
 
 			respXML, err = state.BOSHSender.Send(state.BoshURL, response)
 			if err != nil {
