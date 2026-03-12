@@ -13,19 +13,12 @@ import (
 func Step05_CreateSession(state *model.ConnectionState) error {
 	state.RID++
 
-	requestBody := fmt.Sprintf(
-		`<body xmlns="http://jabber.org/protocol/httpbind"
-            rid="%d"
-            sid="%s">
-            <iq xmlns="jabber:client"
-                id="_session_auth"
-                type="set">
-                <session xmlns="urn:ietf:params:xml:ns:xmpp-session"/>
-            </iq>
-        </body>`,
-		state.RID,
-		state.Sid,
+	requestBody, err := marshalBOSH(state.RID, state.Sid, nil,
+		IQSession{ID: "_session_auth", Type: "set"},
 	)
+	if err != nil {
+		return fmt.Errorf("marshal create session: %w", err)
+	}
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
