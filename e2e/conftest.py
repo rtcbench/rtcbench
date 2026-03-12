@@ -115,6 +115,35 @@ def test_video_dir(tmp_path_factory, ensure_docker_images):
     return d
 
 
+@pytest.fixture(scope="session")
+def test_video_dir_1mbps(tmp_path_factory, ensure_docker_images):
+    """
+    Generate a 1 Mbps VP9/IVF test video for stats buffer size tests.
+    Lower bitrate produces fewer packets/sec, exercising the stats pipeline
+    at a different operating point than the standard 3.5 Mbps video.
+    """
+    d = tmp_path_factory.mktemp("test-videos-1mbps")
+    subprocess.run(
+        [
+            "docker", "run", "--rm",
+            "--entrypoint", "ffmpeg",
+            "-v", f"{d}:/output",
+            "callzip:latest",
+            "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=25",
+            "-t", "10",
+            "-c:v", "libvpx-vp9", "-b:v", "1M",
+            "-minrate", "800k", "-maxrate", "1.2M",
+            "-g", "25",
+            "-deadline", "realtime",
+            "-f", "ivf", "/output/test.ivf",
+            "-y", "-loglevel", "warning",
+        ],
+        check=True,
+    )
+    assert (d / "test.ivf").exists(), "1 Mbps test video generation failed"
+    return d
+
+
 # ---------------------------------------------------------------------------
 # Terminal summary hook
 # ---------------------------------------------------------------------------

@@ -160,7 +160,7 @@ func TestFrameStatistics_AcceptPacketAndTakeSample_SimpleVideos(t *testing.T) {
 	videoDurations := []int{2, 30, 5 * 60}
 
 	for _, seconds := range videoDurations {
-		var stats FrameStatistics
+		stats := NewFrameStatistics(DefaultStatsBufferSize)
 		var sample VideoQualitySample
 
 		// simple "perfect" test packets
@@ -210,8 +210,8 @@ func TestFrameStatistics_AcceptPacketAndTakeSample_SimpleVideos(t *testing.T) {
 		checkInitializedSample := func() {
 			wasInitialized = true
 
-			if sample.SequenceNo < StatsBufferSize-1 {
-				t.Fatalf("[seconds=%d] initialized seq no < StatsBufferSize", seconds)
+			if sample.SequenceNo < DefaultStatsBufferSize-1 {
+				t.Fatalf("[seconds=%d] initialized seq no < DefaultStatsBufferSize", seconds)
 			}
 
 			if sample.EstimatedFPS != 25 {
@@ -219,7 +219,7 @@ func TestFrameStatistics_AcceptPacketAndTakeSample_SimpleVideos(t *testing.T) {
 					seconds, sample.SequenceNo, sample.EstimatedFPS)
 			}
 
-			if sample.SVC.Layers[maxLayerSpatialID][maxLayerTemporalID] != StatsBufferSize {
+			if sample.SVC.Layers[maxLayerSpatialID][maxLayerTemporalID] != DefaultStatsBufferSize {
 				t.Fatalf("[seconds=%d;seq=%d] expected all SIDxTID's to be 2x2 got %d",
 					seconds, sample.SequenceNo,
 					sample.SVC.Layers[maxLayerSpatialID][maxLayerTemporalID])
@@ -245,5 +245,69 @@ func TestFrameStatistics_AcceptPacketAndTakeSample_SimpleVideos(t *testing.T) {
 		if !wasInitialized {
 			t.Fatalf("[seconds=%d] did not initialize, use a longer video time", seconds)
 		}
+	}
+}
+
+func TestFrameStatistics_CustomBufferSize(t *testing.T) {
+	bufferSizes := []int{128, 256, 512}
+
+	for _, bufSize := range bufferSizes {
+		stats := NewFrameStatistics(bufSize)
+		var sample VideoQualitySample
+
+		testPackets := createTestPackets1080p25fps(10)
+
+		initialized := false
+		var lastSample VideoQualitySample
+		for _, pkt := range testPackets {
+			stats.AcceptPacket(pkt.clientReadTime, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
+			stats.TakeSample(&sample)
+			stats.EndSample()
+
+			if stats.Initialized() && !initialized {
+				initialized = true
+
+				if sample.SVC.Layers[maxLayerSpatialID][maxLayerTemporalID] != bufSize {
+					t.Fatalf("[bufSize=%d] expected layer count=%d, got %d",
+						bufSize, bufSize, sample.SVC.Layers[maxLayerSpatialID][maxLayerTemporalID])
+				}
+			}
+			lastSample = sample
+		}
+
+		if !initialized {
+			t.Fatalf("[bufSize=%d] did not initialize", bufSize)
+		}
+
+		// After processing 10s of video, stats should be non-zero
+		if lastSample.SmoothFPS <= 0 {
+			t.Fatalf("[bufSize=%d] expected positive SmoothFPS, got %f", bufSize, lastSample.SmoothFPS)
+		}
+		if lastSample.SmoothBitrate <= 0 {
+			t.Fatalf("[bufSize=%d] expected positive SmoothBitrate, got %f", bufSize, lastSample.SmoothBitrate)
+		}
+	}
+}
+
+func BenchmarkAcceptPacket(b *testing.B) {
+	benchmarks := []struct {
+		name       string
+		bufferSize int
+	}{
+		{"bufferSize=128", 128},
+		{"bufferSize=768", DefaultStatsBufferSize},
+		{"bufferSize=4096", 4096},
+	}
+	testPackets := createTestPackets1080p25fps(60)
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			stats := NewFrameStatistics(bm.bufferSize)
+			pd := &testPackets[0].payloadDesc
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				pkt := &testPackets[i%len(testPackets)]
+				stats.AcceptPacket(pkt.clientReadTime, pkt.rtpTimestamp, pkt.nBytes, pd)
+			}
+		})
 	}
 }
