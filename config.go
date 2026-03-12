@@ -361,6 +361,7 @@ type CameraConfig struct {
 	FileType   string
 	VideoCodec string
 	Directory  string
+	InMemory   bool
 }
 
 type YAMLCameraConfig struct {
@@ -368,6 +369,7 @@ type YAMLCameraConfig struct {
 	FileType   *string `yaml:"fileType,omitempty"`
 	VideoCodec *string `yaml:"videoCodec,omitempty"`
 	Directory  *string `yaml:"directory,omitempty"`
+	InMemory   *bool   `yaml:"inMemory,omitempty"`
 }
 
 func (yc *YAMLCameraConfig) validate() error {
@@ -401,6 +403,9 @@ func (yc *YAMLCameraConfig) mustConvert() CameraConfig {
 	c.FileType = *yc.FileType
 	c.VideoCodec = *yc.VideoCodec
 	c.Directory = *yc.Directory
+	if yc.InMemory != nil {
+		c.InMemory = *yc.InMemory
+	}
 	return c
 }
 
