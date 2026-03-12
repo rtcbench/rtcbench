@@ -26,6 +26,7 @@ cztest-payload:
 	@echo "*** DONE ***\nPlease upload ./target/cztest-payload.zip to the cztest server."
 
 test:
+	go vet ./...
 	go test -v ./...
 
 # ---------------------------------------------------------------------------
