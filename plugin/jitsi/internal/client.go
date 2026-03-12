@@ -5,6 +5,7 @@ import (
 
 	"call.zip"
 	"call.zip/pkg/aofconf"
+	ivfpkg "call.zip/pkg/ivf"
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
@@ -40,9 +41,9 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 	}
 }
 
-func (c *Client) ConnectViewer(roomID, userID string, ivf *vp9.IvfSegmenter, ivfPathsToStream []string) error {
+func (c *Client) ConnectViewer(roomID, userID string, ivf *vp9.IvfSegmenter, ivfPathsToStream []string, preloadedCameras *ivfpkg.PreloadedCameras) error {
 	aof := buildAOFConfig(c.serverIP, c.clientIP, roomID, userID)
-	return c.performHandshake(aof, roomID, userID, ivf, ivfPathsToStream)
+	return c.performHandshake(aof, roomID, userID, ivf, ivfPathsToStream, preloadedCameras)
 }
 
 func (c *Client) Shutdown() {

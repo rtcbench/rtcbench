@@ -12,6 +12,7 @@ import (
 
 // LoopIntoTrack continuously re-reads the IVF files in paths (cycling in order)
 // and writes VP9 frames into track, pacing by the IVF timestamps.
+// It uses wall-clock-relative timing to prevent accumulated drift.
 // It runs forever; call from a goroutine.
 func LoopIntoTrack(
 	logf func(string, ...any),
@@ -20,12 +21,14 @@ func LoopIntoTrack(
 ) {
 	defaultDur := 33 * time.Millisecond
 	idx := 0
+	nextTime := time.Now()
 
 	for {
 		f, err := os.Open(paths[idx])
 		if err != nil {
 			logf("[ivf] open %s: %v", paths[idx], err)
 			time.Sleep(2 * time.Second)
+			nextTime = time.Now()
 			continue
 		}
 
@@ -34,6 +37,7 @@ func LoopIntoTrack(
 			_ = f.Close()
 			logf("[ivf] NewWith: %v", err)
 			time.Sleep(2 * time.Second)
+			nextTime = time.Now()
 			continue
 		}
 
@@ -67,7 +71,11 @@ func LoopIntoTrack(
 				_ = f.Close()
 				return
 			}
-			time.Sleep(dur)
+
+			nextTime = nextTime.Add(dur)
+			if wait := time.Until(nextTime); wait > 0 {
+				time.Sleep(wait)
+			}
 		}
 
 		_ = f.Close()

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"call.zip/pkg/aofconf"
+	ivfpkg "call.zip/pkg/ivf"
 	"call.zip/pkg/vp9"
 	"call.zip/plugin/jitsi/internal/httpxml"
 	"call.zip/plugin/jitsi/internal/model"
@@ -25,10 +26,12 @@ func (c *Client) performHandshake(
 	nickname string,
 	ivf *vp9.IvfSegmenter,
 	senderIVFPaths []string,
+	preloadedCameras *ivfpkg.PreloadedCameras,
 ) error {
 	state := &model.ConnectionState{
-		Sender:         len(senderIVFPaths) > 0,
-		SenderIVFPaths: senderIVFPaths,
+		Sender:           len(senderIVFPaths) > 0 || preloadedCameras != nil,
+		SenderIVFPaths:   senderIVFPaths,
+		PreloadedCameras: preloadedCameras,
 		StepsAOF:       aof.Steps,
 		PionAOF:        aof.Pion,
 		PktRecvAOF:     aof.PktRecv,
