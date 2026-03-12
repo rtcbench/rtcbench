@@ -25,6 +25,9 @@ cztest-server.exe
 !cmd/cztest-client
 !cmd/cztest-server
 
+# Screenshot artifacts (keep verify.html, ignore image runs)
+e2e/screenshots/*/
+
 # Python
 __pycache__/
 
