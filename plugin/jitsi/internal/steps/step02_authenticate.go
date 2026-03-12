@@ -11,14 +11,12 @@ import (
 func Step02_Authenticate(state *model.ConnectionState) error {
 	state.RID++
 
-	requestBody := fmt.Sprintf(
-		`<body xmlns="http://jabber.org/protocol/httpbind"
-			rid="%d"
-			sid="%s">
-			<auth xmlns="urn:ietf:params:xml:ns:xmpp-sasl" mechanism="ANONYMOUS"/>
-		</body>`,
-		state.RID, state.Sid,
+	requestBody, err := marshalBOSH(state.RID, state.Sid, nil,
+		SASLAuth{Mechanism: "ANONYMOUS"},
 	)
+	if err != nil {
+		return fmt.Errorf("marshal authenticate: %w", err)
+	}
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
