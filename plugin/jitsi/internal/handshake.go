@@ -112,14 +112,14 @@ func (c *Client) performHandshake(
 		go runColibriWS(context.Background(), state.ColibriWebSocketURL, aof.KeepAlive)
 	}
 
-	// TODO send xmpp heartbeats (BROKEN)
-	// TODO: docs: RID++ is ok as it gets passed to new goroutine; but this can be very broken if we add more signaling logic!
+	// BOSH keepalive: send XMPP pings to keep the Prosody session alive.
+	// Without this, Prosody expires the session and Jicofo tells JVB to
+	// stop forwarding this sender's media.
 	go func() {
-		ticker := time.NewTicker(10 * time.Second) // or less than BOSH wait time
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 
-		for {
-			<-ticker.C
+		sendPing := func() {
 			state.RID++
 			requestBody := fmt.Sprintf(`<body rid="%d" sid="%s" xmlns="http://jabber.org/protocol/httpbind">
 <iq id="%s:sendIQ" to="%s" type="get" xmlns="jabber:client">
@@ -135,7 +135,13 @@ func (c *Client) performHandshake(
 				aof.KeepAlive.LogPrintf("[KeepAlive] ERROR: %v", err)
 				return
 			}
-			aof.KeepAlive.LogPrintln("[KeepAlive] Sent keepalive poll.")
+			aof.KeepAlive.LogPrintln("[KeepAlive] Sent keepalive ping.")
+		}
+
+		sendPing() // fire immediately — don't wait 5s for the first one
+		for {
+			<-ticker.C
+			sendPing()
 		}
 	}()
 
