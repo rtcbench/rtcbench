@@ -2,6 +2,7 @@ package model
 
 import (
 	"call.zip/pkg/aoflog"
+	"call.zip/pkg/ivf"
 	"call.zip/plugin/jitsi/internal/httpxml"
 )
 
@@ -21,9 +22,10 @@ type ConnectionState struct {
 	LogsDir     *string // e.g. "logs/e-2025XXXXXXXX/split/vbot-XXXXXXXX" or nil for no output
 
 	// sender related fields
-	SenderSSRC     *string
-	SenderMSID     *string
-	SenderIVFPaths []string
+	SenderSSRC       *string
+	SenderMSID       *string
+	SenderIVFPaths   []string
+	PreloadedCameras *ivf.PreloadedCameras
 
 	// === Static config ===
 	BoshURL    string // e.g. https://10.99.0.210/http-bind

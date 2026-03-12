@@ -110,8 +110,8 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	// Build either a viewer (recvonly transceiver) or a sender (local track).
 	var localVideoTrack *webrtc.TrackLocalStaticSample
 	if state.Sender {
-		if len(state.SenderIVFPaths) == 0 {
-			return nil, errors.New("expected at least 1 IVF file path to send")
+		if state.PreloadedCameras == nil && len(state.SenderIVFPaths) == 0 {
+			return nil, errors.New("expected at least 1 IVF file path or preloaded cameras to send")
 		}
 		localVideoTrack, err = webrtc.NewTrackLocalStaticSample(
 			webrtc.RTPCodecCapability{
@@ -128,7 +128,11 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		if _, err := pc.AddTrack(localVideoTrack); err != nil {
 			return nil, fmt.Errorf("AddTrack failed: %w", err)
 		}
-		state.PionAOF.LogPrintf("[startPion] Sender mode: will stream IVF starting from %s", state.SenderIVFPaths[0])
+		if state.PreloadedCameras != nil {
+			state.PionAOF.LogPrintf("[startPion] Sender mode: will stream from %d preloaded IVF files", len(state.PreloadedCameras.Files))
+		} else {
+			state.PionAOF.LogPrintf("[startPion] Sender mode: will stream IVF starting from %s", state.SenderIVFPaths[0])
+		}
 	} else {
 		// Viewer mode: ensure we have a recvonly video transceiver.
 		if _, err := pc.AddTransceiverFromKind(
@@ -193,7 +197,11 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 
 	// Start IVF pumping after local description is set.
 	if state.Sender && localVideoTrack != nil {
-		go ivfpkg.LoopIntoTrack(state.PionAOF.LogPrintf, localVideoTrack, state.SenderIVFPaths)
+		if state.PreloadedCameras != nil {
+			go ivfpkg.LoopIntoTrackMem(state.PionAOF.LogPrintf, localVideoTrack, state.PreloadedCameras)
+		} else {
+			go ivfpkg.LoopIntoTrack(state.PionAOF.LogPrintf, localVideoTrack, state.SenderIVFPaths)
+		}
 	}
 
 	ufrag, pwd, fingerprint := parseIceCredentials(pc.LocalDescription().SDP)

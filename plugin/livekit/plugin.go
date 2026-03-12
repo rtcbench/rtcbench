@@ -33,6 +33,7 @@ type Plugin struct {
 	apiKey             string
 	apiSecret          string
 	ivfPaths           []string
+	ivfCameras         *ivf.PreloadedCameras
 	enableRecording    bool
 	recordingDirectory string
 	viewerManager      *viewer.Manager
@@ -56,11 +57,19 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
 
 	if config.Spec.Conference.Cameras.PerRoom > 0 {
-		paths, err := ivf.LoadCameraPaths(config.Spec.Conference.Cameras.Directory)
-		if err != nil {
-			return fmt.Errorf("livekit: %w", err)
+		if config.Spec.Conference.Cameras.InMemory {
+			cams, err := ivf.LoadCameras(config.Spec.Conference.Cameras.Directory)
+			if err != nil {
+				return fmt.Errorf("livekit: %w", err)
+			}
+			p.ivfCameras = cams
+		} else {
+			paths, err := ivf.LoadCameraPaths(config.Spec.Conference.Cameras.Directory)
+			if err != nil {
+				return fmt.Errorf("livekit: %w", err)
+			}
+			p.ivfPaths = paths
 		}
-		p.ivfPaths = paths
 	}
 
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
@@ -108,7 +117,7 @@ func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 }
 
 func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomID, userID string) error {
-	if len(p.ivfPaths) == 0 {
+	if p.ivfCameras == nil && len(p.ivfPaths) == 0 {
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
 
@@ -153,7 +162,11 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	}
 	logf("published VP9 track")
 
-	go ivf.LoopIntoTrack(logf, track, p.ivfPaths)
+	if p.ivfCameras != nil {
+		go ivf.LoopIntoTrackMem(logf, track, p.ivfCameras)
+	} else {
+		go ivf.LoopIntoTrack(logf, track, p.ivfPaths)
+	}
 
 	select {
 	case <-ctx.Done():
