@@ -11,16 +11,12 @@ import (
 func Step04_BindResource(state *model.ConnectionState) error {
 	state.RID++
 
-	requestBody := fmt.Sprintf(
-		`<body xmlns="http://jabber.org/protocol/httpbind"
-				rid="%d"
-				sid="%s">
-			<iq xmlns="jabber:client" id="_bind_auth" type="set">
-				<bind xmlns="urn:ietf:params:xml:ns:xmpp-bind"/>
-			</iq>
-		</body>`,
-		state.RID, state.Sid,
+	requestBody, err := marshalBOSH(state.RID, state.Sid, nil,
+		IQBind{ID: "_bind_auth", Type: "set"},
 	)
+	if err != nil {
+		return fmt.Errorf("marshal bind resource: %w", err)
+	}
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
