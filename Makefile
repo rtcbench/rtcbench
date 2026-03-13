@@ -1,6 +1,7 @@
 .PHONY: all clean clean-ci clean-screenshots install test \
 	e2e e2e-janus e2e-jitsi e2e-livekit screenshots \
-	_build-all _build-janus _build-jitsi _build-livekit \
+	_build-all _build-e2e-runner _build-janus _build-jitsi _build-livekit \
+	_e2e-run remote-ci remote-run remote-seed remote-status remote-clean remote-estimate \
 	ci cztest-client cztest-server cztest-payload-zip
 
 all:
@@ -36,29 +37,34 @@ test:
 # as a per-test Docker container managed by pytest fixtures. New scenarios are
 # discovered automatically — no Makefile changes required.
 
-VENV := .venv
-$(VENV)/bin/activate: e2e/requirements.txt
-	python3 -m venv $(VENV)
-	$(VENV)/bin/pip install -q -r e2e/requirements.txt
-	$(VENV)/bin/playwright install --with-deps chromium
+E2E_RUNNER := callzip-e2e-runner:latest
+BASETEMP := /tmp/pytest-callzip
+E2E_RUN := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(CURDIR):$(CURDIR) -v /tmp:/tmp --network host -w $(CURDIR) $(E2E_RUNNER)
 
-e2e: _build-all $(VENV)/bin/activate
-	$(VENV)/bin/python -m pytest e2e/ -v -n auto --dist=loadgroup --basetemp=/tmp/pytest-callzip
+_build-e2e-runner:
+	docker build -t $(E2E_RUNNER) -f docker/e2e/Dockerfile .
 
-e2e-janus: _build-janus $(VENV)/bin/activate
-	$(VENV)/bin/python -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-callzip
+e2e: _build-all _build-e2e-runner
+	$(E2E_RUN) -m pytest e2e/ -v -n auto --dist=loadgroup --basetemp=$(BASETEMP)
 
-e2e-jitsi: _build-jitsi $(VENV)/bin/activate
-	$(VENV)/bin/python -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-callzip
+e2e-janus: _build-janus _build-e2e-runner
+	$(E2E_RUN) -m pytest e2e/ -v -k janus --basetemp=$(BASETEMP)
 
-e2e-livekit: _build-livekit $(VENV)/bin/activate
-	$(VENV)/bin/python -m pytest e2e/ -v -k livekit --basetemp=/tmp/pytest-callzip
+e2e-jitsi: _build-jitsi _build-e2e-runner
+	$(E2E_RUN) -m pytest e2e/ -v -k jitsi --basetemp=$(BASETEMP)
+
+e2e-livekit: _build-livekit _build-e2e-runner
+	$(E2E_RUN) -m pytest e2e/ -v -k livekit --basetemp=$(BASETEMP)
+
+# Run arbitrary pytest args in e2e runner (used by remote_e2e.py)
+_e2e-run: _build-e2e-runner
+	$(E2E_RUN) -m pytest $(PYTEST_ARGS)
 
 SCREENSHOTS_DIR := e2e/screenshots
 
-screenshots: _build-all $(VENV)/bin/activate
-	sudo rm -rf /tmp/pytest-callzip
-	$(VENV)/bin/python -m pytest e2e/test_screenshot.py -v -n auto --dist=loadgroup --basetemp=/tmp/pytest-callzip
+screenshots: _build-all _build-e2e-runner
+	sudo rm -rf $(BASETEMP)
+	$(E2E_RUN) -m pytest e2e/test_screenshot.py -v -n auto --dist=loadgroup --basetemp=$(BASETEMP)
 	$(eval FOLDER := $(shell date +%Y%m%d-%H%M%S))
 	mkdir -p $(SCREENSHOTS_DIR)/$(FOLDER)/janus $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi $(SCREENSHOTS_DIR)/$(FOLDER)/livekit
 	cp /tmp/pytest-callzip/popen-gw*/test_janus_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/janus/ 2>/dev/null || true
@@ -86,6 +92,36 @@ _build-livekit:
 	docker build -t callzip-livekit:latest docker/livekit
 
 # ---------------------------------------------------------------------------
+# Remote distributed e2e (via ssh-parallel-test)
+# ---------------------------------------------------------------------------
+# Uses spt from the ssh-parallel-test repo to distribute e2e tests across
+# remote machines. Runs inside the spt Docker image — control machine
+# only needs Docker + make. SSH keys are mounted read-only.
+
+SPT_IMAGE := ghcr.io/ioqr/ssh-parallel-test:latest
+REMOTE_CFG ?= scripts/remote-e2e/config.yml
+SPT_RUN := docker run --rm -t -e HOME=$(HOME) -v /var/run/docker.sock:/var/run/docker.sock -v $(CURDIR):$(CURDIR) -v /tmp:/tmp -v $(HOME)/.ssh:$(HOME)/.ssh:ro -v $(HOME)/.ssh-parallel-test:$(HOME)/.ssh-parallel-test --network host -w $(CURDIR) $(SPT_IMAGE)
+
+remote-seed:
+	$(SPT_RUN) -c $(REMOTE_CFG) seed
+
+remote-run:
+	$(SPT_RUN) -c $(REMOTE_CFG) run
+
+remote-ci:
+	$(MAKE) test
+	$(SPT_RUN) -c $(REMOTE_CFG) run
+
+remote-status:
+	$(SPT_RUN) -c $(REMOTE_CFG) status
+
+remote-clean:
+	$(SPT_RUN) -c $(REMOTE_CFG) clean
+
+remote-estimate:
+	$(SPT_RUN) -c $(REMOTE_CFG) estimate
+
+# ---------------------------------------------------------------------------
 # CI
 # ---------------------------------------------------------------------------
 
@@ -96,15 +132,15 @@ clean-ci:
 	docker compose --project-name callzip-janus --profile janus down -v --remove-orphans 2>/dev/null || true
 	docker compose --project-name callzip-jitsi --profile jitsi down -v --remove-orphans 2>/dev/null || true
 	docker compose --project-name callzip-livekit --profile livekit down -v --remove-orphans 2>/dev/null || true
-	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest callzip-livekit:latest 2>/dev/null || true
-	sudo rm -rf /tmp/pytest-callzip
+	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest callzip-livekit:latest callzip-e2e-runner:latest 2>/dev/null || true
+	sudo rm -rf $(BASETEMP)
 
 clean-screenshots:
 	rm -rf e2e/screenshots/*/
 
 clean:
 	rm -f call.zip call.zip.exe cztest-client cztest-client.exe cztest-server cztest-server.exe
-	rm -rf target/cztest-build target/cztest-payload.zip $(VENV)
+	rm -rf target/cztest-build target/cztest-payload.zip
 	go clean -cache
 	go clean -testcache
 	go clean -modcache
