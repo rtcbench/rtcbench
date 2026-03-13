@@ -65,7 +65,7 @@ func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 			state.ColibriWebSocketURL = util.ExtractAttrInTag(respXML, "web-socket", "url")
 
 			// Log full match values for session-accept
-			state.StepsAOF.LogPrintf(
+			state.Log.Infof(
 				"Step09_WaitForJingleOffer OK: SID=%s Initiator=%s ICEUfrag=%s Candidates=%d ColibriWS=%s",
 				state.JingleSID, state.FocusJid, state.ICEUfrag, len(state.Candidates), state.ColibriWebSocketURL,
 			)
@@ -118,7 +118,7 @@ func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 		}
 
 		// Nothing useful yet; sleep and let the next poll deliver more stanzas.
-		state.StepsAOF.LogPrintln("[Step09_WaitForJingleOffer] sleep 1 second...")
+		state.Log.Debugf("[Step09_WaitForJingleOffer] sleep 1 second...")
 		time.Sleep(1 * time.Second)
 		respXML = "" // force a fresh poll next iteration
 	}

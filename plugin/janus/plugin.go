@@ -4,19 +4,19 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net/http"
+	"path"
 	"strconv"
 	"sync"
 
 	"call.zip"
 	"call.zip/pkg/ivf"
+	"call.zip/pkg/log"
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	janus "call.zip/plugin/janus/internal"
 	"github.com/pion/webrtc/v3"
-	"path"
 )
 
 const (
@@ -34,6 +34,8 @@ const (
 
 type Plugin struct {
 	client             *janus.Client
+	log                *log.Logger
+	logRegistry        *log.Registry
 	serverIP           string
 	clientIP           string
 	cameras            *ivf.Cameras
@@ -59,12 +61,14 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	httpClient := &http.Client{Transport: transport}
 
 	p.client = janus.NewClient(httpClient, baseURL)
+	p.log = config.Log.NewLogger("janus", "")
+	p.logRegistry = config.Log
 
 	info, err := p.client.GetInfo()
 	if err != nil {
 		return err
 	}
-	log.Printf("Found Janus server: %q; Version: %q", info["name"], info["version_string"])
+	p.log.Infof("found Janus server: %q; version: %q", info["name"], info["version_string"])
 
 	p.serverIP = config.Spec.Network.ServerIP
 	p.clientIP = config.Spec.Network.ClientIP
@@ -88,10 +92,11 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 
 	// Stats pipeline shared across all viewer goroutines.
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
-	p.viewerManager = viewer.NewManager(statsInput)
+	statsLog := config.Log.NewLogger("video_stats", "")
+	p.viewerManager = viewer.NewManager(statsInput, statsLog)
 	p.publisher = vp9_stats.NewPublisher(statsInput)
 	p.publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
-		log.Printf("[sub-data-v1] bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
+		statsLog.Infof("bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
 	for _, consumer := range config.StatsConsumers {
 		p.publisher.AddSubscriber(consumer)
@@ -131,21 +136,19 @@ func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 		return err
 	}
 
-	logf := func(format string, args ...any) {
-		log.Printf("[janus][%s][%s] "+format, append([]any{string(role), userID}, args...)...)
-	}
+	l := p.logRegistry.NewLogger("janus", fmt.Sprintf("[%s][%s]", role, userID))
 
 	switch role {
 	case call.Sender:
-		return p.runSender(ctx, logf, roomInt, userID)
+		return p.runSender(ctx, l, roomInt, userID)
 	case call.Viewer:
-		return p.runViewer(ctx, logf, roomInt, userID)
+		return p.runViewer(ctx, l, roomInt, userID)
 	default:
 		return call.ErrUnsupportedRole
 	}
 }
 
-func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomID int64, userID string) error {
+func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, userID string) error {
 	if p.cameras == nil {
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
@@ -154,16 +157,16 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	if err != nil {
 		return fmt.Errorf("%w: create session: %v", call.ErrCannotJoinRoom, err)
 	}
-	logf("session created: %d", sessionID)
+	l.Infof("session created: %d", sessionID)
 
-	session := janus.NewSession(ctx, p.client, sessionID)
+	session := janus.NewSession(ctx, p.client, sessionID, l)
 	defer session.Close()
 
 	handleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
 		return fmt.Errorf("%w: attach plugin: %v", call.ErrCannotJoinRoom, err)
 	}
-	logf("handle attached: %d", handleID)
+	l.Infof("handle attached: %d", handleID)
 
 	joined, err := session.Send(handleID, map[string]any{
 		"request": "join",
@@ -177,9 +180,9 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	if joined.PluginData == nil || joined.PluginData.Data["videoroom"] != "joined" {
 		return fmt.Errorf("%w: unexpected join response: %v", call.ErrCannotJoinRoom, joined)
 	}
-	logf("joined room %d as publisher", roomID)
+	l.Infof("joined room %d as publisher", roomID)
 
-	pc, track, offerSDP, err := janus.StartPionPublisher(logf, p.clientIP)
+	pc, track, offerSDP, err := janus.StartPionPublisher(l, p.clientIP)
 	if err != nil {
 		return fmt.Errorf("%w: pion publisher: %v", call.ErrCannotJoinRoom, err)
 	}
@@ -187,7 +190,7 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	done := make(chan struct{})
 	var once sync.Once
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		logf("[pion] ConnectionState: %s", s)
+		l.Infof("[pion] ConnectionState: %s", s)
 		if s == webrtc.PeerConnectionStateFailed ||
 			s == webrtc.PeerConnectionStateDisconnected ||
 			s == webrtc.PeerConnectionStateClosed {
@@ -211,7 +214,7 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	if configured.JSEP == nil {
 		return fmt.Errorf("%w: publish response missing JSEP answer", call.ErrCannotJoinRoom)
 	}
-	logf("configured, got JSEP answer")
+	l.Infof("configured, got JSEP answer")
 
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{
 		Type: webrtc.SDPTypeAnswer,
@@ -224,7 +227,7 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 		return fmt.Errorf("%w: AddICECandidate: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	go ivf.LoopIntoTrack(logf, track, p.cameras.NewSource())
+	go ivf.LoopIntoTrack(l, track, p.cameras.NewSource())
 
 	select {
 	case <-ctx.Done():
@@ -233,14 +236,14 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	return nil
 }
 
-func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomID int64, userID string) error {
+func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, userID string) error {
 	sessionID, err := p.client.CreateSession()
 	if err != nil {
 		return fmt.Errorf("%w: create session: %v", call.ErrCannotJoinRoom, err)
 	}
-	logf("session created: %d", sessionID)
+	l.Infof("session created: %d", sessionID)
 
-	session := janus.NewSession(ctx, p.client, sessionID)
+	session := janus.NewSession(ctx, p.client, sessionID, l)
 	defer session.Close()
 
 	// Attach a publisher handle just to discover active publishers.
@@ -279,7 +282,7 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 	if len(streams) == 0 {
 		return fmt.Errorf("%w: could not extract publisher IDs", call.ErrCannotJoinRoom)
 	}
-	logf("found %d publisher(s), subscribing", len(streams))
+	l.Infof("found %d publisher(s), subscribing", len(streams))
 
 	subHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
@@ -298,15 +301,15 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 	if attached.JSEP == nil {
 		return fmt.Errorf("%w: subscriber join response missing JSEP offer", call.ErrCannotJoinRoom)
 	}
-	logf("attached, got JSEP offer from Janus")
+	l.Infof("attached, got JSEP offer from Janus")
 
-	pc, answerSDP, err := janus.StartPionSubscriber(logf, p.clientIP, attached.JSEP.SDP)
+	pc, answerSDP, err := janus.StartPionSubscriber(l, p.clientIP, attached.JSEP.SDP)
 	if err != nil {
 		return fmt.Errorf("%w: pion subscriber: %v", call.ErrCannotJoinRoom, err)
 	}
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		logf("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
+		l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
 		cfg := &viewer.Config{
 			PacketsPerSample:  viewerPacketsPerSample,
 			VP9RTPPayloadType: int(track.PayloadType()),
@@ -319,21 +322,21 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 			var recErr error
 			seg, recErr = vp9.NewIvfSegmenter(recDir)
 			if recErr != nil {
-				logf("[viewer] IvfSegmenter failed: %v", recErr)
+				l.Errorf("[viewer] IvfSegmenter failed: %v", recErr)
 			} else {
 				seg.Enable()
-				log.Printf("Enabled IVF file writing for room=%d user=%s", roomID, userID)
+				l.Infof("enabled IVF file writing for room=%d user=%s", roomID, userID)
 			}
 		}
 		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, seg); err != nil {
-			logf("[viewer] SpawnViewer failed: %v", err)
+			l.Errorf("[viewer] SpawnViewer failed: %v", err)
 		}
 	})
 
 	done := make(chan struct{})
 	var once sync.Once
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		logf("[pion] ConnectionState: %s", s)
+		l.Infof("[pion] ConnectionState: %s", s)
 		if s == webrtc.PeerConnectionStateFailed ||
 			s == webrtc.PeerConnectionStateDisconnected ||
 			s == webrtc.PeerConnectionStateClosed {
@@ -354,7 +357,7 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 	if started.PluginData == nil {
 		return fmt.Errorf("%w: unexpected start response", call.ErrCannotJoinRoom)
 	}
-	logf("started, streaming")
+	l.Infof("started, streaming")
 
 	select {
 	case <-ctx.Done():

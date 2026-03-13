@@ -7,9 +7,8 @@ import (
 	"io"
 	"net/http"
 	"runtime"
-	"time"
 
-	"call.zip/pkg/aoflog"
+	"call.zip/pkg/log"
 	"github.com/tdewolff/minify"
 	"github.com/tdewolff/minify/xml"
 )
@@ -28,11 +27,11 @@ func MinifyXML(input string) (string, error) {
 }
 
 type BOSHSender struct {
-	aof aoflog.Client
+	log *log.Logger
 }
 
-func NewBOSHSender(aof aoflog.Client) BOSHSender {
-	return BOSHSender{aof}
+func NewBOSHSender(log *log.Logger) BOSHSender {
+	return BOSHSender{log}
 }
 
 // Send sends an XMPP BOSH XML minified body to a BOSH endpoint
@@ -46,20 +45,13 @@ func (s *BOSHSender) Send(boshURL string, xmlBody string) (string, error) {
 	}
 
 	var callerFuncName string
-	if s.aof != nil {
-		pc, _, _, ok := runtime.Caller(1)
-		callerFuncName = "unknown"
-		if ok {
-			callerFuncName = runtime.FuncForPC(pc).Name()
-		}
+	pc, _, _, ok := runtime.Caller(1)
+	callerFuncName = "unknown"
+	if ok {
+		callerFuncName = runtime.FuncForPC(pc).Name()
 	}
 
-	if s.aof != nil {
-		s.aof.Printf("===== [DEBUG(%s)] SENT =====\n", callerFuncName)
-		s.aof.Println(time.Now().Format(time.RFC3339Nano))
-		s.aof.Println(xmlBody)
-		s.aof.Println("========================")
-	}
+	s.log.Debugf("[BOSH SENT] (%s)\n%s", callerFuncName, xmlBody)
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -88,12 +80,7 @@ func (s *BOSHSender) Send(boshURL string, xmlBody string) (string, error) {
 		return "", fmt.Errorf("reading response: %w", err)
 	}
 
-	if s.aof != nil {
-		s.aof.Printf("===== [DEBUG(%s)] RECEIVED =====\n", callerFuncName)
-		s.aof.Println(time.Now().Format(time.RFC3339Nano))
-		s.aof.Println(string(bodyBytes))
-		s.aof.Println("============================")
-	}
+	s.log.Debugf("[BOSH RECV] (%s)\n%s", callerFuncName, string(bodyBytes))
 
 	return string(bodyBytes), nil
 }

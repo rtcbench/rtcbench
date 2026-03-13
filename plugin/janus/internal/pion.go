@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	"call.zip/pkg/log"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
 )
@@ -40,13 +41,13 @@ func newPionAPI(clientIP string) (*webrtc.API, error) {
 	), nil
 }
 
-func registerLoggingCallbacks(logf func(string, ...any), pc *webrtc.PeerConnection) {
+func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
 	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
-		logf("[pion] ICEConnectionState: %s", s)
+		l.Infof("[pion] ICEConnectionState: %s", s)
 	})
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c != nil {
-			logf("[pion] local ICE candidate: %s", c.ToJSON().Candidate)
+			l.Infof("[pion] local ICE candidate: %s", c.ToJSON().Candidate)
 		}
 	})
 }
@@ -54,7 +55,7 @@ func registerLoggingCallbacks(logf func(string, ...any), pc *webrtc.PeerConnecti
 // StartPionPublisher creates a PeerConnection in sendonly mode and returns the
 // PC, the local video track (for IVF streaming), and the offer SDP.
 func StartPionPublisher(
-	logf func(string, ...any),
+	l *log.Logger,
 	clientIP string,
 ) (*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error) {
 	api, err := newPionAPI(clientIP)
@@ -67,7 +68,7 @@ func StartPionPublisher(
 		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
 
-	registerLoggingCallbacks(logf, pc)
+	registerLoggingCallbacks(l, pc)
 
 	track, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{
@@ -92,7 +93,7 @@ func StartPionPublisher(
 		return nil, nil, "", fmt.Errorf("SetLocalDescription: %w", err)
 	}
 
-	logf("[pion] publisher offer SDP ready")
+	l.Infof("[pion] publisher offer SDP ready")
 	return pc, track, pc.LocalDescription().SDP, nil
 }
 
@@ -100,7 +101,7 @@ func StartPionPublisher(
 // Janus offer as the remote description, and returns the PC and answer SDP.
 // The caller is responsible for setting pc.OnTrack before media flows.
 func StartPionSubscriber(
-	logf func(string, ...any),
+	l *log.Logger,
 	clientIP string,
 	janusOfferSDP string,
 ) (*webrtc.PeerConnection, string, error) {
@@ -114,7 +115,7 @@ func StartPionSubscriber(
 		return nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
 
-	registerLoggingCallbacks(logf, pc)
+	registerLoggingCallbacks(l, pc)
 
 	if _, err := pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,
@@ -139,7 +140,7 @@ func StartPionSubscriber(
 		return nil, "", fmt.Errorf("SetLocalDescription: %w", err)
 	}
 
-	logf("[pion] subscriber answer SDP ready")
+	l.Infof("[pion] subscriber answer SDP ready")
 	return pc, pc.LocalDescription().SDP, nil
 }
 

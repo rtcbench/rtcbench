@@ -3,12 +3,12 @@ package livekit
 import (
 	"context"
 	"fmt"
-	"log"
 	"path"
 	"sync"
 
 	"call.zip"
 	"call.zip/pkg/ivf"
+	"call.zip/pkg/log"
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
@@ -33,6 +33,8 @@ type Plugin struct {
 	apiKey             string
 	apiSecret          string
 	cameras            *ivf.Cameras
+	log                *log.Logger
+	logRegistry        *log.Registry
 	enableRecording    bool
 	recordingDirectory string
 	statsBufferSize    int
@@ -53,6 +55,8 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.apiKey = cfg[cfgAPIKey].(string)
 	p.apiSecret = cfg[cfgAPISecret].(string)
 
+	p.log = config.Log.NewLogger("livekit", "")
+	p.logRegistry = config.Log
 	p.enableRecording = config.Spec.Conference.Recording.Enabled
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
 	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
@@ -66,10 +70,11 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	}
 
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
-	p.viewerManager = viewer.NewManager(statsInput)
+	statsLog := config.Log.NewLogger("video_stats", "")
+	p.viewerManager = viewer.NewManager(statsInput, statsLog)
 	p.publisher = vp9_stats.NewPublisher(statsInput)
 	p.publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
-		log.Printf("[sub-data-v1] bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
+		statsLog.Infof("bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
 	for _, consumer := range config.StatsConsumers {
 		p.publisher.AddSubscriber(consumer)
@@ -95,21 +100,19 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 }
 
 func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userID string) error {
-	logf := func(format string, args ...any) {
-		log.Printf("[livekit][%s][%s] "+format, append([]any{string(role), userID}, args...)...)
-	}
+	l := p.logRegistry.NewLogger("livekit", fmt.Sprintf("[%s][%s]", role, userID))
 
 	switch role {
 	case call.Sender:
-		return p.runSender(ctx, logf, roomID, userID)
+		return p.runSender(ctx, l, roomID, userID)
 	case call.Viewer:
-		return p.runViewer(ctx, logf, roomID, userID)
+		return p.runViewer(ctx, l, roomID, userID)
 	default:
 		return call.ErrUnsupportedRole
 	}
 }
 
-func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomID, userID string) error {
+func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID string) error {
 	if p.cameras == nil {
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
@@ -130,7 +133,7 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	if err != nil {
 		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
 	}
-	logf("connected to room %s", roomID)
+	l.Infof("connected to room %s", roomID)
 
 	p.mu.Lock()
 	p.rooms = append(p.rooms, room)
@@ -153,9 +156,9 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	if err != nil {
 		return fmt.Errorf("%w: publish track: %v", call.ErrCannotJoinRoom, err)
 	}
-	logf("published VP9 track")
+	l.Infof("published VP9 track")
 
-	go ivf.LoopIntoTrack(logf, track, p.cameras.NewSource())
+	go ivf.LoopIntoTrack(l, track, p.cameras.NewSource())
 
 	select {
 	case <-ctx.Done():
@@ -164,7 +167,7 @@ func (p *Plugin) runSender(ctx context.Context, logf func(string, ...any), roomI
 	return nil
 }
 
-func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomID, userID string) error {
+func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID string) error {
 	done := make(chan struct{})
 	var once sync.Once
 
@@ -176,7 +179,7 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 	}, &lksdk.RoomCallback{
 		ParticipantCallback: lksdk.ParticipantCallback{
 			OnTrackSubscribed: func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
-				logf("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
+				l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
 				cfg := &viewer.Config{
 					PacketsPerSample:  viewerPacketsPerSample,
 					VP9RTPPayloadType: int(track.PayloadType()),
@@ -189,14 +192,14 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 					var recErr error
 					seg, recErr = vp9.NewIvfSegmenter(recDir)
 					if recErr != nil {
-						logf("[viewer] IvfSegmenter failed: %v", recErr)
+						l.Errorf("[viewer] IvfSegmenter failed: %v", recErr)
 					} else {
 						seg.Enable()
-						log.Printf("Enabled IVF file writing for room=%s user=%s", roomID, userID)
+						l.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
 					}
 				}
 				if _, err := p.viewerManager.SpawnViewer(track, nil, userID, cfg, seg); err != nil {
-					logf("[viewer] SpawnViewer failed: %v", err)
+					l.Errorf("[viewer] SpawnViewer failed: %v", err)
 				}
 			},
 		},
@@ -207,7 +210,7 @@ func (p *Plugin) runViewer(ctx context.Context, logf func(string, ...any), roomI
 	if err != nil {
 		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
 	}
-	logf("connected to room %s as viewer", roomID)
+	l.Infof("connected to room %s as viewer", roomID)
 
 	p.mu.Lock()
 	p.rooms = append(p.rooms, room)

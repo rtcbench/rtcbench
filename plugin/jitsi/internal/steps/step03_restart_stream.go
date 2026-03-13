@@ -31,6 +31,6 @@ func Step03_RestartStream(state *model.ConnectionState) error {
 		return fmt.Errorf("Step03_RestartStream: no <bind> feature found:\n%s", respXML)
 	}
 
-	state.StepsAOF.LogPrintln("Step03_RestartStream OK: Stream restarted.")
+	state.Log.Infof("Step03_RestartStream OK: Stream restarted.")
 	return nil
 }

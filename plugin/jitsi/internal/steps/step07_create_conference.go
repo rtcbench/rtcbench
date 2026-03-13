@@ -41,6 +41,6 @@ func Step07_CreateConference(state *model.ConnectionState) error {
 	}
 	state.FocusJid = focusJid
 
-	state.StepsAOF.LogPrintf("Step07_CreateConference OK: FocusJID=%s", focusJid)
+	state.Log.Infof("Step07_CreateConference OK: FocusJID=%s", focusJid)
 	return nil
 }

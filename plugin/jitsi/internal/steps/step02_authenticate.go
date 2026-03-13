@@ -29,6 +29,6 @@ func Step02_Authenticate(state *model.ConnectionState) error {
 
 	state.Authenticated = true
 
-	state.StepsAOF.LogPrintln("Step02_Authenticate OK")
+	state.Log.Infof("Step02_Authenticate OK")
 	return nil
 }

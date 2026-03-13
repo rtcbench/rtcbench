@@ -3,10 +3,10 @@ package internal
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
+	"call.zip/pkg/log"
 	"github.com/google/uuid"
 )
 
@@ -15,6 +15,7 @@ import (
 type Session struct {
 	client    *Client
 	sessionID int64
+	log       *log.Logger
 	mu        sync.Mutex
 	pending   map[string]chan *JanusMsg
 	eventsC   chan *JanusMsg
@@ -22,11 +23,12 @@ type Session struct {
 	cancel    context.CancelFunc
 }
 
-func NewSession(ctx context.Context, client *Client, sessionID int64) *Session {
+func NewSession(ctx context.Context, client *Client, sessionID int64, log *log.Logger) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
 		client:    client,
 		sessionID: sessionID,
+		log:       log,
 		pending:   make(map[string]chan *JanusMsg),
 		eventsC:   make(chan *JanusMsg, 64),
 		ctx:       ctx,
@@ -95,7 +97,7 @@ func (s *Session) loop() {
 				return
 			case <-ticker.C:
 				if err := s.client.Keepalive(s.sessionID); err != nil {
-					log.Printf("[janus] keepalive error: %v", err)
+					s.log.Errorf("keepalive error: %v", err)
 				}
 			}
 		}
@@ -110,7 +112,7 @@ func (s *Session) loop() {
 			if s.ctx.Err() != nil {
 				return
 			}
-			log.Printf("[janus] long poll error: %v", err)
+			s.log.Errorf("long poll error: %v", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -146,6 +148,6 @@ func (s *Session) dispatch(msg *JanusMsg) {
 	select {
 	case s.eventsC <- msg:
 	default:
-		log.Printf("[janus] event channel full, dropping: %s", msg.Janus)
+		s.log.Errorf("event channel full, dropping: %s", msg.Janus)
 	}
 }

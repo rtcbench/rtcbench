@@ -61,6 +61,6 @@ func Step06_DiscoverServices(state *model.ConnectionState) error {
 		state.IceServers = append(state.IceServers, server)
 	}
 
-	state.StepsAOF.LogPrintf("Step06_DiscoverServices OK: found %d ICE servers", len(state.IceServers))
+	state.Log.Infof("Step06_DiscoverServices OK: found %d ICE servers", len(state.IceServers))
 	return nil
 }

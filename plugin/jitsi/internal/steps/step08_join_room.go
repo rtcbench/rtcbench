@@ -35,6 +35,6 @@ func Step08_JoinRoom(state *model.ConnectionState) error {
 
 	state.InRoom = true
 	state.PendingBOSHResponse = respXML
-	state.StepsAOF.LogPrintf("Step08_JoinRoom OK: joined room as %s", state.Nickname)
+	state.Log.Infof("Step08_JoinRoom OK: joined room as %s", state.Nickname)
 	return nil
 }

@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	stdlog "log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +12,7 @@ import (
 
 	"call.zip"
 	"call.zip/internal/netutil"
+	"call.zip/pkg/log"
 	"call.zip/pkg/metricsserver"
 	"call.zip/plugin/janus"
 	"call.zip/plugin/jitsi"
@@ -30,22 +32,31 @@ func main() {
 	)
 
 	if len(os.Args) != 2 {
-		log.Fatalf("Usage: %s config.yml", os.Args[0])
+		stdlog.Fatalf("Usage: %s config.yml", os.Args[0])
 	}
 
 	_ = godotenv.Load()
 
 	cfg, err = loadYAMLConfig(os.Args[1])
 	if err != nil {
-		log.Fatalf("Failed to load YAML config file: %v", err)
+		stdlog.Fatalf("Failed to load YAML config file: %v", err)
 	}
+
+	reg, err := buildLogRegistry(cfg.Spec.Logging)
+	if err != nil {
+		stdlog.Fatalf("Failed to initialize logging: %v", err)
+	}
+	defer reg.Close()
+	cfg.Log = reg
+
+	mainLog := cfg.Log.NewLogger("general", "")
 
 	if cfg.Spec.Network.ClientIP == "" {
 		detectedClientIP, err = netutil.DetectClientIP(cfg.Spec.Network.ServerIP)
 		if err != nil {
-			log.Fatalf("Failed to detect client IP, please manually configure it: %v", err)
+			stdlog.Fatalf("Failed to detect client IP, please manually configure it: %v", err)
 		}
-		log.Printf("Detected client IP: %s", detectedClientIP)
+		mainLog.Infof("detected client IP: %s", detectedClientIP)
 		cfg.Spec.Network.ClientIP = detectedClientIP
 	}
 
@@ -55,9 +66,9 @@ func main() {
 		metricsCtx, metricsCancel := context.WithCancel(context.Background())
 		defer metricsCancel()
 		go func() {
-			log.Printf("[metrics] starting on :%d", cfg.Spec.Metrics.Port)
+			mainLog.Infof("[metrics] starting on :%d", cfg.Spec.Metrics.Port)
 			if err := ms.ListenAndServe(metricsCtx); err != nil {
-				log.Printf("[metrics] server error: %v", err)
+				mainLog.Errorf("[metrics] server error: %v", err)
 			}
 		}()
 	}
@@ -69,28 +80,61 @@ func main() {
 
 	err = client.JoinAllRooms(context.Background())
 	if err != nil {
-		log.Printf("[cli-main] error joining all rooms: %v", err)
+		mainLog.Errorf("error joining all rooms: %v", err)
 		if errors.Is(err, call.ErrUnknownPlugin) {
 			os.Exit(1)
 		}
 	}
 
-	log.Println("[cli-main] finished joining rooms")
+	mainLog.Infof("finished joining rooms")
 
 	sigtermCtx, sigtermCancel = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer sigtermCancel()
 	<-sigtermCtx.Done()
 
-	log.Println("[cli-main] signal received, shutting down...")
+	mainLog.Infof("signal received, shutting down...")
 
 	shutdownCtx, shutdownCancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err = client.Shutdown(shutdownCtx); err != nil {
-		log.Println("[cli-main] shutdown error:", err)
+		mainLog.Errorf("shutdown error: %v", err)
 	} else {
-		log.Println("[cli-main] shutdown complete")
+		mainLog.Infof("shutdown complete")
 	}
+}
+
+func buildLogRegistry(lc call.LoggingConfig) (*log.Registry, error) {
+	levels := make(map[string]log.Level, len(lc.Streams))
+	for _, s := range lc.Streams {
+		lvl, err := log.ParseLevel(s.Level)
+		if err != nil {
+			return nil, fmt.Errorf("stream %q: %w", s.Name, err)
+		}
+		levels[s.Name] = lvl
+	}
+
+	var handlers []log.Handler
+	if lc.Console {
+		consoleLvl, err := log.ParseLevel(lc.ConsoleLevel)
+		if err != nil {
+			return nil, fmt.Errorf("consoleLevel: %w", err)
+		}
+		handlers = append(handlers, log.NewConsoleHandler(lc.Color, consoleLvl))
+	}
+	if lc.Directory != "" {
+		fileLvl, err := log.ParseLevel(lc.FileLevel)
+		if err != nil {
+			return nil, fmt.Errorf("fileLevel: %w", err)
+		}
+		fh, err := log.NewFileHandler(lc.Directory, fileLvl, lc.Combined)
+		if err != nil {
+			return nil, err
+		}
+		handlers = append(handlers, fh)
+	}
+
+	return log.NewRegistry(handlers, levels), nil
 }
 
 func loadYAMLConfig(yamlFile string) (*call.Config, error) {

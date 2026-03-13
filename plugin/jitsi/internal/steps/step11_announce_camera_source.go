@@ -30,13 +30,13 @@ func Step11_Sender_AnnounceCameraSource(state *model.ConnectionState) error {
 		return fmt.Errorf("marshal camera source presence: %w", err)
 	}
 
-	state.StepsAOF.LogPrintf("=== BEGIN Step11 camera SourceInfo presence ===\n%s\n=== END Step11 ===", requestBody)
+	state.Log.Debugf("=== BEGIN Step11 camera SourceInfo presence ===\n%s\n=== END Step11 ===", requestBody)
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
 		return fmt.Errorf("Step11_Sender_AnnounceCameraSource failed: %w", err)
 	}
 
-	state.StepsAOF.LogPrintf("[Step11] Sent camera SourceInfo presence update OK: %s", respXML)
+	state.Log.Infof("[Step11] Sent camera SourceInfo presence update OK: %s", respXML)
 	return nil
 }

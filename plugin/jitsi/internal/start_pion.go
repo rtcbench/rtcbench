@@ -8,13 +8,12 @@ import (
 	"strings"
 
 	ivfpkg "call.zip/pkg/ivf"
-	"call.zip/pkg/vp9"
 	"call.zip/pkg/viewer"
+	"call.zip/pkg/vp9"
 	"call.zip/plugin/jitsi/internal/model"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
 )
-
 
 func parseIceCredentials(sdp string) (ufrag, pwd, fingerprint string) {
 	ufragRe := regexp.MustCompile(`a=ice-ufrag:(.+)`)
@@ -56,14 +55,14 @@ func parseLocalVideoMSID(sdp string) (primarySSRC, msid string) {
 }
 
 func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) (*webrtc.PeerConnection, error) {
-	state.PionAOF.LogPrintln("[startPion] Initializing pion PeerConnection...")
+	state.Log.Infof("[startPion] initializing pion PeerConnection...")
 
 	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:0", state.LANClientIP))
 	if err != nil {
 		return nil, fmt.Errorf("failed to bind UDP: %w", err)
 	}
 	addr := conn.LocalAddr().(*net.UDPAddr)
-	state.PionAOF.LogPrintf("[startPion] Listening on UDP %s:%d", addr.IP, addr.Port)
+	state.Log.Infof("[startPion] listening on UDP %s:%d", addr.IP, addr.Port)
 
 	se := webrtc.SettingEngine{}
 	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
@@ -93,17 +92,17 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	}
 
 	pc.OnICEConnectionStateChange(func(iceConnState webrtc.ICEConnectionState) {
-		state.PionAOF.LogPrintf("[pion] ICEConnectionState: %s", iceConnState.String())
+		state.Log.Infof("[pion] ICEConnectionState: %s", iceConnState.String())
 	})
 	pc.OnICEGatheringStateChange(func(iceGathererState webrtc.ICEGathererState) {
-		state.PionAOF.LogPrintf("[pion] ICEGatheringState: %s", iceGathererState.String())
+		state.Log.Infof("[pion] ICEGatheringState: %s", iceGathererState.String())
 	})
 	pc.OnConnectionStateChange(func(peerConnState webrtc.PeerConnectionState) {
-		state.PionAOF.LogPrintf("[pion] PeerConnectionState: %s", peerConnState.String())
+		state.Log.Infof("[pion] PeerConnectionState: %s", peerConnState.String())
 	})
 	pc.OnICECandidate(func(cand *webrtc.ICECandidate) {
 		if cand != nil {
-			state.PionAOF.LogPrintf("[pion] Local ICE candidate: %s", cand.ToJSON().Candidate)
+			state.Log.Infof("[pion] local ICE candidate: %s", cand.ToJSON().Candidate)
 		}
 	})
 
@@ -128,7 +127,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		if _, err := pc.AddTrack(localVideoTrack); err != nil {
 			return nil, fmt.Errorf("AddTrack failed: %w", err)
 		}
-		state.PionAOF.LogPrintf("[startPion] Sender mode: frame source ready")
+		state.Log.Infof("[startPion] sender mode: frame source ready")
 	} else {
 		// Viewer mode: ensure we have a recvonly video transceiver.
 		if _, err := pc.AddTransceiverFromKind(
@@ -146,7 +145,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	if err := pc.SetRemoteDescription(offer); err != nil {
 		return nil, fmt.Errorf("SetRemoteDescription failed: %w", err)
 	}
-	state.PionAOF.LogPrintf("[after SetRemoteDescription] Received SDP Offer:\n%s", pc.RemoteDescription().SDP)
+	state.Log.Debugf("[after SetRemoteDescription] received SDP offer:\n%s", pc.RemoteDescription().SDP)
 
 	// Your reconstructed offer uses a=mid:0 for the video m-line, so SDPMid must be "0".
 	mid0 := "0"
@@ -159,7 +158,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		}); err != nil {
 			return nil, fmt.Errorf("AddICECandidate (fallback) failed: %w", err)
 		}
-		state.PionAOF.LogPrintf("[pion] ✅ Added static remote candidate: %s", staticCandidate)
+		state.Log.Infof("[pion] added static remote candidate: %s", staticCandidate)
 	} else {
 		for _, cand := range state.Candidates {
 			candidateLine := fmt.Sprintf("candidate:%s %d %s %d %s %d typ %s",
@@ -172,7 +171,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 			}); err != nil {
 				return nil, fmt.Errorf("AddICECandidate failed: %w", err)
 			}
-			state.PionAOF.LogPrintf("[pion] Added remote candidate: %s", candidateLine)
+			state.Log.Infof("[pion] added remote candidate: %s", candidateLine)
 		}
 	}
 
@@ -180,7 +179,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	if err != nil {
 		return nil, fmt.Errorf("CreateAnswer failed: %w", err)
 	}
-	// Keep this if you’ve actually observed "actpass" leaking into an answer in your environment.
+	// Keep this if you've actually observed "actpass" leaking into an answer in your environment.
 	answer.SDP = strings.Replace(answer.SDP, "a=setup:actpass", "a=setup:active", 1)
 
 	gatherComplete := webrtc.GatheringCompletePromise(pc)
@@ -189,11 +188,11 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	}
 	<-gatherComplete
 
-	state.PionAOF.LogPrintf("[after SetLocalDescription] Generated SDP Answer:\n%s", pc.LocalDescription().SDP)
+	state.Log.Debugf("[after SetLocalDescription] generated SDP answer:\n%s", pc.LocalDescription().SDP)
 
 	// Start IVF pumping after local description is set.
 	if state.Sender && localVideoTrack != nil {
-		go ivfpkg.LoopIntoTrack(state.PionAOF.LogPrintf, localVideoTrack, state.FrameSource)
+		go ivfpkg.LoopIntoTrack(state.Log, localVideoTrack, state.FrameSource)
 	}
 
 	ufrag, pwd, fingerprint := parseIceCredentials(pc.LocalDescription().SDP)
@@ -211,11 +210,11 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		if state.SenderMSID != nil && msid != "" {
 			*state.SenderMSID = msid
 		}
-		state.PionAOF.LogPrintf("[startPion] Sender mode: parsed primarySSRC=%q msid=%q", primarySSRC, msid)
+		state.Log.Infof("[startPion] sender mode: parsed primarySSRC=%q msid=%q", primarySSRC, msid)
 	}
 
-	state.PionAOF.LogPrintf("[startPion] ✅ Local SDP ufrag=%s pwd=%s fingerprint=%s", ufrag, pwd, fingerprint)
-	state.PionAOF.LogPrintln("[startPion] ✅ pion PeerConnection ready with SDP answer generated.")
+	state.Log.Infof("[startPion] local SDP ufrag=%s pwd=%s fingerprint=%s", ufrag, pwd, fingerprint)
+	state.Log.Infof("[startPion] pion PeerConnection ready with SDP answer generated.")
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		go func() {
