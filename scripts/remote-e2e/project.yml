@@ -1,0 +1,40 @@
+# Shared project settings for ssh-parallel-test.
+# Cluster configs reference this via: project: project.yml
+
+remote:
+  workdir: ~/call.zip
+
+ssh:
+  key: ~/.ssh/id_callzip
+
+rsync:
+  excludes:
+    - ".git/"
+    - ".venv/"
+    - "target/"
+    - "__pycache__/"
+    - "e2e/screenshots/*/"
+    - "/call.zip"
+    - "/cztest-client"
+    - "/cztest-server"
+    - ".idea/"
+    - ".vscode/"
+    - "*.exe"
+    - ".env"
+    - ".env.*"
+
+discover:
+  command: "docker run --rm -v {root}:{root} -w {root} callzip-e2e-runner:latest -m pytest e2e/ --collect-only -q"
+  group_regex: "(janus|jitsi|livekit)"
+
+run:
+  command: "make _e2e-run PYTEST_ARGS='{tests} -v --durations=0 --basetemp=/tmp/pytest-callzip-{group} --tb=short'"
+  duration_regex: "\\s*([\\d.]+)s call\\s+(.+)"
+
+seed:
+  auto: true
+  setup: "make _build-all _build-e2e-runner"
+  docker_install: "curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER && sudo apt-get install -y -qq fuse-overlayfs && echo '{\"storage-driver\": \"fuse-overlayfs\"}' | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker"
+
+clean:
+  command: "make clean-ci"

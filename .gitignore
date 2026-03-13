@@ -5,6 +5,8 @@ logs/
 /target
 /bin
 scripts/venv
+scripts/remote-e2e/config*.yml
+!scripts/remote-e2e/config.example.yml
 /venv
 .venv
 .idea

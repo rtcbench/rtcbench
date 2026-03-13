@@ -59,6 +59,13 @@ spec:
       fileType: ivf
       videoCodec: vp9
       directory: '~/vp9_ivf_videos'
+      # If true, all IVF files are loaded into memory at startup instead of read from disk on each loop.
+      # This reduces disk I/O under load but uses more RAM. Defaults to false.
+      inMemory: false
+
+    # Size of the per-viewer ring buffer used for VP9 quality statistics (bitrate, FPS).
+    # Valid range: 64–4096. Defaults to 768 if omitted.
+    # statsBufferSize: 768
 
     # Specify the behavior upon each bot joining the server (global across all conference rooms).
     joinPolicy:
@@ -95,6 +102,10 @@ spec:
     janus:
       _serverRoot: 'https://{{spec.network.serverIP}}/janus'
       allowInsecureHttps: true
+    livekit:
+      _wsURL: 'ws://{{spec.network.serverIP}}:7880'
+      apiKey: devkey
+      apiSecret: secret
 
   # Expose a /health HTTP endpoint reporting live VP9 bitrate and FPS per viewer.
   # Set port: 0 or omit this section to disable.
