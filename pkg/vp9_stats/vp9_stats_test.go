@@ -289,6 +289,150 @@ func TestFrameStatistics_CustomBufferSize(t *testing.T) {
 	}
 }
 
+func TestVideoQualitySample_String(t *testing.T) {
+	sample := VideoQualitySample{
+		SmoothFPS:     25,
+		SmoothBitrate: 3500000,
+		Nickname:      "test-viewer",
+	}
+	got := sample.String()
+
+	prefix := "vp9.VideoQualitySample["
+	if len(got) < len(prefix) || got[:len(prefix)] != prefix {
+		t.Fatalf("String() = %q, want prefix %q", got, prefix)
+	}
+
+	// Check that the nickname is present in the output
+	found := false
+	for i := 0; i <= len(got)-len("test-viewer"); i++ {
+		if got[i:i+len("test-viewer")] == "test-viewer" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("String() = %q, want it to contain %q", got, "test-viewer")
+	}
+}
+
+func TestVideoQualitySample_Mbps(t *testing.T) {
+	tests := []struct {
+		smoothBitrate float32
+		want          string
+	}{
+		{0, "0.00 Mbps"},
+		{3_500_000, "3.50 Mbps"},
+		{500_000, "0.50 Mbps"},
+		{1_000_000, "1.00 Mbps"},
+	}
+
+	for _, tc := range tests {
+		sample := VideoQualitySample{SmoothBitrate: tc.smoothBitrate}
+		got := sample.Mbps()
+		if got != tc.want {
+			t.Fatalf("Mbps() with SmoothBitrate=%v = %q, want %q", tc.smoothBitrate, got, tc.want)
+		}
+	}
+}
+
+func TestFrameStatistics_EndSample_Resets(t *testing.T) {
+	stats := NewFrameStatistics(DefaultStatsBufferSize)
+	testPackets := createTestPackets1080p25fps(2)
+
+	for _, pkt := range testPackets {
+		stats.AcceptPacket(pkt.clientReadTime, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
+	}
+
+	var sample VideoQualitySample
+	stats.TakeSample(&sample)
+
+	if sample.Sample.TotalBytes <= 0 {
+		t.Fatalf("expected TotalBytes > 0 after feeding packets, got %d", sample.Sample.TotalBytes)
+	}
+
+	firstSeq := sample.SequenceNo
+	stats.EndSample()
+
+	// TakeSample again after EndSample — sample data should be reset
+	stats.TakeSample(&sample)
+
+	if sample.Sample.TotalBytes != 0 {
+		t.Fatalf("expected TotalBytes == 0 after EndSample, got %d", sample.Sample.TotalBytes)
+	}
+
+	if sample.SequenceNo != firstSeq+1 {
+		t.Fatalf("expected SequenceNo = %d after EndSample, got %d", firstSeq+1, sample.SequenceNo)
+	}
+}
+
+func TestFrameStatistics_Initialized_Boundary(t *testing.T) {
+	bufferSize := 64
+	stats := NewFrameStatistics(bufferSize)
+
+	baseTime := time.Now().UnixMicro()
+	var rtpTS uint32 = 1000
+
+	pd := vp9.PayloadDescriptor{
+		SID: maxLayerSpatialID,
+		TID: maxLayerTemporalID,
+	}
+
+	// Feed 63 packets (one less than bufferSize)
+	for i := 0; i < bufferSize-1; i++ {
+		stats.AcceptPacket(baseTime+int64(i)*1000, rtpTS, 100, &pd)
+		rtpTS += 3600 // increment per packet
+	}
+
+	if stats.Initialized() {
+		t.Fatalf("expected Initialized() == false after %d packets (bufferSize=%d)", bufferSize-1, bufferSize)
+	}
+
+	// Feed the 64th packet
+	stats.AcceptPacket(baseTime+int64(bufferSize-1)*1000, rtpTS, 100, &pd)
+
+	if !stats.Initialized() {
+		t.Fatalf("expected Initialized() == true after %d packets (bufferSize=%d)", bufferSize, bufferSize)
+	}
+}
+
+func TestFrameStatistics_TakeSample_BeforeInitialized(t *testing.T) {
+	stats := NewFrameStatistics(DefaultStatsBufferSize)
+
+	baseTime := time.Now().UnixMicro()
+	var rtpTS uint32 = 5000
+
+	pd := vp9.PayloadDescriptor{
+		SID: maxLayerSpatialID,
+		TID: maxLayerTemporalID,
+	}
+
+	// Feed only 10 packets (well below the 768 buffer size)
+	for i := 0; i < 10; i++ {
+		stats.AcceptPacket(baseTime+int64(i)*1000, rtpTS, 200, &pd)
+		rtpTS += 3600
+	}
+
+	if stats.Initialized() {
+		t.Fatalf("expected Initialized() == false after 10 packets with bufferSize=%d", DefaultStatsBufferSize)
+	}
+
+	var sample VideoQualitySample
+	stats.TakeSample(&sample)
+
+	if sample.SmoothBitrate != 0 {
+		t.Fatalf("expected SmoothBitrate == 0 before initialized, got %f", sample.SmoothBitrate)
+	}
+	if sample.SmoothFPS != 0 {
+		t.Fatalf("expected SmoothFPS == 0 before initialized, got %f", sample.SmoothFPS)
+	}
+	if sample.BufferBitrate != 0 {
+		t.Fatalf("expected BufferBitrate == 0 before initialized, got %f", sample.BufferBitrate)
+	}
+	if sample.BufferFPS != 0 {
+		t.Fatalf("expected BufferFPS == 0 before initialized, got %f", sample.BufferFPS)
+	}
+}
+
 func BenchmarkAcceptPacket(b *testing.B) {
 	benchmarks := []struct {
 		name       string
