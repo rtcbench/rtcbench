@@ -3,9 +3,9 @@ package ivf
 import (
 	"time"
 
-	"github.com/pion/webrtc/v3/pkg/media"
-
+	"call.zip/pkg/log"
 	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v3/pkg/media"
 )
 
 // LoopIntoTrack continuously reads frames from src and writes them into
@@ -13,7 +13,7 @@ import (
 // to prevent accumulated drift across frames.
 // It runs forever; call from a goroutine.
 func LoopIntoTrack(
-	logf func(string, ...any),
+	l *log.Logger,
 	track *webrtc.TrackLocalStaticSample,
 	src FrameSource,
 ) {
@@ -22,14 +22,14 @@ func LoopIntoTrack(
 	for {
 		data, dur, err := src.NextFrame()
 		if err != nil {
-			logf("[ivf] NextFrame: %v", err)
+			l.Errorf("[ivf] NextFrame: %v", err)
 			time.Sleep(2 * time.Second)
 			nextTime = time.Now()
 			continue
 		}
 
 		if err := track.WriteSample(media.Sample{Data: data, Duration: dur}); err != nil {
-			logf("[ivf] WriteSample: %v", err)
+			l.Errorf("[ivf] WriteSample: %v", err)
 			return
 		}
 

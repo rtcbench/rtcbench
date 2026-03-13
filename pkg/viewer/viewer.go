@@ -105,8 +105,6 @@ loop:
 		n, _, err = v.track.Read(buf)
 		clientReadTime = time.Now().UnixMicro()
 
-		//log.Println("packet: ", n)
-
 		if err != nil {
 			select {
 			case <-done:

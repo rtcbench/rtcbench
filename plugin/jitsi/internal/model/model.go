@@ -1,25 +1,21 @@
 package model
 
 import (
-	"call.zip/pkg/aoflog"
 	"call.zip/pkg/ivf"
+	"call.zip/pkg/log"
 	"call.zip/plugin/jitsi/internal/httpxml"
 )
 
 // ConnectionState is an object built by the signaling flow
 type ConnectionState struct {
 	// === Bot config ===
-	Sender      bool
-	StepsAOF    aoflog.Client
-	PionAOF     aoflog.Client
-	PktRecvAOF  aoflog.Client
-	NetStatsAOF aoflog.Client
-	BOSHSender  httpxml.BOSHSender
-	BotRandom   string
-	Nickname    string
-	LANServerIP string  // e.g. "10.99.0.210"
-	LANClientIP string  // e.g. "10.99.0.219"
-	LogsDir     *string // e.g. "logs/e-2025XXXXXXXX/split/vbot-XXXXXXXX" or nil for no output
+	Sender       bool
+	Log *log.Logger
+	BOSHSender   httpxml.BOSHSender
+	BotRandom    string
+	Nickname     string
+	LANServerIP  string // e.g. "10.99.0.210"
+	LANClientIP  string // e.g. "10.99.0.219"
 
 	// sender related fields
 	SenderSSRC  *string

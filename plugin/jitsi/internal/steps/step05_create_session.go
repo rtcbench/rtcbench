@@ -22,26 +22,26 @@ func Step05_CreateSession(state *model.ConnectionState) error {
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
-		state.StepsAOF.LogPrintf("[Step05] ERROR sending create session request: %v", err)
+		state.Log.Errorf("[Step05] sending create session request: %v", err)
 		return fmt.Errorf("create session failed: %w", err)
 	}
 
-	state.StepsAOF.LogPrintf("[Step05] DEBUG: CreateSession Response XML: %s", respXML)
+	state.Log.Debugf("[Step05] CreateSession Response XML: %s", respXML)
 
 	// Check for <iq> tag presence
 	if !strings.Contains(respXML, "<iq") {
-		state.StepsAOF.LogPrintln("[Step05] ERROR: Missing <iq> tag in response.")
+		state.Log.Errorf("[Step05] Missing <iq> tag in response.")
 		return fmt.Errorf("no <iq> tag in create session response")
 	}
 
 	// Check iq type attribute
 	iqType := util.ExtractAttr(respXML, "type")
 	if iqType != "result" {
-		state.StepsAOF.LogPrintf("[Step05] ERROR: Incorrect iq type='%s', expected 'result'.", iqType)
+		state.Log.Errorf("[Step05] Incorrect iq type='%s', expected 'result'.", iqType)
 		return fmt.Errorf("unexpected iq type='%s'", iqType)
 	}
 
 	state.Bound = true
-	state.StepsAOF.LogPrintln("Step05_CreateSession OK: session established successfully.")
+	state.Log.Infof("Step05_CreateSession OK: session established successfully.")
 	return nil
 }

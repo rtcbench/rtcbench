@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"call.zip/pkg/log"
 	"call.zip/pkg/vp9_stats"
 )
 
@@ -61,6 +62,8 @@ var (
 	ErrInvalidClientIP = errors.New("invalid spec.network.clientIP address")
 
 	ErrMissingLoggingDirectory = errors.New("missing spec.logging.directory pathname")
+	ErrInvalidConsoleLevel     = errors.New("invalid spec.logging.consoleLevel string, must match " + logLevelRegex.String())
+	ErrInvalidFileLevel        = errors.New("invalid spec.logging.fileLevel string, must match " + logLevelRegex.String())
 
 	ErrMissingLogStreamName  = errors.New("missing spec.logging.streams[#].name string")
 	ErrInvalidLogStreamName  = errors.New("invalid spec.logging.streams[#].name string")
@@ -83,6 +86,7 @@ type Config struct {
 	Metadata       MetadataConfig
 	Spec           SpecConfig
 	StatsConsumers []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
+	Log            *log.Registry
 }
 
 type YAMLConfig struct {
@@ -529,15 +533,23 @@ func (yc *YAMLNetworkConfig) mustConvert() NetworkConfig {
 }
 
 type LoggingConfig struct {
-	Console   bool
-	Directory string
-	Streams   []LogStreamConfig
+	Console      bool
+	ConsoleLevel string
+	Color        bool
+	Directory    string
+	FileLevel    string
+	Combined     bool
+	Streams      []LogStreamConfig
 }
 
 type YAMLLoggingConfig struct {
-	Console   bool                  `yaml:"console"`
-	Directory *string               `yaml:"directory,omitempty"`
-	Streams   []YAMLLogStreamConfig `yaml:"streams,omitempty"`
+	Console      bool                  `yaml:"console"`
+	ConsoleLevel *string               `yaml:"consoleLevel,omitempty"`
+	Color        *bool                 `yaml:"color,omitempty"`
+	Directory    *string               `yaml:"directory,omitempty"`
+	FileLevel    *string               `yaml:"fileLevel,omitempty"`
+	Combined     *bool                 `yaml:"combined,omitempty"`
+	Streams      []YAMLLogStreamConfig `yaml:"streams,omitempty"`
 }
 
 func (yc *YAMLLoggingConfig) validate() error {
@@ -547,6 +559,12 @@ func (yc *YAMLLoggingConfig) validate() error {
 	)
 	if yc.Directory == nil || strings.TrimSpace(*yc.Directory) == "" {
 		errs = append(errs, ErrMissingLoggingDirectory)
+	}
+	if yc.ConsoleLevel != nil && !logLevelRegex.MatchString(*yc.ConsoleLevel) {
+		errs = append(errs, ErrInvalidConsoleLevel)
+	}
+	if yc.FileLevel != nil && !logLevelRegex.MatchString(*yc.FileLevel) {
+		errs = append(errs, ErrInvalidFileLevel)
 	}
 	for i, stream := range yc.Streams {
 		streamErr := stream.validate()
@@ -563,7 +581,21 @@ func (yc *YAMLLoggingConfig) validate() error {
 func (yc *YAMLLoggingConfig) mustConvert() LoggingConfig {
 	var c LoggingConfig
 	c.Console = yc.Console
+	c.ConsoleLevel = "info"
+	if yc.ConsoleLevel != nil {
+		c.ConsoleLevel = *yc.ConsoleLevel
+	}
+	if yc.Color != nil {
+		c.Color = *yc.Color
+	}
 	c.Directory = *yc.Directory
+	c.FileLevel = "debug"
+	if yc.FileLevel != nil {
+		c.FileLevel = *yc.FileLevel
+	}
+	if yc.Combined != nil {
+		c.Combined = *yc.Combined
+	}
 	for _, stream := range yc.Streams {
 		c.Streams = append(c.Streams, stream.mustConvert())
 	}

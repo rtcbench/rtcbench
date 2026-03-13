@@ -63,7 +63,7 @@ func buildSessionAcceptIQ(state *model.ConnectionState, videoSenders string, vid
 		candidate = extractHostCandidate(state.LocalSDP)
 	}
 
-	state.StepsAOF.LogPrintf("[Step10] Using ufrag=%s pwd=%s fingerprint=%s hostIP=%s port=%d priority=%d",
+	state.Log.Debugf("[Step10] Using ufrag=%s pwd=%s fingerprint=%s hostIP=%s port=%d priority=%d",
 		ufrag, pwd, fingerprint, candidate.IP, candidate.Port, candidate.Priority)
 
 	candElem := &ICECandidateElem{
@@ -201,13 +201,13 @@ func Step10_SendSessionAccept(state *model.ConnectionState) error {
 		return fmt.Errorf("marshal session-accept: %w", err)
 	}
 
-	state.StepsAOF.LogPrintf("=== BEGIN session-accept ===\n%s\n=== END session-accept ===", requestBody)
+	state.Log.Debugf("=== BEGIN session-accept ===\n%s\n=== END session-accept ===", requestBody)
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
 		return fmt.Errorf("session-accept failed: %w", err)
 	}
 
-	state.StepsAOF.LogPrintf("[Step10] session-accept sent OK: %s", respXML)
+	state.Log.Infof("[Step10] session-accept sent OK: %s", respXML)
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"call.zip/pkg/log"
 	"call.zip/pkg/vp9_stats"
 )
 
@@ -139,7 +140,7 @@ func TestJoinErrors(t *testing.T) {
 
 func TestNewManager(t *testing.T) {
 	ch := make(chan vp9_stats.VideoQualitySample, 1)
-	m := NewManager(ch)
+	m := NewManager(ch, log.NewRegistry(nil, nil).NewLogger("test", ""))
 	if m == nil {
 		t.Fatalf("expected non-nil Manager")
 	}
@@ -150,7 +151,7 @@ func TestNewManager(t *testing.T) {
 
 func TestNewManager_SizeZero(t *testing.T) {
 	ch := make(chan vp9_stats.VideoQualitySample, 1)
-	m := NewManager(ch)
+	m := NewManager(ch, log.NewRegistry(nil, nil).NewLogger("test", ""))
 	for i := 0; i < 3; i++ {
 		if got := m.Size(); got != 0 {
 			t.Fatalf("call %d: expected Size() == 0, got %d", i, got)

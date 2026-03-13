@@ -75,7 +75,7 @@ func Step10_Sender_SendSessionAccept(state *model.ConnectionState) error {
 		return fmt.Errorf("marshal session-accept (sender): %w", err)
 	}
 
-	state.StepsAOF.LogPrintf("=== BEGIN session-accept (sender, no-rtx) ===\n%s\n=== END session-accept (sender, no-rtx) ===", requestBody)
+	state.Log.Debugf("=== BEGIN session-accept (sender, no-rtx) ===\n%s\n=== END session-accept (sender, no-rtx) ===", requestBody)
 
 	respXML, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 	if err != nil {
@@ -86,6 +86,6 @@ func Step10_Sender_SendSessionAccept(state *model.ConnectionState) error {
 		return fmt.Errorf("session-accept rejected by Jicofo: %s", respXML)
 	}
 
-	state.StepsAOF.LogPrintf("[Step10_Sender] session-accept sent OK: %s", respXML)
+	state.Log.Infof("[Step10_Sender] session-accept sent OK: %s", respXML)
 	return nil
 }

@@ -31,6 +31,6 @@ func Step04_BindResource(state *model.ConnectionState) error {
 	state.Jid = jid
 	state.Bound = true
 
-	state.StepsAOF.LogPrintf("Step04_BindResource OK: JID=%s", jid)
+	state.Log.Infof("Step04_BindResource OK: JID=%s", jid)
 	return nil
 }

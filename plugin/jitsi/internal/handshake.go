@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"time"
 
-	"call.zip/pkg/aofconf"
 	ivfpkg "call.zip/pkg/ivf"
+	"call.zip/pkg/log"
 	"call.zip/pkg/vp9"
 	"call.zip/plugin/jitsi/internal/httpxml"
 	"call.zip/plugin/jitsi/internal/model"
@@ -21,7 +21,7 @@ func initialRid() int64 {
 }
 
 func (c *Client) performHandshake(
-	aof *aofconf.Config,
+	l *log.Logger,
 	room string,
 	nickname string,
 	ivf *vp9.IvfSegmenter,
@@ -30,19 +30,15 @@ func (c *Client) performHandshake(
 	state := &model.ConnectionState{
 		Sender:      src != nil,
 		FrameSource: src,
-		StepsAOF:       aof.Steps,
-		PionAOF:        aof.Pion,
-		PktRecvAOF:     aof.PktRecv,
-		NetStatsAOF:    aof.NetStats,
-		BOSHSender:     httpxml.NewBOSHSender(aof.BOSH),
-		BoshURL:        fmt.Sprintf("https://%s/http-bind", c.serverIP),
-		RoomName:       room,
-		MachineUID:     uuid.NewString(),
-		RID:            initialRid(),
-		Nickname:       nickname,
-		LANServerIP:    c.serverIP,
-		LANClientIP:    c.clientIP,
-		LogsDir:        aof.LogsDir,
+		Log:         l,
+		BOSHSender:  httpxml.NewBOSHSender(l),
+		BoshURL:     fmt.Sprintf("https://%s/http-bind", c.serverIP),
+		RoomName:    room,
+		MachineUID:  uuid.NewString(),
+		RID:         initialRid(),
+		Nickname:    nickname,
+		LANServerIP: c.serverIP,
+		LANClientIP: c.clientIP,
 	}
 
 	u, _ := url.Parse(state.BoshURL)
@@ -62,13 +58,13 @@ func (c *Client) performHandshake(
 	for _, step := range stepsBeforeJingle {
 		err := step(state)
 		if err != nil {
-			aof.Handshake.LogPrintf("Step failed: %v", err)
+			l.Errorf("step failed: %v", err)
 			return err
 		}
 	}
 
 	if err := steps.Step09_WaitForJingleOffer(state); err != nil {
-		aof.Handshake.LogPrintf("Step09 failed: %v", err)
+		l.Errorf("Step09 failed: %v", err)
 		return err
 	}
 
@@ -79,14 +75,14 @@ func (c *Client) performHandshake(
 		Sender:      state.Sender,
 	})
 	if err != nil {
-		aof.Handshake.LogPrintf("SDP conversion failed: %v", err)
+		l.Errorf("SDP conversion failed: %v", err)
 		return err
 	}
 	state.RemoteSDP = sdp
 
 	pionConnection, err := c.startPion(state, ivf)
 	if err != nil {
-		aof.Handshake.LogPrintf("startPion failed: %v", err)
+		l.Errorf("startPion failed: %v", err)
 		return err
 	}
 
@@ -95,22 +91,22 @@ func (c *Client) performHandshake(
 
 	if state.Sender {
 		if err := steps.Step10_Sender_SendSessionAccept(state); err != nil {
-			aof.Handshake.LogPrintf("Step10_Sender failed: %v", err)
+			l.Errorf("Step10_Sender failed: %v", err)
 			return err
 		}
 		if err := steps.Step11_Sender_AnnounceCameraSource(state); err != nil {
-			aof.Handshake.LogPrintf("Step11_Sender failed: %v", err)
+			l.Errorf("Step11_Sender failed: %v", err)
 			return err
 		}
 	} else {
 		if err := steps.Step10_SendSessionAccept(state); err != nil {
-			aof.Handshake.LogPrintf("Step10 failed: %v", err)
+			l.Errorf("Step10 failed: %v", err)
 			return err
 		}
 	}
 
 	if state.ColibriWebSocketURL != "" {
-		go runColibriWS(context.Background(), state.ColibriWebSocketURL, aof.KeepAlive)
+		go runColibriWS(context.Background(), state.ColibriWebSocketURL, l)
 	}
 
 	// BOSH keepalive: send XMPP pings to keep the Prosody session alive.
@@ -133,10 +129,10 @@ func (c *Client) performHandshake(
 
 			_, err := state.BOSHSender.Send(state.BoshURL, requestBody)
 			if err != nil {
-				aof.KeepAlive.LogPrintf("[KeepAlive] ERROR: %v", err)
+				l.Errorf("[keepalive] %v", err)
 				return
 			}
-			aof.KeepAlive.LogPrintln("[KeepAlive] Sent keepalive ping.")
+			l.Debugf("[keepalive] sent ping")
 		}
 
 		sendPing() // fire immediately — don't wait 5s for the first one

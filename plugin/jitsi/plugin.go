@@ -3,11 +3,11 @@ package jitsi
 import (
 	"context"
 	"errors"
-	"log"
 	"path"
 
 	"call.zip"
 	ivfpkg "call.zip/pkg/ivf"
+	"call.zip/pkg/log"
 	"call.zip/pkg/vp9"
 	jitsi "call.zip/plugin/jitsi/internal"
 )
@@ -16,6 +16,7 @@ const statsInputChanSize = 1 << 20 // TODO: configurable statsInputChanSize
 
 type Plugin struct {
 	client             *jitsi.Client
+	log                *log.Logger
 	enableRecording    bool
 	recordingDirectory string
 	cameras            *ivfpkg.Cameras
@@ -27,6 +28,7 @@ func NewPlugin() call.Plugin {
 
 func (e *Plugin) Setup(_ context.Context, config *call.Config) error {
 	e.client = jitsi.NewClient(config, statsInputChanSize)
+	e.log = config.Log.NewLogger("jitsi", "")
 	e.enableRecording = config.Spec.Conference.Recording.Enabled
 	e.recordingDirectory = config.Spec.Conference.Recording.Directory
 
@@ -64,7 +66,7 @@ func (e *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 			return errors.Join(call.ErrCannotJoinRoom, err)
 		}
 		ivf.Enable()
-		log.Printf("Enabled IVF file writing for room=%s user=%s", roomID, userID)
+		e.log.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
 	}
 
 	var src ivfpkg.FrameSource

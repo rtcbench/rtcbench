@@ -34,12 +34,12 @@ func Step01_StartSession(state *model.ConnectionState) error {
 	// Extract just the <body ...> opening tag for scoped parsing.
 	bodyTagStart := strings.Index(respXML, "<body")
 	if bodyTagStart == -1 {
-		state.StepsAOF.LogPrintf("[Step01] WARN: <body> tag not found at all in response:\n%s", respXML)
+		state.Log.Errorf("[Step01] <body> tag not found at all in response:\n%s", respXML)
 		return fmt.Errorf("BOSH server response missing <body> tag")
 	}
 	bodyTagEnd := strings.Index(respXML[bodyTagStart:], ">")
 	if bodyTagEnd == -1 {
-		state.StepsAOF.LogPrintf("[Step01] WARN: Malformed <body> tag: no closing '>' found:\n%s", respXML)
+		state.Log.Errorf("[Step01] Malformed <body> tag: no closing '>' found:\n%s", respXML)
 		return fmt.Errorf("BOSH server response malformed <body> tag")
 	}
 	bodyOpenTag := respXML[bodyTagStart : bodyTagStart+bodyTagEnd]
@@ -48,11 +48,11 @@ func Step01_StartSession(state *model.ConnectionState) error {
 	sid := util.ExtractAttr(bodyOpenTag, "sid")
 	authid := util.ExtractAttr(bodyOpenTag, "authid")
 
-	state.StepsAOF.LogPrintf("[Step01] DEBUG: Extracted body tag: %s", bodyOpenTag)
-	state.StepsAOF.LogPrintf("[Step01] DEBUG: Parsed sid=%q, authid=%q", sid, authid)
+	state.Log.Debugf("[Step01] Extracted body tag: %s", bodyOpenTag)
+	state.Log.Debugf("[Step01] Parsed sid=%q, authid=%q", sid, authid)
 
 	if sid == "" || authid == "" {
-		state.StepsAOF.LogPrintf("[Step01] ERROR: sid/authid missing. Full response:\n%s", respXML)
+		state.Log.Errorf("[Step01] sid/authid missing. Full response:\n%s", respXML)
 		return fmt.Errorf("BOSH server did not return sid or authid")
 	}
 
@@ -61,6 +61,6 @@ func Step01_StartSession(state *model.ConnectionState) error {
 	state.Authenticated = false
 	state.Bound = false
 
-	state.StepsAOF.LogPrintf("Step01_StartSession OK: SID=%s AUTHID=%s", sid, authid)
+	state.Log.Infof("Step01_StartSession OK: SID=%s AUTHID=%s", sid, authid)
 	return nil
 }

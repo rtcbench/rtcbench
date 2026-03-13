@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 	"time"
 
+	"call.zip/pkg/log"
 	"github.com/google/uuid"
 )
 
@@ -64,6 +64,7 @@ type Client struct {
 	config   *Config
 	registry PluginRegistry
 	plugin   Plugin
+	log      *log.Logger
 }
 
 func NewClient(config *Config) *Client {
@@ -71,6 +72,7 @@ func NewClient(config *Config) *Client {
 		config:   config,
 		registry: make(PluginRegistry),
 		plugin:   nil,
+		log:      config.Log.NewLogger("general", ""),
 	}
 }
 
@@ -117,9 +119,9 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 			fmtRoomName += "_" + strconv.Itoa(i)
 		}
 		go func() {
-			log.Printf("[cli-main] joining room %q (%d users)", fmtRoomName, c.config.Spec.Conference.UsersPerRoom)
+			c.log.Infof("joining room %q (%d users)", fmtRoomName, c.config.Spec.Conference.UsersPerRoom)
 			c.joinRoomByName(ctx, fmtRoomName)
-			log.Printf("[cli-main] finished joining room %q", fmtRoomName)
+			c.log.Infof("finished joining room %q", fmtRoomName)
 			wg.Done()
 		}()
 	}
@@ -140,7 +142,7 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 				},
 			})
 			if len(errs) == 0 {
-				log.Println("[AlwaysRetryFailedJoins] Finished joining room", roomName)
+				c.log.Infof("[AlwaysRetryFailedJoins] finished joining room %s", roomName)
 				break
 			}
 
@@ -149,9 +151,9 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 				retryDelay = 1 * time.Second
 			}
 
-			log.Printf("[AlwaysRetryFailedJoins] %d errors occurred, will retry in %s\n", len(errs), retryDelay.String())
+			c.log.Errorf("[AlwaysRetryFailedJoins] %d errors occurred, will retry in %s", len(errs), retryDelay.String())
 			for _, e := range errs {
-				log.Printf("[AlwaysRetryFailedJoins] error: %v", e.error)
+				c.log.Errorf("[AlwaysRetryFailedJoins] error: %v", e.error)
 			}
 			nUsersRemaining = len(errs)
 
@@ -165,9 +167,9 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 				concurrency: c.config.Spec.Conference.JoinPolicy.Concurrency,
 			},
 		}); errs != nil {
-			log.Printf("[cli-main] %d errors from c.JoinRoom: %v", len(errs), errs)
+			c.log.Errorf("%d errors from JoinRoom: %v", len(errs), errs)
 			for _, e := range errs {
-				log.Printf("[cli-main] error: %v", e.error)
+				c.log.Errorf("error: %v", e.error)
 			}
 		}
 	}
@@ -227,7 +229,7 @@ func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSign
 					}
 				}
 			}
-			log.Printf("[JoinRoom] worker #%d done (room=%s)", workerID, cfg.roomName)
+			c.log.Infof("[JoinRoom] worker #%d done (room=%s)", workerID, cfg.roomName)
 		}(i)
 	}
 

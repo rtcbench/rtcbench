@@ -1,9 +1,9 @@
 package viewer
 
 import (
-	"log"
 	"sync"
 
+	"call.zip/pkg/log"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	"github.com/pion/webrtc/v3"
@@ -16,13 +16,15 @@ type Manager struct {
 	done    chan struct{}
 	viewers map[*Viewer]struct{}
 	input   chan<- vp9_stats.VideoQualitySample
+	log     *log.Logger
 }
 
-func NewManager(input chan<- vp9_stats.VideoQualitySample) *Manager {
+func NewManager(input chan<- vp9_stats.VideoQualitySample, log *log.Logger) *Manager {
 	return &Manager{
 		done:    make(chan struct{}),
 		viewers: make(map[*Viewer]struct{}),
 		input:   input,
+		log:     log,
 	}
 }
 
@@ -47,11 +49,10 @@ func (m *Manager) SpawnViewer(
 		defer m.wg.Done()
 		err := v.run(m.done)
 
-		// TODO do something with the error...
 		if err != nil {
-			log.Printf("Viewer exited with error(s): %v", err)
+			m.log.Errorf("viewer exited with error(s): %v", err)
 		} else {
-			log.Println("Viewer exited normally")
+			m.log.Infof("viewer exited normally")
 		}
 
 		m.mu.Lock()
