@@ -1,7 +1,7 @@
 port: 7880
 rtc:
-  port_range_start: 7881
-  port_range_end: 7921
+  port_range_start: 10000
+  port_range_end: 60000
   use_external_ip: false
   node_ip: 172.22.0.10
 keys:

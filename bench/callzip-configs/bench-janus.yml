@@ -1,0 +1,36 @@
+apiVersion: call.zip/v1
+kind: VideoCallStressTest
+metadata:
+  name: bench-janus
+spec:
+  plugin: janus
+  conference:
+    name: room-1234
+    usersPerRoom: $env:VIEWERS_PER_ROOM=10
+    totalRooms: $env:TOTAL_ROOMS=1
+    cameras:
+      perRoom: 0
+    joinPolicy:
+      concurrency: $env:VIEWERS_PER_ROOM=10
+  pluginConfig:
+    janus:
+      _serverRoot: 'http://{{spec.network.serverIP}}:8088/janus'
+  network:
+    serverIP: $env:SERVER_IP
+  metrics:
+    port: 9090
+    statsJSONLPath: $env:STATS_JSONL_PATH=
+  logging:
+    console: true
+    directory: $env:LOG_DIR=/tmp/bench-logs
+    streams:
+      - name: general
+        level: info
+      - name: signaling
+        level: info
+      - name: media
+        level: info
+      - name: packets
+        level: info
+      - name: video_stats
+        level: info

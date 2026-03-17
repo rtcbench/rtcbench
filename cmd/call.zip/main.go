@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	stdlog "log"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"call.zip/internal/netutil"
 	"call.zip/pkg/log"
 	"call.zip/pkg/metricsserver"
+	"call.zip/pkg/statsjsonl"
 	"call.zip/plugin/janus"
 	"call.zip/plugin/jitsi"
 	"call.zip/plugin/livekit"
@@ -31,13 +33,16 @@ func main() {
 		sigtermCancel, shutdownCancel context.CancelFunc
 	)
 
-	if len(os.Args) != 2 {
-		stdlog.Fatalf("Usage: %s config.yml", os.Args[0])
+	startAt := flag.Int64("start-at", 0, "Unix timestamp to wait until before joining rooms")
+	flag.Parse()
+
+	if flag.NArg() != 1 {
+		stdlog.Fatalf("Usage: %s [--start-at TIMESTAMP] config.yml", os.Args[0])
 	}
 
 	_ = godotenv.Load()
 
-	cfg, err = loadYAMLConfig(os.Args[1])
+	cfg, err = loadYAMLConfig(flag.Arg(0))
 	if err != nil {
 		stdlog.Fatalf("Failed to load YAML config file: %v", err)
 	}
@@ -73,10 +78,30 @@ func main() {
 		}()
 	}
 
+	if cfg.Spec.Metrics.StatsJSONLPath != "" {
+		hostname, _ := os.Hostname()
+		jw, err := statsjsonl.New(cfg.Spec.Metrics.StatsJSONLPath, hostname, 0)
+		if err != nil {
+			mainLog.Errorf("failed to create JSONL stats writer: %v", err)
+		} else {
+			cfg.StatsConsumers = append(cfg.StatsConsumers, jw.Subscriber())
+			defer jw.Close()
+			mainLog.Infof("[stats-jsonl] writing to %s", cfg.Spec.Metrics.StatsJSONLPath)
+		}
+	}
+
 	client = call.NewClient(cfg)
 	client.RegisterPlugin("jitsi", jitsi.NewPlugin)
 	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
 	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
+
+	if *startAt > 0 {
+		waitDuration := time.Until(time.Unix(*startAt, 0))
+		if waitDuration > 0 {
+			mainLog.Infof("waiting %s until start-at time %d", waitDuration.Round(time.Second), *startAt)
+			time.Sleep(waitDuration)
+		}
+	}
 
 	err = client.JoinAllRooms(context.Background())
 	if err != nil {
