@@ -19,6 +19,7 @@ spec:
   pluginConfig:
     janus:
       _serverRoot: 'http://{{spec.network.serverIP}}:8088/janus'
+      allowInsecureHttps: false
     jitsi:
       _boshURL: 'https://{{spec.network.serverIP}}/http-bind'
       _domain: '{{spec.network.serverIP}}'
