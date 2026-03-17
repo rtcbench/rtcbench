@@ -14,10 +14,10 @@ build-web:
 	docker build -t callzip-livekit-web:latest docker/livekit-web
 
 bench-quick: build build-web
-	$(RUN) python -m bench cluster.yml --sfus janus --clients callzip,chromium --quick -v
+	$(RUN) -m bench cluster.yml --sfus janus --clients callzip,chromium --quick -v
 
 bench: build build-web
-	$(RUN) python -m bench cluster.yml --clients callzip,chromium,webrtcperf -v
+	$(RUN) -m bench cluster.yml --clients callzip,chromium,webrtcperf -v
 
 bench-analyze: build
-	$(RUN) python -m bench.analyze $(filter-out $@,$(MAKECMDGOALS))
+	$(RUN) -m bench.analyze $(filter-out $@,$(MAKECMDGOALS))
