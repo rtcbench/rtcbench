@@ -13,14 +13,38 @@ from bench.config import (
     DEFAULT_MIN_R, DEFAULT_MAX_R, RESULTS_BASE, log,
 )
 from bench.ssh import SSHRunner
-from bench.sfu import stop_sfu
+from bench.sfu import stop_sfu, cleanup
 from bench.search import binary_search
 from bench.results import load_hints, hint_range, print_results, save_results
 
 
-def run_benchmark(cluster_path, sfus, clients, min_r, max_r, dry_run,
+def parse_cells(cells_str):
+    """Parse --cells spec into list of (sfu, client) tuples.
+
+    Format: semicolon-separated groups of 'sfu:client,client,...'
+    Example: 'janus:chromium,webrtcperf;jitsi:webrtcperf'
+    Returns: [('janus','chromium'), ('janus','webrtcperf'), ('jitsi','webrtcperf')]
+    """
+    cells = []
+    for group in cells_str.split(";"):
+        group = group.strip()
+        if ":" not in group:
+            raise ValueError(f"Bad cell spec '{group}', expected 'sfu:client[,client,...]'")
+        sfu, clients_part = group.split(":", 1)
+        sfu = sfu.strip()
+        if sfu not in SFUS:
+            raise ValueError(f"Unknown SFU: {sfu}")
+        for c in clients_part.split(","):
+            c = c.strip()
+            if c not in CLIENTS:
+                raise ValueError(f"Unknown client: {c}")
+            cells.append((sfu, c))
+    return cells
+
+
+def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
                    use_hints=True, quick=False):
-    """Run the full benchmark."""
+    """Run the benchmark for a list of (sfu, client) cells."""
     cluster = cfg.load_cluster_config(cluster_path)
 
     if quick:
@@ -31,7 +55,7 @@ def run_benchmark(cluster_path, sfus, clients, min_r, max_r, dry_run,
         log.info("Quick mode active: warmup=%ds, steady=%ds",
                  cfg.WARMUP_S, cfg.EXPERIMENT_DURATION_S)
 
-    run_id = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    run_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     run_dir = os.path.join(RESULTS_BASE, run_id)
     os.makedirs(run_dir, exist_ok=True)
     log.info("Results directory: %s", run_dir)
@@ -47,15 +71,16 @@ def run_benchmark(cluster_path, sfus, clients, min_r, max_r, dry_run,
     results = {}
     histories = {}
 
+    cleanup(ssh, cluster)
+
     log.info("Cluster config: sender=%s sfu=%s receivers=%s",
              cluster["sender"], sfu_host, cluster["receivers"])
-    log.info("Matrix: SFUs=%s Clients=%s", sfus, clients)
+    log.info("Cells: %s", [f"{s}/{c}" for s, c in cells])
     log.info("Binary search default range: [%d, %d]", min_r, max_r)
     if initial_hi:
         log.info("Per-client initial_hi overrides: %s", initial_hi)
 
-    for sfu_name in sfus:
-        for client_name in clients:
+    for sfu_name, client_name in cells:
             cell_tag = f"{sfu_name}/{client_name}"
             log.info("")
             log.info("=" * 60)
@@ -96,6 +121,7 @@ def run_benchmark(cluster_path, sfus, clients, min_r, max_r, dry_run,
             finally:
                 stop_sfu(ssh, sfu_host, sfu_name, cluster)
 
+    cleanup(ssh, cluster)
     print_results(results, histories)
     save_results(results, histories, run_dir)
 
@@ -113,6 +139,10 @@ def main():
     parser.add_argument("--clients",
                         default=",".join(CLIENTS),
                         help=f"Comma-separated clients (default: {','.join(CLIENTS)})")
+    parser.add_argument("--cells",
+                        help="Run specific cells: 'sfu:client,...;sfu:client,...' "
+                             "(e.g. 'janus:chromium,webrtcperf;jitsi:webrtcperf'). "
+                             "Overrides --sfus/--clients.")
     parser.add_argument("--min-r", type=int, default=DEFAULT_MIN_R)
     parser.add_argument("--max-r", type=int, default=DEFAULT_MAX_R)
     parser.add_argument("--dry-run", action="store_true")
@@ -133,19 +163,25 @@ def main():
     if args.quick and args.max_r == DEFAULT_MAX_R:
         args.max_r = 15
 
-    sfus = [s.strip() for s in args.sfus.split(",")]
-    clients = [c.strip() for c in args.clients.split(",")]
-
-    for s in sfus:
-        if s not in SFUS:
-            parser.error(f"Unknown SFU: {s}")
-    for c in clients:
-        if c not in CLIENTS:
-            parser.error(f"Unknown client: {c}")
+    if args.cells:
+        try:
+            cells = parse_cells(args.cells)
+        except ValueError as e:
+            parser.error(str(e))
+    else:
+        sfus = [s.strip() for s in args.sfus.split(",")]
+        clients = [c.strip() for c in args.clients.split(",")]
+        for s in sfus:
+            if s not in SFUS:
+                parser.error(f"Unknown SFU: {s}")
+        for c in clients:
+            if c not in CLIENTS:
+                parser.error(f"Unknown client: {c}")
+        cells = [(s, c) for s in sfus for c in clients]
 
     results = run_benchmark(
         args.cluster_config,
-        sfus=sfus, clients=clients,
+        cells=cells,
         min_r=args.min_r, max_r=args.max_r,
         dry_run=args.dry_run,
         use_hints=not args.ignore_hints,

@@ -4,6 +4,7 @@ import logging
 
 from bench.config import (
     SFUS, SFU_CONTAINER_NAME, WEB_CONTAINER_NAME, JITSI_IMAGE_TAG,
+    CALLZIP_SENDER_CONTAINER, CALLZIP_VIEWER_CONTAINER, WRP_CONTAINER_NAME,
 )
 
 log = logging.getLogger("bench")
@@ -183,3 +184,24 @@ def stop_all_sfus(ssh, sfu_host, cluster=None):
     """Stop all SFU containers."""
     for sfu_name in SFUS:
         stop_sfu(ssh, sfu_host, sfu_name, cluster)
+
+
+def cleanup(ssh, cluster):
+    """Kill all bench containers on all hosts. Called at start and end of run."""
+    containers = f"{SFU_CONTAINER_NAME} {WEB_CONTAINER_NAME} {CALLZIP_SENDER_CONTAINER} {CALLZIP_VIEWER_CONTAINER} {WRP_CONTAINER_NAME}"
+    hosts = set()
+    hosts.add(cluster["sender"])
+    hosts.update(cluster["sfu"])
+    hosts.update(cluster["receivers"])
+    jitsi_cfg = cluster.get("jitsi", {})
+    for key in ("jvb", "prosody_web", "jicofo"):
+        if key in jitsi_cfg:
+            hosts.add(jitsi_cfg[key])
+
+    log.info("Cleaning up bench containers on %d hosts...", len(hosts))
+    for host in hosts:
+        try:
+            ssh.run(host, f"docker rm -f {containers} 2>/dev/null || true",
+                    check=False, timeout=30)
+        except Exception as e:
+            log.warning("Cleanup failed on %s: %s", host, e)
