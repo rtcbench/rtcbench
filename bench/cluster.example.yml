@@ -1,0 +1,46 @@
+# Benchmark cluster configuration.
+#
+# Layout:
+#   1 sender, 1 SFU, 1 receiver (normalizes all SFUs to same receiver count)
+#   Jitsi uses 3 machines for SFU components, same single receiver.
+
+ssh_key: ~/.ssh/id_callzip
+ssh_user: ubuntu-server
+
+sender: 192.168.10.11
+sfu:
+  - 192.168.10.39
+
+receivers:
+  - 192.168.10.88
+
+# Jitsi distributed topology (3 separate hosts)
+# When running Jitsi, these machines are reserved for SFU components
+# and excluded from the receiver pool automatically.
+jitsi:
+  jvb: 192.168.10.39           # Video bridge (media plane, bottleneck)
+  prosody_web: 192.168.10.36    # Prosody (XMPP) + Jitsi-Web (nginx/BOSH)
+  jicofo: 192.168.10.28         # Jicofo (focus component)
+
+# SFU port configuration
+janus_api_port: 8088
+janus_web_port: 8080
+jitsi_web_port: 443
+livekit_ws_port: 7880
+livekit_web_port: 8080
+
+# NIC bandwidth — caps binary search at floor(nic_mbps / 3.5) viewers
+nic_mbps: 10000
+
+# Test parameters — longer windows for accuracy
+warmup_seconds: 60
+steady_state_seconds: 120
+start_lead_seconds: 60
+min_bitrate_bps: 2800000
+min_fps: 20.0
+
+# Binary search upper bounds per client type
+initial_hi:
+  callzip: 5000
+  webrtcperf: 200
+  chromium: 200

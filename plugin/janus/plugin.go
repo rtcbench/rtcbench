@@ -29,7 +29,7 @@ const (
 
 	viewerPacketsPerSample = 1000
 	viewerTrackBufferSize  = 1500
-	statsInputChanSize     = 128
+	statsInputChanSize     = 1 << 16 // 65536 - large enough for high viewer counts
 )
 
 type Plugin struct {
@@ -223,10 +223,6 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		return fmt.Errorf("%w: SetRemoteDescription: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	if err := janus.AddStaticCandidate(pc, p.serverIP); err != nil {
-		return fmt.Errorf("%w: AddICECandidate: %v", call.ErrCannotJoinRoom, err)
-	}
-
 	go ivf.LoopIntoTrack(l, track, p.cameras.NewSource())
 
 	select {
@@ -343,10 +339,6 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 			once.Do(func() { close(done) })
 		}
 	})
-
-	if err := janus.AddStaticCandidate(pc, p.serverIP); err != nil {
-		return fmt.Errorf("%w: AddICECandidate: %v", call.ErrCannotJoinRoom, err)
-	}
 
 	started, err := session.Send(subHandleID, map[string]any{
 		"request": "start",

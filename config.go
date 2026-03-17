@@ -195,11 +195,13 @@ type YAMLSpecConfig struct {
 }
 
 type MetricsConfig struct {
-	Port int
+	Port           int
+	StatsJSONLPath string
 }
 
 type YAMLMetricsConfig struct {
-	Port *int `yaml:"port,omitempty"`
+	Port           *int    `yaml:"port,omitempty"`
+	StatsJSONLPath *string `yaml:"statsJSONLPath,omitempty"`
 }
 
 func (yc *YAMLSpecConfig) validate() error {
@@ -256,8 +258,13 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 		}
 	}
 	c.Logging = yc.Logging.mustConvert()
-	if yc.Metrics != nil && yc.Metrics.Port != nil {
-		c.Metrics.Port = *yc.Metrics.Port
+	if yc.Metrics != nil {
+		if yc.Metrics.Port != nil {
+			c.Metrics.Port = *yc.Metrics.Port
+		}
+		if yc.Metrics.StatsJSONLPath != nil {
+			c.Metrics.StatsJSONLPath = *yc.Metrics.StatsJSONLPath
+		}
 	}
 	return c
 }
@@ -415,6 +422,9 @@ func (yc *YAMLCameraConfig) validate() error {
 func (yc *YAMLCameraConfig) mustConvert() CameraConfig {
 	var c CameraConfig
 	c.PerRoom = *yc.PerRoom
+	if c.PerRoom == 0 {
+		return c
+	}
 	c.FileType = *yc.FileType
 	c.VideoCodec = *yc.VideoCodec
 	c.Directory = *yc.Directory

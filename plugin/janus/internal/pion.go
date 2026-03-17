@@ -144,12 +144,3 @@ func StartPionSubscriber(
 	return pc, pc.LocalDescription().SDP, nil
 }
 
-// AddStaticCandidate adds a static host ICE candidate pointing at serverIP:10000.
-func AddStaticCandidate(pc *webrtc.PeerConnection, serverIP string) error {
-	mid0 := "0"
-	candidate := fmt.Sprintf("candidate:1 1 udp 2130706431 %s 10000 typ host", serverIP)
-	return pc.AddICECandidate(webrtc.ICECandidateInit{
-		Candidate: candidate,
-		SDPMid:    &mid0,
-	})
-}

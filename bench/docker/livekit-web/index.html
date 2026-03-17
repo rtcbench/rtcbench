@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><title>LiveKit Viewer</title></head>
+<body style="margin:0;background:#222;">
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const WS_URL = params.get("ws");
+const ROOM = params.get("room") || "room-1234";
+const API_KEY = params.get("key") || "devkey";
+const API_SECRET = params.get("secret") || "secret";
+
+if (!WS_URL) {
+    document.title = "ERROR: missing ws query parameter";
+    throw new Error("missing ws query parameter");
+}
+
+// Minimal JWT implementation (HS256) — no external dependencies.
+function base64url(buf) {
+    return btoa(String.fromCharCode(...new Uint8Array(buf)))
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function makeToken(room, identity, key, secret) {
+    const enc = new TextEncoder();
+    const header = base64url(enc.encode(JSON.stringify({alg: "HS256", typ: "JWT"})));
+    const now = Math.floor(Date.now() / 1000);
+    const payload = base64url(enc.encode(JSON.stringify({
+        iss: key, sub: identity, iat: now, exp: now + 86400,
+        video: {room: room, roomJoin: true, canSubscribe: true, canPublish: false},
+    })));
+    const data = enc.encode(header + "." + payload);
+    const cryptoKey = await crypto.subtle.importKey(
+        "raw", enc.encode(secret), {name: "HMAC", hash: "SHA-256"}, false, ["sign"]);
+    const sig = base64url(await crypto.subtle.sign("HMAC", cryptoKey, data));
+    return header + "." + payload + "." + sig;
+}
+
+(async () => {
+    const identity = "viewer-" + Math.random().toString(36).slice(2, 10);
+    const token = await makeToken(ROOM, identity, API_KEY, API_SECRET);
+
+    const room = new LivekitClient.Room({adaptiveStream: false, dynacast: false});
+
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+        const el = track.attach();
+        el.style.display = "none";
+        document.body.appendChild(el);
+    });
+
+    await room.connect(WS_URL, token);
+    document.title = "JOINED";
+})().catch(e => { console.error(e); document.title = "ERROR: " + e.message; });
+</script>
+</body></html>

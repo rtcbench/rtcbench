@@ -1,0 +1,44 @@
+apiVersion: call.zip/v1
+kind: VideoCallStressTest
+metadata:
+  name: bench-sender
+spec:
+  plugin: $env:PLUGIN_ID
+  conference:
+    name: room-1234
+    usersPerRoom: 1
+    totalRooms: $env:TOTAL_ROOMS=1
+    cameras:
+      perRoom: 1
+      fileType: ivf
+      videoCodec: vp9
+      directory: $env:IVF_DIR=/opt/ivf-videos
+      inMemory: true
+    joinPolicy:
+      concurrency: 1
+  pluginConfig:
+    janus:
+      _serverRoot: 'http://{{spec.network.serverIP}}:8088/janus'
+    jitsi:
+      _boshURL: 'https://{{spec.network.serverIP}}/http-bind'
+      _domain: '{{spec.network.serverIP}}'
+    livekit:
+      _wsURL: 'ws://{{spec.network.serverIP}}:7880'
+      apiKey: devkey
+      apiSecret: secret
+  network:
+    serverIP: $env:SERVER_IP
+  logging:
+    console: true
+    directory: $env:LOG_DIR=/tmp/bench-logs
+    streams:
+      - name: general
+        level: info
+      - name: signaling
+        level: info
+      - name: media
+        level: info
+      - name: packets
+        level: info
+      - name: video_stats
+        level: info

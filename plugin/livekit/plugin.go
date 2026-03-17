@@ -25,7 +25,7 @@ const (
 
 	viewerPacketsPerSample = 1000
 	viewerTrackBufferSize  = 1500
-	statsInputChanSize     = 128
+	statsInputChanSize     = 1 << 16 // 65536 - large enough for high viewer counts
 )
 
 type Plugin struct {

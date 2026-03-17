@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html><head><title>Janus Viewer</title></head>
+<body>
+<script>
+const params = new URLSearchParams(window.location.search);
+const SERVER = params.get("server") || "http://172.20.0.10:8088/janus";
+const ROOM_ID = parseInt(params.get("room") || "1234", 10);
+
+function dbg(msg) { console.log(msg); }
+
+async function post(path, body) {
+    const r = await fetch(SERVER + path, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({...body, transaction: "t" + Math.random().toString(36).slice(2)}),
+    });
+    return r.json();
+}
+
+async function main() {
+    const sess = await post("", {janus: "create"});
+    const sid = sess.data.id;
+
+    const att = await post("/" + sid, {janus: "attach", plugin: "janus.plugin.videoroom"});
+    const hid = att.data.id;
+
+    // Long-poll for async events (shared across all handles in this session).
+    const events = {};
+    const unsolicitedHandlers = [];
+    (async function poll() {
+        while (true) {
+            try {
+                const r = await fetch(SERVER + "/" + sid + "?maxev=5");
+                const data = await r.json();
+                for (const d of (Array.isArray(data) ? data : [data])) {
+                    if (d.transaction && events[d.transaction]) {
+                        events[d.transaction](d);
+                        delete events[d.transaction];
+                    } else {
+                        for (const h of unsolicitedHandlers) h(d);
+                    }
+                }
+            } catch(e) { await new Promise(r => setTimeout(r, 500)); }
+        }
+    })();
+
+    function asyncMsg(handleId, body, jsep) {
+        const txn = "t" + Math.random().toString(36).slice(2);
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                delete events[txn]; reject(new Error("async timeout"));
+            }, 15000);
+            events[txn] = d => { clearTimeout(timer); resolve(d); };
+            const msg = {janus: "message", body, transaction: txn};
+            if (jsep) msg.jsep = jsep;
+            fetch(SERVER + "/" + sid + "/" + handleId, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(msg),
+            });
+        });
+    }
+
+    // Step 1: Join as publisher to get the active publishers list.
+    const joined = await asyncMsg(hid, {
+        request: "join", ptype: "publisher", room: ROOM_ID,
+        display: "browser-viewer",
+    });
+    const pubData = joined.plugindata && joined.plugindata.data;
+    if (!pubData || pubData.videoroom !== "joined") {
+        document.title = "ERROR: publisher join failed"; return;
+    }
+    const publishers = pubData.publishers || [];
+    dbg("publishers=" + publishers.length + " ids=[" + publishers.map(p=>p.id).join(",") + "]");
+
+    // Step 2: Subscribe to all active publishers in a single multistream
+    // PeerConnection via a second handle (the standard Janus pattern).
+    if (publishers.length === 0) { document.title = "ERROR: no publishers"; return; }
+    const streams = publishers.map(p => ({feed: p.id}));
+
+    const subAtt = await post("/" + sid, {janus: "attach", plugin: "janus.plugin.videoroom"});
+    const subHid = subAtt.data.id;
+
+    const subJoined = await asyncMsg(subHid, {
+        request: "join", ptype: "subscriber", room: ROOM_ID,
+        streams: streams, private_id: pubData.private_id,
+    });
+    if (!subJoined.jsep) { document.title = "ERROR: no JSEP offer"; return; }
+
+    // Map mids to feed IDs for track identification.
+    const midToFeed = {};
+    const subStreams = subJoined.plugindata &&
+        subJoined.plugindata.data && subJoined.plugindata.data.streams;
+    if (subStreams) {
+        for (const s of subStreams) {
+            if (s.type === "video") midToFeed[s.mid] = s.feed_id;
+        }
+    }
+
+    const pc = new RTCPeerConnection();
+    pc.ontrack = (ev) => {
+        if (ev.track.kind !== "video") return;
+        const mid = ev.transceiver && ev.transceiver.mid;
+        const feedId = midToFeed[mid];
+        dbg("ontrack video mid=" + mid + " feedId=" + feedId);
+        const v = document.createElement("video");
+        v.autoplay = true; v.muted = true; v.playsInline = true;
+        v.style.display = "none";
+        v.srcObject = new MediaStream([ev.track]);
+        document.body.appendChild(v);
+        v.play().catch(() => {});
+    };
+
+    await pc.setRemoteDescription(new RTCSessionDescription(subJoined.jsep));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await asyncMsg(subHid, {request: "start"}, {type: "answer", sdp: answer.sdp});
+    dbg("subscribed feeds=" + publishers.length + " midToFeed=" + JSON.stringify(midToFeed));
+
+    // Handle late-arriving publishers: subscribe dynamically and renegotiate.
+    const subscribedFeeds = new Set(publishers.map(p => p.id));
+    unsolicitedHandlers.push(async (ev) => {
+        const pd = ev.plugindata && ev.plugindata.data;
+        if (!pd || !pd.publishers) return;
+        const newPubs = pd.publishers.filter(p => !subscribedFeeds.has(p.id));
+        if (newPubs.length === 0) return;
+        dbg("NEW pubs arrived: " + newPubs.length + " ids=[" + newPubs.map(p=>p.id).join(",") + "]");
+        for (const p of newPubs) subscribedFeeds.add(p.id);
+
+        // Subscribe to new feeds on the existing subscriber handle.
+        const subResp = await asyncMsg(subHid,
+            {request: "subscribe", streams: newPubs.map(p => ({feed: p.id}))});
+        if (!subResp.jsep) { console.error("no offer for new feeds"); return; }
+
+        // Update mid-to-feed mapping from the updated response.
+        const ns = subResp.plugindata && subResp.plugindata.data &&
+            subResp.plugindata.data.streams;
+        if (ns) {
+            for (const s of ns) {
+                if (s.type === "video") midToFeed[s.mid] = s.feed_id;
+            }
+        }
+
+        // Renegotiate the PeerConnection.
+        await pc.setRemoteDescription(new RTCSessionDescription(subResp.jsep));
+        const ans = await pc.createAnswer();
+        await pc.setLocalDescription(ans);
+        await asyncMsg(subHid, {request: "start"}, {type: "answer", sdp: ans.sdp});
+        dbg("subscribed to " + newPubs.length + " new feeds, midToFeed=" + JSON.stringify(midToFeed));
+    });
+
+    document.title = "JOINED";
+}
+main().catch(e => { console.error(e); document.title = "ERROR: " + e.message; });
+</script>
+</body></html>

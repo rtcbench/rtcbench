@@ -16,8 +16,10 @@ general: {
 }
 
 media: {
-	# Must include 10000 - that's the port used by AddStaticCandidate in the client.
-	rtp_port_range = "10000-10200"
+	# Each PeerConnection binds its own UDP port from this range, so the range
+	# size limits the maximum concurrent connections. The client uses ICE
+	# candidates from the SDP (no hardcoded port).
+	rtp_port_range = "10000-20000"
 	dtls_timeout = 500
 }
 
