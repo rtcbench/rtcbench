@@ -201,7 +201,8 @@ def cleanup(ssh, cluster):
     log.info("Cleaning up bench containers on %d hosts...", len(hosts))
     for host in hosts:
         try:
-            ssh.run(host, f"docker rm -f {containers} 2>/dev/null || true",
+            ssh.run(host,
+                    f"docker rm -f {containers} $(docker ps -aq --filter name={WRP_CONTAINER_NAME}-) 2>/dev/null || true",
                     check=False, timeout=30)
         except Exception as e:
             log.warning("Cleanup failed on %s: %s", host, e)

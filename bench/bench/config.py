@@ -19,9 +19,9 @@ MIN_FPS = 20.0
 VIDEO_BITRATE_MBPS = 3.5     # VP9 test video bitrate (used for NIC ceiling calc)
 
 # Multi-room: max viewers per room before splitting into additional rooms.
-# Currently disabled — single room works for all SFUs, and the multi-room
-# customUrlHandler breaks WebRTCPerf's stats collection.
-VIEWERS_PER_ROOM = {}
+VIEWERS_PER_ROOM = {
+    "jitsi": 20,
+}
 
 # Default timing (overridable via cluster config)
 RENDEZVOUS_LEAD_S = 90
