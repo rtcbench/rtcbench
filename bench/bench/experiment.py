@@ -280,6 +280,8 @@ class Experiment:
             if self.num_rooms > 1:
                 # One container per room — avoids customUrlHandler which
                 # breaks WebRTCPerf's stats aggregation.
+                # Start first container alone and wait for it to populate
+                # the shared ffmpeg cache, then launch the rest.
                 for room_idx in range(self.num_rooms):
                     url = self._webrtcperf_url(room_index=room_idx)
                     container = f"{WRP_CONTAINER_NAME}-{room_idx}"
@@ -308,6 +310,10 @@ class Experiment:
                     )
                     self.ssh.run(host, cmd, timeout=60)
                     self.pids.setdefault(host, []).append(container)
+                    if room_idx == 0:
+                        # Wait for first container to finish ffmpeg cache
+                        # conversion before launching the rest.
+                        time.sleep(10)
                 log.info("%s started on %s (%d containers, sessions=%d, rooms=%d, per_room=%d, decoders=%d)",
                          self.client_name, host, self.num_rooms,
                          self.r_per_machine, self.num_rooms,
