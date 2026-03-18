@@ -27,7 +27,7 @@ def log_experiment(run_dir, sfu, client, r, result, reason, meta=None, topology=
         f.write(json.dumps(entry) + "\n")
 
 
-def save_results(results, histories, run_dir):
+def save_results(results, histories, run_dir, update_hints=True):
     """Save results as JSON to the run directory."""
     output = {
         "results": {f"{s}/{c}": v for (s, c), v in results.items()},
@@ -39,7 +39,8 @@ def save_results(results, histories, run_dir):
         json.dump(output, f, indent=2)
     log.info("Results saved to %s", path)
 
-    save_hints(results)
+    if update_hints:
+        save_hints(results)
 
 
 def print_results(results, histories):
