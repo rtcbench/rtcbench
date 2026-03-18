@@ -123,7 +123,7 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
 
     cleanup(ssh, cluster)
     print_results(results, histories)
-    save_results(results, histories, run_dir)
+    save_results(results, histories, run_dir, update_hints=(min_r != max_r))
 
     return results
 
