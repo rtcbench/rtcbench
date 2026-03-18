@@ -270,82 +270,72 @@ class Experiment:
 
     def _start_webrtcperf_receivers(self):
         max_decoders = 0 if self.client_name == "webrtcperf" else -1
-        # Shared cache dir prevents each container from converting the same
-        # video independently, which fills the 32 GB overlay disk.
-        wrp_cache = "/tmp/wrp-cache"
 
         for host in self.receiver_ips:
-            self.ssh.run(host, f"mkdir -p {wrp_cache}", timeout=10)
+            url = self._webrtcperf_url()
+
+            wrp_config = {
+                "url": url,
+                "sessions": self.r_per_machine,
+                "maxVideoDecoders": max_decoders,
+                "showPageLog": True,
+                "statsInterval": 5,
+                "statsPath": f"{REMOTE_STATS_DIR}/wrp-stats.csv",
+            }
 
             if self.num_rooms > 1:
-                # One container per room — avoids customUrlHandler which
-                # breaks WebRTCPerf's stats aggregation.
-                # Start first container alone and wait for it to populate
-                # the shared ffmpeg cache, then launch the rest.
-                for room_idx in range(self.num_rooms):
-                    url = self._webrtcperf_url(room_index=room_idx)
-                    container = f"{WRP_CONTAINER_NAME}-{room_idx}"
-                    config_path = f"/tmp/wrp-config-{room_idx}.json"
-                    stats_file = f"{REMOTE_STATS_DIR}/wrp-stats-{room_idx}.csv"
+                self._write_wrp_url_handler(host)
+                wrp_config["customUrlHandler"] = "/tmp/wrp-url-handler.js"
 
-                    wrp_config = {
-                        "url": url,
-                        "sessions": self.viewers_per_room,
-                        "maxVideoDecoders": max_decoders,
-                        "showPageLog": True,
-                        "statsInterval": 5,
-                        "statsPath": stats_file,
-                    }
-                    self.ssh.write_remote_file(host, config_path, json.dumps(wrp_config))
-                    self.ssh.run(host, f"docker rm -f {container} 2>/dev/null || true",
-                                 check=False, timeout=10)
-                    cmd = (
-                        f"docker run -d --name {container} --network host "
-                        f"--shm-size=2g "
-                        f"-v {config_path}:/config.json:ro "
-                        f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
-                        f"-v {wrp_cache}:/root/.webrtcperf/cache "
-                        f"{WRP_IMAGE} "
-                        f"--run-xvfb /config.json"
-                    )
-                    self.ssh.run(host, cmd, timeout=60)
-                    self.pids.setdefault(host, []).append(container)
-                    if room_idx == 0:
-                        # Wait for first container to finish ffmpeg cache
-                        # conversion before launching the rest.
-                        time.sleep(10)
-                log.info("%s started on %s (%d containers, sessions=%d, rooms=%d, per_room=%d, decoders=%d)",
-                         self.client_name, host, self.num_rooms,
-                         self.r_per_machine, self.num_rooms,
-                         self.viewers_per_room, max_decoders)
-            else:
-                url = self._webrtcperf_url()
-                wrp_config = {
-                    "url": url,
-                    "sessions": self.r_per_machine,
-                    "maxVideoDecoders": max_decoders,
-                    "showPageLog": True,
-                    "statsInterval": 5,
-                    "statsPath": f"{REMOTE_STATS_DIR}/wrp-stats.csv",
-                }
-                self.ssh.write_remote_file(host, "/tmp/wrp-config.json", json.dumps(wrp_config))
-                self.ssh.run(host, f"docker rm -f {WRP_CONTAINER_NAME} 2>/dev/null || true",
-                             check=False, timeout=10)
-                cmd = (
-                    f"docker run -d --name {WRP_CONTAINER_NAME} --network host "
-                    f"--shm-size=2g "
-                    f"-v /tmp/wrp-config.json:/config.json:ro "
-                    f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
-                    f"-v {wrp_cache}:/root/.webrtcperf/cache "
-                    f"{WRP_IMAGE} "
-                    f"--run-xvfb /config.json"
-                )
-                self.ssh.run(host, cmd, timeout=60)
-                self.pids.setdefault(host, []).append(WRP_CONTAINER_NAME)
-                log.info("%s started on %s (container=%s, sessions=%d, rooms=%d, per_room=%d, decoders=%d)",
-                         self.client_name, host, WRP_CONTAINER_NAME,
-                         self.r_per_machine, self.num_rooms,
-                         self.viewers_per_room, max_decoders)
+            config_json = json.dumps(wrp_config)
+            self.ssh.write_remote_file(host, "/tmp/wrp-config.json", config_json)
+            self.ssh.run(host, f"docker rm -f {WRP_CONTAINER_NAME} 2>/dev/null || true",
+                         check=False, timeout=10)
+
+            volumes = (
+                f"-v /tmp/wrp-config.json:/config.json:ro "
+                f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR}"
+            )
+            if self.num_rooms > 1:
+                volumes += f" -v /tmp/wrp-url-handler.js:/tmp/wrp-url-handler.js:ro"
+
+            cmd = (
+                f"docker run -d --name {WRP_CONTAINER_NAME} --network host "
+                f"--shm-size=2g "
+                f"{volumes} "
+                f"{WRP_IMAGE} "
+                f"--run-xvfb /config.json"
+            )
+            self.ssh.run(host, cmd, timeout=60)
+            self.pids.setdefault(host, []).append(WRP_CONTAINER_NAME)
+            log.info("%s started on %s (container=%s, sessions=%d, rooms=%d, per_room=%d, decoders=%d)",
+                     self.client_name, host, WRP_CONTAINER_NAME,
+                     self.r_per_machine, self.num_rooms,
+                     self.viewers_per_room, max_decoders)
+
+    def _write_wrp_url_handler(self, host):
+        handler_js = self._generate_wrp_url_handler()
+        self.ssh.write_remote_file(host, "/tmp/wrp-url-handler.js", handler_js)
+
+    def _generate_wrp_url_handler(self):
+        """Generate JS that maps session ID to a room-specific URL.
+
+        Room names use incrementing digits: room-1234, room-1235, room-1236, ...
+        For Janus: ?room=1234 → ?room=1235, ?room=1236, ...
+        For Jitsi: /room-1234 → /room-1235, /room-1236, ...
+        For LiveKit: &room=room-1234 → &room=room-1235, ...
+        """
+        return f"""\
+module.exports = function({{sessions, id, params}}) {{
+  const viewersPerRoom = {self.viewers_per_room};
+  const roomIndex = Math.floor(id / viewersPerRoom);
+  const baseUrl = params.url;
+  if (roomIndex === 0) return baseUrl;
+  // Increment the trailing number in the room identifier.
+  return baseUrl.replace(/(room[=-]?)(\\d+)/, (m, prefix, num) =>
+    prefix + (parseInt(num, 10) + roomIndex));
+}};
+"""
 
     def _webrtcperf_url(self, room_index=None):
         sfu_ip = self.sfu_ip
@@ -507,118 +497,97 @@ class Experiment:
         self._health_reason = "OK"
         self._health_meta = {}
 
-        if self.num_rooms > 1:
-            containers = [f"{WRP_CONTAINER_NAME}-{i}" for i in range(self.num_rooms)]
-            stats_files = [f"{REMOTE_STATS_DIR}/wrp-stats-{i}.csv" for i in range(self.num_rooms)]
-        else:
-            containers = [WRP_CONTAINER_NAME]
-            stats_files = [f"{REMOTE_STATS_DIR}/wrp-stats.csv"]
-
         for host in self.receiver_ips:
-            total_bitrate_length = 0
-            min_bitrate = float('inf')
-            mean_bitrate_sum = 0.0
-            min_fps = float('inf')
-
-            for container, stats_file in zip(containers, stats_files):
-                label = f"{host}:{container}"
-                try:
-                    result = self.ssh.run(
+            label = f"{host}:{WRP_CONTAINER_NAME}"
+            stats_file = f"{REMOTE_STATS_DIR}/wrp-stats.csv"
+            try:
+                result = self.ssh.run(
+                    host,
+                    f"docker inspect {WRP_CONTAINER_NAME} --format '{{{{.State.Running}}}}' 2>/dev/null || echo false",
+                    timeout=15)
+                running = result.stdout.strip() == "true"
+                if not running:
+                    oom = self.ssh.run(
                         host,
-                        f"docker inspect {container} --format '{{{{.State.Running}}}}' 2>/dev/null || echo false",
-                        timeout=15)
-                    running = result.stdout.strip() == "true"
-                    if not running:
-                        oom = self.ssh.run(
-                            host,
-                            f"docker inspect {container} --format '{{{{.State.OOMKilled}}}}' 2>/dev/null || echo unknown",
-                            check=False, timeout=15)
-                        is_oom = oom.stdout.strip() == "true"
-                        logs = self.ssh.run(
-                            host,
-                            f"docker logs {container} 2>&1 | tail -3",
-                            check=False, timeout=15)
-                        if is_oom:
-                            log.warning("%s: OOM killed", label)
-                            self._health_reason = "OOM"
-                        else:
-                            log.warning("%s: container crashed: %s",
-                                        label, logs.stdout.strip().replace('\n', ' | '))
-                            self._health_reason = "CONTAINER_CRASHED"
-                        all_ok = False
-                        continue
-
-                    result = self.ssh.run(
+                        f"docker inspect {WRP_CONTAINER_NAME} --format '{{{{.State.OOMKilled}}}}' 2>/dev/null || echo unknown",
+                        check=False, timeout=15)
+                    is_oom = oom.stdout.strip() == "true"
+                    logs = self.ssh.run(
                         host,
-                        f"head -1 {stats_file} 2>/dev/null && echo '---SPLIT---' && tail -1 {stats_file} 2>/dev/null",
-                        timeout=15)
-                    parts = result.stdout.split('---SPLIT---')
-                    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
-                        log.warning("%s: no CSV stats data", label)
-                        self._health_reason = "NO_STATS"
-                        all_ok = False
-                        continue
-
-                    cols = parts[0].strip().split(',')
-                    vals = parts[1].strip().split(',')
-                    if len(cols) != len(vals):
-                        log.warning("%s: CSV column/value mismatch (%d vs %d)",
-                                    label, len(cols), len(vals))
-                        self._health_reason = "STATS_PARSE_ERROR"
-                        all_ok = False
-                        continue
-
-                    row = dict(zip(cols, vals))
-                    bl = int(float(row.get('videoRecvBitrates_length', '0')))
-                    total_bitrate_length += bl
-                    bmin = float(row.get('videoRecvBitrates_min', '0'))
-                    bmean = float(row.get('videoRecvBitrates_mean', '0'))
-                    if bmin < min_bitrate:
-                        min_bitrate = bmin
-                    mean_bitrate_sum += bmean * bl
-
-                    if max_decoders != 0:
-                        fmin = float(row.get('videoRecvFps_min', '0'))
-                        if fmin < min_fps:
-                            min_fps = fmin
-
-                except Exception as e:
-                    log.error("Health check failed for %s: %s", label, e)
-                    self._health_reason = "ERROR"
-                    self._health_meta = {"error": str(e)}
+                        f"docker logs {WRP_CONTAINER_NAME} 2>&1 | tail -3",
+                        check=False, timeout=15)
+                    if is_oom:
+                        log.warning("%s: OOM killed", label)
+                        self._health_reason = "OOM"
+                    else:
+                        log.warning("%s: container crashed: %s",
+                                    label, logs.stdout.strip().replace('\n', ' | '))
+                        self._health_reason = "CONTAINER_CRASHED"
                     all_ok = False
+                    continue
 
-            if not all_ok:
-                return False
+                result = self.ssh.run(
+                    host,
+                    f"head -1 {stats_file} 2>/dev/null && echo '---SPLIT---' && tail -1 {stats_file} 2>/dev/null",
+                    timeout=15)
+                parts = result.stdout.split('---SPLIT---')
+                if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+                    log.warning("%s: no CSV stats data", label)
+                    self._health_reason = "NO_STATS"
+                    all_ok = False
+                    continue
 
-            if total_bitrate_length < self.r_per_machine:
-                log.warning("%s: only %d/%d sessions have bitrate data",
-                            host, total_bitrate_length, self.r_per_machine)
-                self._health_reason = "SESSIONS_MISSING"
-                self._health_meta = {"sessions": total_bitrate_length,
-                                     "expected": self.r_per_machine}
-                return False
+                cols = parts[0].strip().split(',')
+                vals = parts[1].strip().split(',')
+                if len(cols) != len(vals):
+                    log.warning("%s: CSV column/value mismatch (%d vs %d)",
+                                label, len(cols), len(vals))
+                    self._health_reason = "STATS_PARSE_ERROR"
+                    all_ok = False
+                    continue
 
-            if min_bitrate < MIN_BITRATE_BPS:
-                log.warning("%s: min bitrate %.0f bps < %.0f threshold",
-                            host, min_bitrate, MIN_BITRATE_BPS)
-                self._health_reason = "BITRATE_LOW"
-                self._health_meta = {"min_bps": min_bitrate, "threshold_bps": MIN_BITRATE_BPS}
-                return False
+                row = dict(zip(cols, vals))
 
-            fps_info = ""
-            if max_decoders != 0 and min_fps < float('inf'):
-                fps_info = f", min_fps={min_fps:.1f}"
-                if min_fps < MIN_FPS:
-                    log.warning("%s: min FPS %.1f < %.1f threshold",
-                                host, min_fps, MIN_FPS)
-                    self._health_reason = "FPS_LOW"
-                    self._health_meta = {"min_fps": min_fps, "threshold_fps": MIN_FPS}
-                    return False
+                bitrate_length = int(float(row.get('videoRecvBitrates_length', '0')))
+                if bitrate_length < self.r_per_machine:
+                    log.warning("%s: only %d/%d sessions have bitrate data",
+                                label, bitrate_length, self.r_per_machine)
+                    self._health_reason = "SESSIONS_MISSING"
+                    self._health_meta = {"sessions": bitrate_length,
+                                         "expected": self.r_per_machine}
+                    all_ok = False
+                    continue
 
-            mean_bitrate = mean_bitrate_sum / total_bitrate_length if total_bitrate_length else 0
-            log.info("%s: healthy (sessions=%d, min_bps=%.0f, mean_bps=%.0f%s)",
-                     host, total_bitrate_length, min_bitrate, mean_bitrate, fps_info)
+                bitrate_min = float(row.get('videoRecvBitrates_min', '0'))
+                bitrate_mean = float(row.get('videoRecvBitrates_mean', '0'))
+                if bitrate_min < MIN_BITRATE_BPS:
+                    log.warning("%s: min bitrate %.0f bps < %.0f threshold",
+                                label, bitrate_min, MIN_BITRATE_BPS)
+                    self._health_reason = "BITRATE_LOW"
+                    self._health_meta = {"min_bps": bitrate_min, "threshold_bps": MIN_BITRATE_BPS}
+                    all_ok = False
+                    continue
+
+                fps_info = ""
+                if max_decoders != 0:
+                    fps_min = float(row.get('videoRecvFps_min', '0'))
+                    fps_info = f", min_fps={fps_min:.1f}"
+                    if fps_min < MIN_FPS:
+                        log.warning("%s: min FPS %.1f < %.1f threshold",
+                                    label, fps_min, MIN_FPS)
+                        self._health_reason = "FPS_LOW"
+                        self._health_meta = {"min_fps": fps_min, "threshold_fps": MIN_FPS}
+                        all_ok = False
+                        continue
+
+                log.info("%s: healthy (sessions=%d, min_bps=%.0f, mean_bps=%.0f%s)",
+                         label, bitrate_length, bitrate_min, bitrate_mean, fps_info)
+
+            except Exception as e:
+                log.error("Health check failed for %s: %s", label, e)
+                self._health_reason = "ERROR"
+                self._health_meta = {"error": str(e)}
+                all_ok = False
 
         return all_ok
 
