@@ -19,8 +19,9 @@ MIN_FPS = 20.0
 VIDEO_BITRATE_MBPS = 3.5     # VP9 test video bitrate (used for NIC ceiling calc)
 
 # Multi-room: max viewers per room before splitting into additional rooms.
+# Janus has no per-room limit (single publisher, many subscribers).
+# Jitsi JVB struggles above ~20 viewers per room.
 VIEWERS_PER_ROOM = {
-    "janus": 20,
     "jitsi": 20,
 }
 
