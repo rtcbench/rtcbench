@@ -25,10 +25,17 @@ build-web:
 build-callzip:
 	cd $(REPO_ROOT) && docker build -t callzip:latest .
 
+# Only push if the local image ID differs from the remote.
 push-callzip: build-callzip
-	@for host in $(CALLZIP_HOSTS); do \
-		echo "Pushing callzip:latest to $$host..."; \
-		docker save callzip:latest | $(SSH) $(SSH_USER)@$$host docker load; \
+	@LOCAL_ID=$$(docker images -q callzip:latest); \
+	for host in $(CALLZIP_HOSTS); do \
+		REMOTE_ID=$$($(SSH) $(SSH_USER)@$$host docker images -q callzip:latest 2>/dev/null); \
+		if [ "$$LOCAL_ID" = "$$REMOTE_ID" ] && [ -n "$$REMOTE_ID" ]; then \
+			echo "callzip:latest up-to-date on $$host ($$LOCAL_ID)"; \
+		else \
+			echo "Pushing callzip:latest to $$host..."; \
+			docker save callzip:latest | $(SSH) $(SSH_USER)@$$host docker load; \
+		fi; \
 	done
 
 bench-quick: build build-web push-callzip
