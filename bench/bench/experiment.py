@@ -270,8 +270,13 @@ class Experiment:
 
     def _start_webrtcperf_receivers(self):
         max_decoders = 0 if self.client_name == "webrtcperf" else -1
+        # Shared cache dir prevents each container from converting the same
+        # video independently, which fills the 32 GB overlay disk.
+        wrp_cache = "/tmp/wrp-cache"
 
         for host in self.receiver_ips:
+            self.ssh.run(host, f"mkdir -p {wrp_cache}", timeout=10)
+
             if self.num_rooms > 1:
                 # One container per room — avoids customUrlHandler which
                 # breaks WebRTCPerf's stats aggregation.
@@ -297,6 +302,7 @@ class Experiment:
                         f"--shm-size=2g "
                         f"-v {config_path}:/config.json:ro "
                         f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
+                        f"-v {wrp_cache}:/root/.webrtcperf/cache "
                         f"{WRP_IMAGE} "
                         f"--run-xvfb /config.json"
                     )
@@ -324,6 +330,7 @@ class Experiment:
                     f"--shm-size=2g "
                     f"-v /tmp/wrp-config.json:/config.json:ro "
                     f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
+                    f"-v {wrp_cache}:/root/.webrtcperf/cache "
                     f"{WRP_IMAGE} "
                     f"--run-xvfb /config.json"
                 )
