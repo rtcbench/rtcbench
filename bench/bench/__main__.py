@@ -105,7 +105,8 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
             try:
                 max_healthy_r, history = binary_search(
                     ssh, cluster, sfu_name, client_name,
-                    cell_lo, cell_hi, hard_max_r=cell_max_r,
+                    cell_lo, cell_hi,
+                    hard_min_r=min_r, hard_max_r=cell_max_r,
                     dry_run=dry_run, run_dir=run_dir,
                 )
                 results[(sfu_name, client_name)] = max_healthy_r
