@@ -114,10 +114,7 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	for i := 0; i < c.config.Spec.Conference.TotalRooms; i++ {
 		wg.Add(1)
-		fmtRoomName := c.config.Spec.Conference.Name
-		if c.config.Spec.Conference.TotalRooms > 1 {
-			fmtRoomName += "_" + strconv.Itoa(i)
-		}
+		fmtRoomName := expandRoomName(c.config.Spec.Conference.Name, i)
 		go func() {
 			c.log.Infof("joining room %q (%d users)", fmtRoomName, c.config.Spec.Conference.UsersPerRoom)
 			c.joinRoomByName(ctx, fmtRoomName)
@@ -127,6 +124,33 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 	}
 	wg.Wait()
 	return nil
+}
+
+// expandRoomName generates the room name for a given index in a multi-room
+// setup. If the base name ends with digits, those digits are parsed as a
+// number and incremented by offset. For index 0 the original name is returned.
+//
+//	expandRoomName("room-1234", 0) → "room-1234"
+//	expandRoomName("room-1234", 1) → "room-1235"
+//	expandRoomName("room-1234", 2) → "room-1236"
+//	expandRoomName("nodigits", 1)  → "nodigits_1"
+func expandRoomName(base string, offset int) string {
+	if offset == 0 {
+		return base
+	}
+	end := len(base)
+	if end == 0 || base[end-1] < '0' || base[end-1] > '9' {
+		return base + "_" + strconv.Itoa(offset)
+	}
+	start := end - 1
+	for start > 0 && base[start-1] >= '0' && base[start-1] <= '9' {
+		start--
+	}
+	n, err := strconv.ParseInt(base[start:end], 10, 64)
+	if err != nil {
+		return base + "_" + strconv.Itoa(offset)
+	}
+	return base[:start] + strconv.FormatInt(n+int64(offset), 10)
 }
 
 func (c *Client) joinRoomByName(ctx context.Context, roomName string) {

@@ -19,8 +19,11 @@ MIN_FPS = 20.0
 VIDEO_BITRATE_MBPS = 3.5     # VP9 test video bitrate (used for NIC ceiling calc)
 
 # Multi-room: max viewers per room before splitting into additional rooms.
+# All SFUs use 20 viewers per room with 1 sender per room for fairness.
 VIEWERS_PER_ROOM = {
+    "janus": 20,
     "jitsi": 20,
+    "livekit": 20,
 }
 
 # Default timing (overridable via cluster config)

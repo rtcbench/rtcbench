@@ -73,7 +73,7 @@ class Experiment:
 
         rooms = []
         for i in range(self.num_rooms):
-            room_name = f"room-1234_{i}" if self.num_rooms > 1 else "room-1234"
+            room_name = f"room-{1234 + i}" if self.num_rooms > 1 else "room-1234"
             rooms.append({
                 "name": room_name,
                 "senders": 1,
@@ -154,7 +154,12 @@ class Experiment:
             self.ssh.run(host, f"rm -f {REMOTE_STATS_DIR}/*.jsonl {REMOTE_STATS_DIR}/*.csv", timeout=60)
 
     def _create_janus_rooms(self):
-        """Create Janus videoroom rooms 0..N-1 via HTTP API."""
+        """Create Janus videoroom rooms 1234..1234+N-1 via HTTP API.
+
+        Room IDs match expandRoomName("room-1234", i) which produces
+        room-1234, room-1235, room-1236, ... → Janus IDs 1234, 1235, 1236.
+        Room 1234 already exists from the config file, so we skip it.
+        """
         sfu_host = self.cluster["sfu"][0]
         api = "http://localhost:8088/janus"
 
@@ -172,9 +177,10 @@ class Experiment:
         resp = json.loads(result.stdout)
         handle_id = resp["data"]["id"]
 
-        for i in range(self.num_rooms):
+        for i in range(1, self.num_rooms):  # skip 0 — room 1234 exists
+            room_id = 1234 + i
             body = json.dumps({
-                "request": "create", "room": i, "publishers": 4096,
+                "request": "create", "room": room_id, "publishers": 4096,
                 "bitrate": 4000000, "bitrate_cap": True,
                 "videocodec": "vp9", "fir_freq": 10, "permanent": False,
             })
@@ -183,7 +189,7 @@ class Experiment:
                 f"-H 'Content-Type: application/json' "
                 f"-d '{{\"janus\":\"message\",\"transaction\":\"r{i}\",\"body\":{body}}}'",
                 timeout=15)
-        log.info("Created %d Janus videoroom rooms (IDs 0..%d)", self.num_rooms, self.num_rooms - 1)
+        log.info("Created %d Janus videoroom rooms (IDs 1234..%d)", self.num_rooms, 1234 + self.num_rooms - 1)
 
         self.ssh.run(sfu_host,
             f"curl -s -X POST {api}/{session_id} -H 'Content-Type: application/json' "
@@ -331,8 +337,8 @@ class Experiment:
     def _webrtcperf_url(self, room_index=None):
         sfu_ip = self.sfu_ip
         if room_index is not None:
-            janus_room_id = room_index
-            room_name = f"room-1234_{room_index}"
+            janus_room_id = 1234 + room_index
+            room_name = f"room-{1234 + room_index}"
         else:
             janus_room_id = 1234
             room_name = "room-1234"
