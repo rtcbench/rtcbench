@@ -34,7 +34,7 @@ push-callzip: build-callzip
 			echo "callzip:latest up-to-date on $$host ($$LOCAL_ID)"; \
 		else \
 			echo "Pushing callzip:latest to $$host..."; \
-			docker save callzip:latest | $(SSH) $(SSH_USER)@$$host docker load; \
+			docker save callzip:latest | $(SSH) $(SSH_USER)@$$host 'docker load && docker image prune -f > /dev/null'; \
 		fi; \
 	done
 
