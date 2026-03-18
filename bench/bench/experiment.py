@@ -47,8 +47,8 @@ class Experiment:
             self.receiver_ips = cluster["receivers"]
 
         # Multi-room
-        max_per_room = VIEWERS_PER_ROOM.get(sfu_name)
-        if max_per_room and r_per_machine > max_per_room:
+        max_per_room = VIEWERS_PER_ROOM
+        if r_per_machine > max_per_room:
             self.num_rooms = math.ceil(r_per_machine / max_per_room)
             self.viewers_per_room = math.ceil(r_per_machine / self.num_rooms)
             log.info("Multi-room (%s): %d rooms x %d viewers/room = %d total (requested %d)",

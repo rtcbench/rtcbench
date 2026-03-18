@@ -92,11 +92,7 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
             # NIC ceiling
             nic_mbps = cluster.get("nic_mbps")
             if nic_mbps:
-                max_per_room = VIEWERS_PER_ROOM.get(sfu_name)
-                if max_per_room:
-                    num_senders = math.ceil(cell_max_r / max_per_room)
-                else:
-                    num_senders = 1
+                num_senders = math.ceil(cell_max_r / VIEWERS_PER_ROOM)
                 nic_ceiling = int(nic_mbps / VIDEO_BITRATE_MBPS) - num_senders
                 if nic_ceiling < cell_max_r:
                     log.info("NIC ceiling: %d Mbps / %.1f Mbps - %d senders = %d max viewers",
