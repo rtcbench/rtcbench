@@ -242,48 +242,41 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	session := janus.NewSession(ctx, p.client, sessionID, l)
 	defer session.Close()
 
-	// Attach a publisher handle just to discover active publishers.
-	pubHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
-	if err != nil {
-		return fmt.Errorf("%w: attach pub handle: %v", call.ErrCannotJoinRoom, err)
-	}
-
-	joined, err := session.Send(pubHandleID, map[string]any{
-		"request": "join",
-		"ptype":   "publisher",
-		"room":    roomID,
-		"display": userID + "-discovery",
-	}, nil)
-	if err != nil {
-		return fmt.Errorf("%w: publisher join: %v", call.ErrCannotJoinRoom, err)
-	}
-	if joined.PluginData == nil || joined.PluginData.Data["videoroom"] != "joined" {
-		return fmt.Errorf("%w: unexpected publisher join response", call.ErrCannotJoinRoom)
-	}
-
-	pubs, _ := joined.PluginData.Data["publishers"].([]any)
-	if len(pubs) == 0 {
-		return fmt.Errorf("%w: no publishers in room %d", call.ErrCannotJoinRoom, roomID)
-	}
-	streams := make([]map[string]any, 0, len(pubs))
-	for _, pub := range pubs {
-		m, ok := pub.(map[string]any)
-		if !ok {
-			continue
-		}
-		if id, ok := m["id"]; ok {
-			streams = append(streams, map[string]any{"feed": id})
-		}
-	}
-	if len(streams) == 0 {
-		return fmt.Errorf("%w: could not extract publisher IDs", call.ErrCannotJoinRoom)
-	}
-	l.Infof("found %d publisher(s), subscribing", len(streams))
-
 	subHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
 		return fmt.Errorf("%w: attach sub handle: %v", call.ErrCannotJoinRoom, err)
 	}
+
+	// Discover publishers via listparticipants instead of joining as a
+	// publisher. This avoids creating a fake publisher handle per viewer,
+	// which causes O(N²) event broadcasts inside the Janus videoroom.
+	listed, err := session.Send(subHandleID, map[string]any{
+		"request": "listparticipants",
+		"room":    roomID,
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("%w: listparticipants: %v", call.ErrCannotJoinRoom, err)
+	}
+	if listed.PluginData == nil {
+		return fmt.Errorf("%w: listparticipants returned no plugin data", call.ErrCannotJoinRoom)
+	}
+	participants, _ := listed.PluginData.Data["participants"].([]any)
+	streams := make([]map[string]any, 0, len(participants))
+	for _, pt := range participants {
+		m, ok := pt.(map[string]any)
+		if !ok {
+			continue
+		}
+		if publisher, _ := m["publisher"].(bool); publisher {
+			if id, ok := m["id"]; ok {
+				streams = append(streams, map[string]any{"feed": id})
+			}
+		}
+	}
+	if len(streams) == 0 {
+		return fmt.Errorf("%w: no publishers in room %d", call.ErrCannotJoinRoom, roomID)
+	}
+	l.Infof("found %d publisher(s), subscribing", len(streams))
 
 	attached, err := session.Send(subHandleID, map[string]any{
 		"request": "join",
