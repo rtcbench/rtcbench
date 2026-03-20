@@ -44,6 +44,8 @@ type Plugin struct {
 	statsBufferSize    int
 	viewerManager      *viewer.Manager
 	publisher          *vp9_stats.Publisher
+	sessionPool        *janus.SessionPool
+	cancelPool         context.CancelFunc
 }
 
 func NewPlugin() call.Plugin {
@@ -90,6 +92,11 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 		p.cameras = cams
 	}
 
+	// Shared session pool: one Janus session per room instead of per viewer.
+	poolCtx, poolCancel := context.WithCancel(context.Background())
+	p.sessionPool = janus.NewSessionPool(poolCtx, p.client, p.log)
+	p.cancelPool = poolCancel
+
 	// Stats pipeline shared across all viewer goroutines.
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
 	statsLog := config.Log.NewLogger("video_stats", "")
@@ -127,6 +134,8 @@ func roomIDFromName(name string) (int64, error) {
 func (p *Plugin) Shutdown(ctx context.Context) error {
 	p.viewerManager.StopAll()
 	p.publisher.Stop()
+	p.sessionPool.Close()
+	p.cancelPool()
 	return nil
 }
 
@@ -233,16 +242,12 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 }
 
 func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, userID string) error {
-	sessionID, err := p.client.CreateSession()
+	session, err := p.sessionPool.Get(roomID)
 	if err != nil {
 		return fmt.Errorf("%w: create session: %v", call.ErrCannotJoinRoom, err)
 	}
-	l.Infof("session created: %d", sessionID)
 
-	session := janus.NewSession(ctx, p.client, sessionID, l)
-	defer session.Close()
-
-	subHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
+	subHandleID, err := session.AttachPlugin(videoroomPlugin)
 	if err != nil {
 		return fmt.Errorf("%w: attach sub handle: %v", call.ErrCannotJoinRoom, err)
 	}

@@ -83,6 +83,11 @@ func (s *Session) Events() <-chan *JanusMsg {
 	return s.eventsC
 }
 
+// AttachPlugin attaches a plugin to this session and returns the handle ID.
+func (s *Session) AttachPlugin(plugin string) (int64, error) {
+	return s.client.AttachPlugin(s.sessionID, plugin)
+}
+
 func (s *Session) Close() {
 	s.cancel()
 }
