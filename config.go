@@ -55,7 +55,8 @@ var (
 	ErrNegativeJoinStartSpacing      = errors.New("invalid spec.conference.joinPolicy.joinStartSpacing, must be >= 0")
 
 	ErrInvalidStatsBufferSize    = errors.New("invalid spec.conference.statsBufferSize integer, must be in range [64..4096]")
-	ErrMissingRecordingDirectory = errors.New("missing spec.conference.recording.directory pathname")
+	ErrMissingRecordingDirectory      = errors.New("missing spec.conference.recording.directory pathname")
+	ErrMissingPacketCaptureDirectory  = errors.New("missing spec.conference.packetCapture.directory pathname")
 
 	ErrMissingServerIP = errors.New("missing spec.network.serverIP address")
 	ErrInvalidServerIP = errors.New("invalid spec.network.serverIP address")
@@ -277,6 +278,7 @@ type ConferenceConfig struct {
 	Cameras         CameraConfig
 	JoinPolicy      JoinPolicyConfig
 	Recording       RecordingConfig
+	PacketCapture   PacketCaptureConfig
 }
 
 type YAMLConferenceConfig struct {
@@ -293,6 +295,8 @@ type YAMLConferenceConfig struct {
 	JoinPolicy *YAMLJoinPolicyConfig `yaml:"joinPolicy,omitempty"`
 	// Recording optional section, defaults to disabled
 	Recording *YAMLRecordingConfig `yaml:"recording,omitempty"`
+	// PacketCapture optional section, defaults to disabled
+	PacketCapture *YAMLPacketCaptureConfig `yaml:"packetCapture,omitempty"`
 }
 
 func (yc *YAMLConferenceConfig) validate() error {
@@ -341,6 +345,11 @@ func (yc *YAMLConferenceConfig) validate() error {
 	if recordingErr != nil {
 		errs = append(errs, recordingErr)
 	}
+	if yc.PacketCapture != nil {
+		if pcErr := yc.PacketCapture.validate(); pcErr != nil {
+			errs = append(errs, pcErr)
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -374,6 +383,9 @@ func (yc *YAMLConferenceConfig) mustConvert() ConferenceConfig {
 		}
 	} else {
 		c.Cameras = yc.Cameras.mustConvert()
+	}
+	if yc.PacketCapture != nil {
+		c.PacketCapture = yc.PacketCapture.mustConvert()
 	}
 	return c
 }
@@ -503,6 +515,35 @@ func (yc *YAMLRecordingConfig) mustConvert() RecordingConfig {
 	var c RecordingConfig
 	c.Enabled = false
 	c.Directory = ""
+	if yc.Enabled != nil && *yc.Enabled {
+		c.Enabled = true
+		c.Directory = *yc.Directory
+	}
+	return c
+}
+
+type PacketCaptureConfig struct {
+	Enabled   bool
+	Directory string
+}
+
+type YAMLPacketCaptureConfig struct {
+	Enabled   *bool   `yaml:"enabled,omitempty"`
+	Directory *string `yaml:"directory,omitempty"`
+}
+
+func (yc *YAMLPacketCaptureConfig) validate() error {
+	if yc.Enabled == nil || !*yc.Enabled {
+		return nil
+	}
+	if yc.Directory == nil || strings.TrimSpace(*yc.Directory) == "" {
+		return ErrMissingPacketCaptureDirectory
+	}
+	return nil
+}
+
+func (yc *YAMLPacketCaptureConfig) mustConvert() PacketCaptureConfig {
+	var c PacketCaptureConfig
 	if yc.Enabled != nil && *yc.Enabled {
 		c.Enabled = true
 		c.Directory = *yc.Directory

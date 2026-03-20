@@ -223,6 +223,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 				VP9RTPPayloadType: 101,
 				TrackBufferSize:   1500,
 				StatsBufferSize:   c.statsBufferSize,
+				PacketCaptureDir:  c.packetCaptureDir,
 			}
 
 			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg, ivf); err != nil {
