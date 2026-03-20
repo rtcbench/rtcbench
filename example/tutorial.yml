@@ -85,6 +85,13 @@ spec:
       enabled: false
       directory: './vp9_ivf_recordings'
 
+    # Capture raw RTP packets to per-viewer pcap files for offline analysis.
+    # Each viewer writes a separate .pcap file into a timestamped subdirectory.
+    # Disabled by default. When enabled, "directory" is required.
+    packetCapture:
+      enabled: false
+      directory: '/tmp/captures'
+
   # General network configuration goes here.
   network:
     serverIP: $env:SERVER_IP

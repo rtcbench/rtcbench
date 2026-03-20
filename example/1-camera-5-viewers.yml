@@ -17,6 +17,9 @@ spec:
       concurrency: 10
       alwaysRetryFailedJoins: true
       joinStartSpacing: 2s
+    # packetCapture:
+    #   enabled: false
+    #   directory: '/tmp/captures'
   network:
     serverIP: $env:SERVER_IP
   pluginConfig:

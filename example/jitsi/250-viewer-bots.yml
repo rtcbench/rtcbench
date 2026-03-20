@@ -20,6 +20,9 @@ spec:
     recording:
       enabled: false
       directory: './vp9_ivf_videos'
+    # packetCapture:
+    #   enabled: false
+    #   directory: '/tmp/captures'
   network:
     serverIP: $env:SERVER_IP
   pluginConfig:  # plugin-specific internal configuration
