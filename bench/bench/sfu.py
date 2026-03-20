@@ -43,6 +43,16 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
         ssh.run(sfu_host,
                 f"docker run -d --name {WEB_CONTAINER_NAME} --network host "
                 "callzip-livekit-web:latest", timeout=30)
+    elif sfu_name == "mediasoup":
+        ws_port = cluster.get("mediasoup_ws_port", 4443) if cluster else 4443
+        ssh.run(sfu_host,
+                f"docker run -d --name {SFU_CONTAINER_NAME} --network host "
+                "--ulimit nofile=65536:65536 "
+                f"-e ANNOUNCED_IP={sfu_host} "
+                "callzip-mediasoup:latest", timeout=60)
+        ssh.run(sfu_host,
+                f"for i in $(seq 30); do curl -sf http://localhost:{ws_port}/health >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1",
+                timeout=60)
     log.info("SFU %s is up on %s", sfu_name, sfu_host)
 
 

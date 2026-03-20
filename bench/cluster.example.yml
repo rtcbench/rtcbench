@@ -28,6 +28,7 @@ janus_web_port: 8080
 jitsi_web_port: 443
 livekit_ws_port: 7880
 livekit_web_port: 8080
+mediasoup_ws_port: 4443
 
 # NIC bandwidth — caps binary search at floor(nic_mbps / 3.5) viewers
 nic_mbps: 10000
