@@ -19,6 +19,7 @@ import (
 	"call.zip/plugin/janus"
 	"call.zip/plugin/jitsi"
 	"call.zip/plugin/livekit"
+	"call.zip/plugin/mediasoup"
 	"github.com/goccy/go-yaml"
 	"github.com/joho/godotenv"
 )
@@ -94,6 +95,7 @@ func main() {
 	client.RegisterPlugin("jitsi", jitsi.NewPlugin)
 	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
 	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
+	client.RegisterPlugin(mediasoup.PluginID, mediasoup.NewPlugin)
 
 	if *startAt > 0 {
 		waitDuration := time.Until(time.Unix(*startAt, 0))

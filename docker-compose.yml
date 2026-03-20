@@ -24,6 +24,14 @@ networks:
       config:
         - subnet: 172.22.0.0/24
 
+  # Mediasoup uses 172.23.0.0/24 — project callzip-mediasoup creates callzip-mediasoup_callzip-mediasoup-net
+  callzip-mediasoup-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.23.0.0/24
+
 services:
   janus:
     profiles: [janus]
@@ -179,4 +187,21 @@ services:
       interval: 5s
       timeout: 5s
       start_period: 10s
+      retries: 12
+
+  mediasoup:
+    profiles: [mediasoup]
+    build:
+      context: docker/mediasoup
+    image: callzip-mediasoup:latest
+    environment:
+      - ANNOUNCED_IP=172.23.0.10
+    networks:
+      callzip-mediasoup-net:
+        ipv4_address: 172.23.0.10
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4443/health"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
       retries: 12
