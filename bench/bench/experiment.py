@@ -372,6 +372,9 @@ module.exports = function({{sessions, id, params}}) {{
             return (f"http://{sfu_ip}:{web_port}/"
                     f"?ws=ws://{sfu_ip}:{ws_port}"
                     f"&room={room_name}&key=devkey&secret=secret")
+        elif self.sfu_name == "mediasoup":
+            raise ValueError("mediasoup does not have a web frontend yet; "
+                             "use --clients callzip for mediasoup benchmarks")
         else:
             raise ValueError(f"Unknown SFU: {self.sfu_name}")
 

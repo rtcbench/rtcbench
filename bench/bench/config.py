@@ -5,7 +5,7 @@ import os
 import sys
 
 # SFU and client types
-SFUS = ["janus", "jitsi", "livekit"]
+SFUS = ["janus", "jitsi", "livekit", "mediasoup"]
 CLIENTS = ["callzip", "webrtcperf", "chromium"]
 
 # WebRTCPerf
@@ -50,6 +50,7 @@ VIEWER_CONFIGS = {
     "janus": os.path.join(CALLZIP_CONFIGS_DIR, "bench-janus.yml"),
     "jitsi": os.path.join(CALLZIP_CONFIGS_DIR, "bench-jitsi.yml"),
     "livekit": os.path.join(CALLZIP_CONFIGS_DIR, "bench-livekit.yml"),
+    "mediasoup": os.path.join(CALLZIP_CONFIGS_DIR, "bench-mediasoup.yml"),
 }
 HINTS_FILE = "hints.json"
 
@@ -58,12 +59,14 @@ COMPOSE_PROJECTS = {
     "janus": "callzip-janus",
     "jitsi": "callzip-jitsi",
     "livekit": "callzip-livekit",
+    "mediasoup": "callzip-mediasoup",
 }
 
 COMPOSE_PROFILES = {
     "janus": "janus",
     "jitsi": "jitsi",
     "livekit": "livekit",
+    "mediasoup": "mediasoup",
 }
 
 # Jitsi container images
