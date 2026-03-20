@@ -8,7 +8,7 @@ SERVER_IP, and ENABLE_IN_MEMORY_CAMERA.
 import pytest
 
 from helpers import (
-    JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK,
+    JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK, MEDIASOUP_NETWORK,
     PLUGIN_ENV, callzip_run, poll_health, record_result,
 )
 
@@ -47,3 +47,8 @@ def test_jitsi_inmemory(jitsi_infra, test_video_dir):
 @pytest.mark.xdist_group("livekit")
 def test_livekit_inmemory(livekit_infra, test_video_dir):
     _run_inmemory("livekit", LIVEKIT_NETWORK, 4, 120, test_video_dir)
+
+
+@pytest.mark.xdist_group("mediasoup")
+def test_mediasoup_inmemory(mediasoup_infra, test_video_dir):
+    _run_inmemory("mediasoup", MEDIASOUP_NETWORK, 4, 120, test_video_dir)

@@ -1,6 +1,6 @@
 .PHONY: all clean clean-ci clean-screenshots install test \
-	e2e e2e-janus e2e-jitsi e2e-livekit screenshots \
-	_build-all _build-e2e-runner _build-janus _build-jitsi _build-livekit \
+	e2e e2e-janus e2e-jitsi e2e-livekit e2e-mediasoup screenshots \
+	_build-all _build-e2e-runner _build-janus _build-jitsi _build-livekit _build-mediasoup \
 	_e2e-run remote-ci remote-run remote-seed remote-status remote-clean remote-estimate \
 	ci cztest-client cztest-server cztest-payload-zip
 
@@ -56,6 +56,9 @@ e2e-jitsi: _build-jitsi _build-e2e-runner
 e2e-livekit: _build-livekit _build-e2e-runner
 	$(E2E_RUN) -m pytest e2e/ -v -k livekit --basetemp=$(BASETEMP)
 
+e2e-mediasoup: _build-mediasoup _build-e2e-runner
+	$(E2E_RUN) -m pytest e2e/ -v -k mediasoup --basetemp=$(BASETEMP)
+
 # Run arbitrary pytest args in e2e runner (used by remote_e2e.py)
 _e2e-run: _build-e2e-runner
 	$(E2E_RUN) -m pytest $(PYTEST_ARGS)
@@ -78,6 +81,7 @@ _build-all:
 	docker build -t callzip-janus:latest docker/janus
 	docker build -t callzip-jitsi-web:latest docker/jitsi
 	docker build -t callzip-livekit:latest docker/livekit
+	docker build -t callzip-mediasoup:latest docker/mediasoup
 
 _build-janus:
 	docker build -t callzip:latest .
@@ -90,6 +94,10 @@ _build-jitsi:
 _build-livekit:
 	docker build -t callzip:latest .
 	docker build -t callzip-livekit:latest docker/livekit
+
+_build-mediasoup:
+	docker build -t callzip:latest .
+	docker build -t callzip-mediasoup:latest docker/mediasoup
 
 # ---------------------------------------------------------------------------
 # Remote distributed e2e (via ssh-parallel-test)
@@ -132,7 +140,8 @@ clean-ci:
 	docker compose --project-name callzip-janus --profile janus down -v --remove-orphans 2>/dev/null || true
 	docker compose --project-name callzip-jitsi --profile jitsi down -v --remove-orphans 2>/dev/null || true
 	docker compose --project-name callzip-livekit --profile livekit down -v --remove-orphans 2>/dev/null || true
-	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest callzip-livekit:latest callzip-e2e-runner:latest 2>/dev/null || true
+	docker compose --project-name callzip-mediasoup --profile mediasoup down -v --remove-orphans 2>/dev/null || true
+	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest callzip-livekit:latest callzip-mediasoup:latest callzip-e2e-runner:latest 2>/dev/null || true
 	sudo rm -rf $(BASETEMP)
 
 clean-screenshots:
