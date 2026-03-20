@@ -5,9 +5,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"call.zip"
 	"call.zip/pkg/ivf"
@@ -41,6 +44,7 @@ type Plugin struct {
 	cameras            *ivf.Cameras
 	enableRecording    bool
 	recordingDirectory string
+	packetCaptureDir   string
 	statsBufferSize    int
 	viewerManager      *viewer.Manager
 	publisher          *vp9_stats.Publisher
@@ -75,6 +79,14 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.enableRecording = config.Spec.Conference.Recording.Enabled
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
 	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
+
+	if config.Spec.Conference.PacketCapture.Enabled {
+		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+		p.packetCaptureDir = filepath.Join(config.Spec.Conference.PacketCapture.Directory, ts)
+		if err := os.MkdirAll(p.packetCaptureDir, 0o755); err != nil {
+			return fmt.Errorf("janus: packet capture directory: %w", err)
+		}
+	}
 
 	// Validate that the conference name contains a parseable integer for the Janus room ID.
 	if _, err := roomIDFromName(config.Spec.Conference.Name); err != nil {
@@ -311,6 +323,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 			VP9RTPPayloadType: int(track.PayloadType()),
 			TrackBufferSize:   viewerTrackBufferSize,
 			StatsBufferSize:   p.statsBufferSize,
+			PacketCaptureDir:  p.packetCaptureDir,
 		}
 		var seg *vp9.IvfSegmenter
 		if p.enableRecording {

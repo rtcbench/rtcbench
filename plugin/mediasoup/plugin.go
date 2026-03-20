@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"call.zip"
 	"call.zip/pkg/ivf"
@@ -37,6 +40,7 @@ type Plugin struct {
 	logRegistry        *log.Registry
 	enableRecording    bool
 	recordingDirectory string
+	packetCaptureDir   string
 	statsBufferSize    int
 	viewerManager      *viewer.Manager
 	publisher          *vp9_stats.Publisher
@@ -58,6 +62,14 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.enableRecording = config.Spec.Conference.Recording.Enabled
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
 	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
+
+	if config.Spec.Conference.PacketCapture.Enabled {
+		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+		p.packetCaptureDir = filepath.Join(config.Spec.Conference.PacketCapture.Directory, ts)
+		if err := os.MkdirAll(p.packetCaptureDir, 0o755); err != nil {
+			return fmt.Errorf("mediasoup: packet capture directory: %w", err)
+		}
+	}
 
 	// Load IVF camera files for senders.
 	if config.Spec.Conference.Cameras.PerRoom > 0 {
@@ -376,6 +388,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 			VP9RTPPayloadType: int(track.PayloadType()),
 			TrackBufferSize:   viewerTrackBufferSize,
 			StatsBufferSize:   p.statsBufferSize,
+			PacketCaptureDir:  p.packetCaptureDir,
 		}
 		var seg *vp9.IvfSegmenter
 		if p.enableRecording {

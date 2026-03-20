@@ -3,8 +3,10 @@ package viewer
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
+	"call.zip/pkg/pcap"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	"github.com/pion/rtp"
@@ -18,6 +20,7 @@ const (
 	errViewerSeqNoJumpID
 	errViewerInputChannelID
 	errViewerIVFSegmenterFailed
+	errViewerPcapWriteID
 	numViewerErrIDs
 )
 
@@ -29,13 +32,15 @@ type Viewer struct {
 	nickname string
 	config   Config
 	ivf      *vp9.IvfSegmenter
+	pcap     *pcap.Writer
 }
 
 type Config struct {
-	PacketsPerSample  int `json:"packets_per_sample"`
-	VP9RTPPayloadType int `json:"vp9_rtp_payload_type"`
-	TrackBufferSize   int `json:"track_buffer_size"`
-	StatsBufferSize   int `json:"stats_buffer_size"`
+	PacketsPerSample  int    `json:"packets_per_sample"`
+	VP9RTPPayloadType int    `json:"vp9_rtp_payload_type"`
+	TrackBufferSize   int    `json:"track_buffer_size"`
+	StatsBufferSize   int    `json:"stats_buffer_size"`
+	PacketCaptureDir  string `json:"packet_capture_dir"` // if non-empty, write pcap file here
 }
 
 func (c *Config) verify() error {
@@ -63,14 +68,24 @@ func newViewer(
 	if err := config.verify(); err != nil {
 		return nil, err
 	}
-	return &Viewer{
+	v := &Viewer{
 		track:    track,
 		receiver: receiver,
 		input:    input,
 		nickname: nickname,
 		config:   *config,
 		ivf:      ivf,
-	}, nil
+	}
+	if config.PacketCaptureDir != "" {
+		trackNickname := fmt.Sprintf("%s[%d]", nickname, track.SSRC())
+		pcapPath := filepath.Join(config.PacketCaptureDir, trackNickname+".pcap")
+		pw, err := pcap.New(pcapPath)
+		if err != nil {
+			return nil, fmt.Errorf("pcap writer: %w", err)
+		}
+		v.pcap = pw
+	}
+	return v, nil
 }
 
 func (v *Viewer) run(done <-chan struct{}) error {
@@ -116,6 +131,12 @@ loop:
 		}
 
 		raw = buf[:n]
+
+		if v.pcap != nil {
+			if err = v.pcap.WritePacket(raw, time.UnixMicro(clientReadTime)); err != nil {
+				errs[errViewerPcapWriteID]++
+			}
+		}
 
 		if err = pkt.Unmarshal(raw); err != nil {
 			errs[errViewerUnmarshalPacketID]++
@@ -174,6 +195,9 @@ loop:
 func (v *Viewer) stop() {
 	if v.receiver != nil {
 		_ = v.receiver.Stop()
+	}
+	if v.pcap != nil {
+		_ = v.pcap.Close()
 	}
 }
 

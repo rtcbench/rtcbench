@@ -2,6 +2,9 @@ package jitsi
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
 	"call.zip"
 	ivfpkg "call.zip/pkg/ivf"
@@ -12,12 +15,13 @@ import (
 )
 
 type Client struct {
-	botManager      *viewer.Manager
-	publisher       *vp9_stats.Publisher
-	log             *log.Logger
-	serverIP        string
-	clientIP        string
-	statsBufferSize int
+	botManager       *viewer.Manager
+	publisher        *vp9_stats.Publisher
+	log              *log.Logger
+	serverIP         string
+	clientIP         string
+	statsBufferSize  int
+	packetCaptureDir string
 }
 
 func NewClient(cfg *call.Config, inputChanSize int64) *Client {
@@ -36,13 +40,21 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 
 	go publisher.Run()
 
+	var pcapDir string
+	if cfg.Spec.Conference.PacketCapture.Enabled {
+		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+		pcapDir = filepath.Join(cfg.Spec.Conference.PacketCapture.Directory, ts)
+		_ = os.MkdirAll(pcapDir, 0o755)
+	}
+
 	return &Client{
-		botManager:      botManager,
-		publisher:       publisher,
-		log:             cfg.Log.NewLogger("jitsi", ""),
-		serverIP:        cfg.Spec.Network.ServerIP,
-		clientIP:        cfg.Spec.Network.ClientIP,
-		statsBufferSize: cfg.Spec.Conference.StatsBufferSize,
+		botManager:       botManager,
+		publisher:        publisher,
+		log:              cfg.Log.NewLogger("jitsi", ""),
+		serverIP:         cfg.Spec.Network.ServerIP,
+		clientIP:         cfg.Spec.Network.ClientIP,
+		statsBufferSize:  cfg.Spec.Conference.StatsBufferSize,
+		packetCaptureDir: pcapDir,
 	}
 }
 

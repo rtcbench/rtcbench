@@ -102,7 +102,7 @@ def poll_health(
 
 
 @contextlib.contextmanager
-def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = None, env: dict = None):
+def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = None, capture_dir: Path = None, env: dict = None):
     """
     Start call.zip in a Docker container joined to the given Docker network.
 
@@ -111,6 +111,7 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
     video_dir: host directory mounted read-only as /test-videos inside the container.
     network: Docker network name to join (JANUS_NETWORK or JITSI_NETWORK).
     recording_dir: if given, mounted as /tmp/recordings (write).
+    capture_dir: if given, mounted as /tmp/captures (write) for packet capture.
     env: if given, dict of environment variables passed to the container via -e flags.
 
     Yields (health_url, proc) where health_url is http://localhost:<port>/health.
@@ -142,6 +143,8 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
     ]
     if recording_dir is not None:
         cmd += ["-v", f"{recording_dir}:/tmp/recordings"]
+    if capture_dir is not None:
+        cmd += ["-v", f"{capture_dir}:/tmp/captures"]
     cmd += ["callzip:latest", container_config]
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -152,6 +155,27 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
         out, _ = proc.communicate(timeout=15)
         if out:
             print(f"\n--- callzip output ({config.name}) ---\n{out}---")
+
+
+def build_pcap_config(base_config_name: str) -> Path:
+    """
+    Write a temporary YAML config identical to ci/<base_config_name> but with
+    packetCapture.enabled=true and packetCapture.directory=/tmp/captures.
+
+    Returns the path to the temp file. Caller is responsible for unlinking it.
+    """
+    with open(REPO_ROOT / "ci" / base_config_name) as f:
+        cfg = yaml.safe_load(f)
+    cfg["spec"]["conference"]["packetCapture"] = {
+        "enabled": True,
+        "directory": "/tmp/captures",
+    }
+    tmp = tempfile.NamedTemporaryFile(
+        suffix=".yml", delete=False, mode="w", prefix="callzip-e2e-pcap-", dir="/tmp"
+    )
+    yaml.dump(cfg, tmp)
+    tmp.close()
+    return Path(tmp.name)
 
 
 def build_recording_config(base_config_name: str) -> Path:
