@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"path"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	janus "call.zip/plugin/janus/internal"
+	"github.com/pion/ice/v2"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -46,6 +48,8 @@ type Plugin struct {
 	publisher          *vp9_stats.Publisher
 	sessionPool        *janus.SessionPool
 	cancelPool         context.CancelFunc
+	udpMux             ice.UDPMux
+	udpConn            net.PacketConn
 }
 
 func NewPlugin() call.Plugin {
@@ -97,6 +101,15 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.sessionPool = janus.NewSessionPool(poolCtx, p.client, p.log)
 	p.cancelPool = poolCancel
 
+	// Single UDP socket shared across all PeerConnections.
+	mux, conn, err := janus.NewSharedUDPMux(p.clientIP)
+	if err != nil {
+		poolCancel()
+		return fmt.Errorf("janus: %w", err)
+	}
+	p.udpMux = mux
+	p.udpConn = conn
+
 	// Stats pipeline shared across all viewer goroutines.
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
 	statsLog := config.Log.NewLogger("video_stats", "")
@@ -136,6 +149,7 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 	p.publisher.Stop()
 	p.sessionPool.Close()
 	p.cancelPool()
+	p.udpConn.Close()
 	return nil
 }
 
@@ -191,7 +205,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 	}
 	l.Infof("joined room %d as publisher", roomID)
 
-	pc, track, offerSDP, err := janus.StartPionPublisher(l, p.clientIP)
+	pc, track, offerSDP, err := janus.StartPionPublisher(l, p.udpMux)
 	if err != nil {
 		return fmt.Errorf("%w: pion publisher: %v", call.ErrCannotJoinRoom, err)
 	}
@@ -297,7 +311,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	}
 	l.Infof("attached, got JSEP offer from Janus")
 
-	pc, answerSDP, err := janus.StartPionSubscriber(l, p.clientIP, attached.JSEP.SDP)
+	pc, answerSDP, err := janus.StartPionSubscriber(l, p.udpMux, attached.JSEP.SDP)
 	if err != nil {
 		return fmt.Errorf("%w: pion subscriber: %v", call.ErrCannotJoinRoom, err)
 	}

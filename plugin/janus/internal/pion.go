@@ -7,22 +7,31 @@ import (
 
 	"call.zip/pkg/log"
 	"github.com/pion/dtls/v2"
+	"github.com/pion/ice/v2"
 	"github.com/pion/webrtc/v3"
 )
 
-func newPionAPI(clientIP string) (*webrtc.API, error) {
+// NewSharedUDPMux creates a single UDP socket and ICE mux that can be
+// shared across all PeerConnections. This avoids binding one kernel
+// socket per viewer, reducing file descriptors and kernel buffer memory
+// from O(N) to O(1).
+func NewSharedUDPMux(clientIP string) (ice.UDPMux, net.PacketConn, error) {
 	bindAddr := clientIP
 	if bindAddr == "" {
 		bindAddr = "0.0.0.0"
 	}
 	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:0", bindAddr))
 	if err != nil {
-		return nil, fmt.Errorf("bind UDP: %w", err)
+		return nil, nil, fmt.Errorf("bind UDP: %w", err)
 	}
+	mux := webrtc.NewICEUDPMux(nil, conn)
+	return mux, conn, nil
+}
 
+func newPionAPI(mux ice.UDPMux) *webrtc.API {
 	se := webrtc.SettingEngine{}
 	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
-	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
+	se.SetICEUDPMux(mux)
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 
 	m := &webrtc.MediaEngine{}
@@ -38,7 +47,7 @@ func newPionAPI(clientIP string) (*webrtc.API, error) {
 	return webrtc.NewAPI(
 		webrtc.WithSettingEngine(se),
 		webrtc.WithMediaEngine(m),
-	), nil
+	)
 }
 
 func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
@@ -56,12 +65,9 @@ func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
 // PC, the local video track (for IVF streaming), and the offer SDP.
 func StartPionPublisher(
 	l *log.Logger,
-	clientIP string,
+	mux ice.UDPMux,
 ) (*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error) {
-	api, err := newPionAPI(clientIP)
-	if err != nil {
-		return nil, nil, "", err
-	}
+	api := newPionAPI(mux)
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
@@ -102,13 +108,10 @@ func StartPionPublisher(
 // The caller is responsible for setting pc.OnTrack before media flows.
 func StartPionSubscriber(
 	l *log.Logger,
-	clientIP string,
+	mux ice.UDPMux,
 	janusOfferSDP string,
 ) (*webrtc.PeerConnection, string, error) {
-	api, err := newPionAPI(clientIP)
-	if err != nil {
-		return nil, "", err
-	}
+	api := newPionAPI(mux)
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
@@ -143,4 +146,3 @@ func StartPionSubscriber(
 	l.Infof("[pion] subscriber answer SDP ready")
 	return pc, pc.LocalDescription().SDP, nil
 }
-
