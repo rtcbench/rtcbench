@@ -4,11 +4,14 @@
 	_e2e-run remote-ci remote-run remote-seed remote-status remote-clean remote-estimate \
 	ci cztest-client cztest-server cztest-payload-zip
 
+VERSION := $(shell git describe --tags --always --dirty)
+LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+
 all:
-	go build -v ./cmd/call.zip
+	go build -v $(LDFLAGS) ./cmd/call.zip
 
 install:
-	go install -v ./cmd/call.zip
+	go install -v $(LDFLAGS) ./cmd/call.zip
 
 cztest-client:
 	go build -v ./cmd/cztest-client
@@ -20,8 +23,8 @@ cztest-payload:
 	@test -f cztest-config.yml || (echo "missing ./cztest-config.yml" && exit 1)
 	rm -rf target/cztest-build target/cztest-payload.zip
 	mkdir -p target/cztest-build
-	GOOS=darwin GOARCH=arm64 go build -v -o target/cztest-build/cztest-binary-os_darwin-arch_arm64 ./cmd/call.zip
-	GOOS=linux  GOARCH=amd64 go build -v -o target/cztest-build/cztest-binary-os_linux-arch_amd64  ./cmd/call.zip
+	GOOS=darwin GOARCH=arm64 go build -v $(LDFLAGS) -o target/cztest-build/cztest-binary-os_darwin-arch_arm64 ./cmd/call.zip
+	GOOS=linux  GOARCH=amd64 go build -v $(LDFLAGS) -o target/cztest-build/cztest-binary-os_linux-arch_amd64  ./cmd/call.zip
 	cp -f cztest-config.yml target/cztest-build/config.yml
 	cd target/cztest-build && zip -9 -r ../cztest-payload.zip config.yml cztest-binary-os_darwin-arch_arm64 cztest-binary-os_linux-arch_amd64
 	@echo "*** DONE ***\nPlease upload ./target/cztest-payload.zip to the cztest server."

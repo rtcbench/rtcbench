@@ -24,6 +24,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var version = "dev"
+
 func main() {
 	var (
 		err                           error
@@ -35,10 +37,24 @@ func main() {
 	)
 
 	startAt := flag.Int64("start-at", 0, "Unix timestamp to wait until before joining rooms")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
+
 	if flag.NArg() != 1 {
-		stdlog.Fatalf("Usage: %s [--start-at TIMESTAMP] config.yml", os.Args[0])
+		if flag.NArg() > 1 {
+			for _, arg := range flag.Args() {
+				if len(arg) > 0 && arg[0] == '-' {
+					stdlog.Fatalf("unknown flag: %s (flags must appear before the config file)", arg)
+				}
+			}
+		}
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	_ = godotenv.Load()
