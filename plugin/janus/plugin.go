@@ -44,6 +44,11 @@ type Plugin struct {
 	statsBufferSize    int
 	viewerManager      *viewer.Manager
 	publisher          *vp9_stats.Publisher
+
+	sessionID          int64
+	session            *janus.Session
+	ctx                context.Context
+	cancel             context.CancelFunc
 }
 
 func NewPlugin() call.Plugin {
@@ -51,6 +56,8 @@ func NewPlugin() call.Plugin {
 }
 
 func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+
 	baseURL := config.Spec.PluginConfig[PluginID].(map[string]any)[cfgServerRoot].(string)
 	allowInsecure := config.Spec.PluginConfig[PluginID].(map[string]any)[cfgAllowInsecure].(bool)
 
@@ -58,6 +65,8 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	if allowInsecure {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
+	transport.MaxIdleConns = 10000
+	transport.MaxIdleConnsPerHost = 10000
 	httpClient := &http.Client{Transport: transport}
 
 	p.client = janus.NewClient(httpClient, baseURL)
@@ -89,6 +98,17 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 		}
 		p.cameras = cams
 	}
+
+	sessionID, err := p.client.CreateSession()
+	if err != nil {
+		return fmt.Errorf("janus: create global session: %v", err)
+	}
+	p.sessionID = sessionID
+	p.session = janus.NewSession(p.ctx, p.client, sessionID, config.Log.NewLogger("janus_session", ""))
+	go func() {
+		for range p.session.Events() {
+		}
+	}()
 
 	// Stats pipeline shared across all viewer goroutines.
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
@@ -125,6 +145,9 @@ func roomIDFromName(name string) (int64, error) {
 }
 
 func (p *Plugin) Shutdown(ctx context.Context) error {
+	if p.cancel != nil {
+		p.cancel()
+	}
 	p.viewerManager.StopAll()
 	p.publisher.Stop()
 	return nil
@@ -153,22 +176,13 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
 
-	sessionID, err := p.client.CreateSession()
-	if err != nil {
-		return fmt.Errorf("%w: create session: %v", call.ErrCannotJoinRoom, err)
-	}
-	l.Infof("session created: %d", sessionID)
-
-	session := janus.NewSession(ctx, p.client, sessionID, l)
-	defer session.Close()
-
-	handleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
+	handleID, err := p.client.AttachPlugin(p.sessionID, videoroomPlugin)
 	if err != nil {
 		return fmt.Errorf("%w: attach plugin: %v", call.ErrCannotJoinRoom, err)
 	}
 	l.Infof("handle attached: %d", handleID)
 
-	joined, err := session.Send(handleID, map[string]any{
+	joined, err := p.session.Send(handleID, map[string]any{
 		"request": "join",
 		"ptype":   "publisher",
 		"room":    roomID,
@@ -198,7 +212,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		}
 	})
 
-	configured, err := session.Send(handleID, map[string]any{
+	configured, err := p.session.Send(handleID, map[string]any{
 		"request":    "publish",
 		"videocodec": "vp9",
 	}, &janus.JSEP{Type: "offer", SDP: offerSDP})
@@ -233,22 +247,13 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 }
 
 func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, userID string) error {
-	sessionID, err := p.client.CreateSession()
-	if err != nil {
-		return fmt.Errorf("%w: create session: %v", call.ErrCannotJoinRoom, err)
-	}
-	l.Infof("session created: %d", sessionID)
-
-	session := janus.NewSession(ctx, p.client, sessionID, l)
-	defer session.Close()
-
 	// Attach a publisher handle just to discover active publishers.
-	pubHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
+	pubHandleID, err := p.client.AttachPlugin(p.sessionID, videoroomPlugin)
 	if err != nil {
 		return fmt.Errorf("%w: attach pub handle: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	joined, err := session.Send(pubHandleID, map[string]any{
+	joined, err := p.session.Send(pubHandleID, map[string]any{
 		"request": "join",
 		"ptype":   "publisher",
 		"room":    roomID,
@@ -280,12 +285,12 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	}
 	l.Infof("found %d publisher(s), subscribing", len(streams))
 
-	subHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
+	subHandleID, err := p.client.AttachPlugin(p.sessionID, videoroomPlugin)
 	if err != nil {
 		return fmt.Errorf("%w: attach sub handle: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	attached, err := session.Send(subHandleID, map[string]any{
+	attached, err := p.session.Send(subHandleID, map[string]any{
 		"request": "join",
 		"ptype":   "subscriber",
 		"room":    roomID,
@@ -340,7 +345,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 		}
 	})
 
-	started, err := session.Send(subHandleID, map[string]any{
+	started, err := p.session.Send(subHandleID, map[string]any{
 		"request": "start",
 	}, &janus.JSEP{Type: "answer", SDP: answerSDP})
 	if err != nil {
