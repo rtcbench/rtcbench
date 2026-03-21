@@ -5,12 +5,29 @@ import (
 	"net"
 	"strings"
 
+	"call.zip"
 	"call.zip/pkg/log"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
 )
 
-func newPionAPI(clientIP string) (*webrtc.API, error) {
+func iceServersFromNAT(nat call.NATConfig) []webrtc.ICEServer {
+	var servers []webrtc.ICEServer
+	if len(nat.STUNServers) > 0 {
+		servers = append(servers, webrtc.ICEServer{URLs: nat.STUNServers})
+	}
+	for _, turn := range nat.TURNServers {
+		servers = append(servers, webrtc.ICEServer{
+			URLs:           []string{turn.URL},
+			Username:       turn.Username,
+			Credential:     turn.Credential,
+			CredentialType: webrtc.ICECredentialTypePassword,
+		})
+	}
+	return servers
+}
+
+func newPionAPI(clientIP string, nat call.NATConfig) (*webrtc.API, error) {
 	bindAddr := clientIP
 	if bindAddr == "" {
 		bindAddr = "0.0.0.0"
@@ -24,6 +41,9 @@ func newPionAPI(clientIP string) (*webrtc.API, error) {
 	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
 	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	if nat.PublicIP != "" {
+		se.SetNAT1To1IPs([]string{nat.PublicIP}, webrtc.ICECandidateTypeHost)
+	}
 
 	m := &webrtc.MediaEngine{}
 	m.RegisterCodec(webrtc.RTPCodecParameters{
@@ -57,13 +77,16 @@ func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
 func StartPionPublisher(
 	l *log.Logger,
 	clientIP string,
+	nat call.NATConfig,
 ) (*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error) {
-	api, err := newPionAPI(clientIP)
+	api, err := newPionAPI(clientIP, nat)
 	if err != nil {
 		return nil, nil, "", err
 	}
 
-	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	pc, err := api.NewPeerConnection(webrtc.Configuration{
+		ICEServers: iceServersFromNAT(nat),
+	})
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
@@ -103,14 +126,17 @@ func StartPionPublisher(
 func StartPionSubscriber(
 	l *log.Logger,
 	clientIP string,
+	nat call.NATConfig,
 	janusOfferSDP string,
 ) (*webrtc.PeerConnection, string, error) {
-	api, err := newPionAPI(clientIP)
+	api, err := newPionAPI(clientIP, nat)
 	if err != nil {
 		return nil, "", err
 	}
 
-	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	pc, err := api.NewPeerConnection(webrtc.Configuration{
+		ICEServers: iceServersFromNAT(nat),
+	})
 	if err != nil {
 		return nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}

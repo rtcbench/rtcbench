@@ -82,6 +82,19 @@ func main() {
 		cfg.Spec.Network.ClientIP = detectedClientIP
 	}
 
+	nat := cfg.Spec.Network.NAT
+	if nat.Enabled() {
+		if nat.PublicIP != "" {
+			mainLog.Infof("NAT traversal: publicIP=%s", nat.PublicIP)
+		}
+		if len(nat.STUNServers) > 0 {
+			mainLog.Infof("NAT traversal: %d STUN server(s) configured", len(nat.STUNServers))
+		}
+		if len(nat.TURNServers) > 0 {
+			mainLog.Infof("NAT traversal: %d TURN server(s) configured", len(nat.TURNServers))
+		}
+	}
+
 	if cfg.Spec.Metrics.Port > 0 {
 		ms := metricsserver.New(cfg.Spec.Metrics.Port)
 		cfg.StatsConsumers = append(cfg.StatsConsumers, ms.Subscriber())

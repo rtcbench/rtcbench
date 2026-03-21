@@ -62,6 +62,13 @@ var (
 	ErrInvalidServerIP = errors.New("invalid spec.network.serverIP address")
 	ErrInvalidClientIP = errors.New("invalid spec.network.clientIP address")
 
+	ErrInvalidPublicIP       = errors.New("invalid spec.network.nat.publicIP address")
+	ErrInvalidSTUNURL        = errors.New("invalid spec.network.nat.stunServers URL, must use stun: or stuns: scheme")
+	ErrMissingTURNURL        = errors.New("missing spec.network.nat.turnServers[#].url")
+	ErrInvalidTURNURL        = errors.New("invalid spec.network.nat.turnServers[#].url, must use turn: or turns: scheme")
+	ErrMissingTURNUsername   = errors.New("missing spec.network.nat.turnServers[#].username")
+	ErrMissingTURNCredential = errors.New("missing spec.network.nat.turnServers[#].credential")
+
 	ErrMissingLoggingDirectory = errors.New("missing spec.logging.directory pathname")
 	ErrInvalidConsoleLevel     = errors.New("invalid spec.logging.consoleLevel string, must match " + logLevelRegex.String())
 	ErrInvalidFileLevel        = errors.New("invalid spec.logging.fileLevel string, must match " + logLevelRegex.String())
@@ -554,11 +561,93 @@ func (yc *YAMLPacketCaptureConfig) mustConvert() PacketCaptureConfig {
 type NetworkConfig struct {
 	ServerIP string
 	ClientIP string
+	NAT      NATConfig
+}
+
+type NATConfig struct {
+	PublicIP    string
+	STUNServers []string
+	TURNServers []TURNServerConfig
+}
+
+type TURNServerConfig struct {
+	URL        string
+	Username   string
+	Credential string
+}
+
+// Enabled returns true if any NAT traversal settings are configured.
+func (nc NATConfig) Enabled() bool {
+	return nc.PublicIP != "" || len(nc.STUNServers) > 0 || len(nc.TURNServers) > 0
 }
 
 type YAMLNetworkConfig struct {
-	ServerIP *string `yaml:"serverIP,omitempty"`
-	ClientIP *string `yaml:"clientIP,omitempty"`
+	ServerIP *string        `yaml:"serverIP,omitempty"`
+	ClientIP *string        `yaml:"clientIP,omitempty"`
+	NAT      *YAMLNATConfig `yaml:"nat,omitempty"`
+}
+
+type YAMLNATConfig struct {
+	PublicIP    *string          `yaml:"publicIP,omitempty"`
+	STUNServers []string         `yaml:"stunServers,omitempty"`
+	TURNServers []YAMLTURNServer `yaml:"turnServers,omitempty"`
+}
+
+type YAMLTURNServer struct {
+	URL        *string `yaml:"url,omitempty"`
+	Username   *string `yaml:"username,omitempty"`
+	Credential *string `yaml:"credential,omitempty"`
+}
+
+func isValidSTUNURL(s string) bool {
+	return strings.HasPrefix(s, "stun:") || strings.HasPrefix(s, "stuns:")
+}
+
+func isValidTURNURL(s string) bool {
+	return strings.HasPrefix(s, "turn:") || strings.HasPrefix(s, "turns:")
+}
+
+func (yc *YAMLNATConfig) validate() error {
+	var errs []error
+	if yc.PublicIP != nil && *yc.PublicIP != "" && net.ParseIP(*yc.PublicIP) == nil {
+		errs = append(errs, ErrInvalidPublicIP)
+	}
+	for _, s := range yc.STUNServers {
+		if !isValidSTUNURL(s) {
+			errs = append(errs, ErrInvalidSTUNURL)
+			break
+		}
+	}
+	for i, turn := range yc.TURNServers {
+		if turn.URL == nil || *turn.URL == "" {
+			errs = append(errs, fmt.Errorf("(@%d)%w", i, ErrMissingTURNURL))
+		} else if !isValidTURNURL(*turn.URL) {
+			errs = append(errs, fmt.Errorf("(@%d)%w", i, ErrInvalidTURNURL))
+		}
+		if turn.Username == nil || *turn.Username == "" {
+			errs = append(errs, fmt.Errorf("(@%d)%w", i, ErrMissingTURNUsername))
+		}
+		if turn.Credential == nil || *turn.Credential == "" {
+			errs = append(errs, fmt.Errorf("(@%d)%w", i, ErrMissingTURNCredential))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (yc *YAMLNATConfig) mustConvert() NATConfig {
+	var c NATConfig
+	if yc.PublicIP != nil {
+		c.PublicIP = *yc.PublicIP
+	}
+	c.STUNServers = append(c.STUNServers, yc.STUNServers...)
+	for _, turn := range yc.TURNServers {
+		c.TURNServers = append(c.TURNServers, TURNServerConfig{
+			URL:        *turn.URL,
+			Username:   *turn.Username,
+			Credential: *turn.Credential,
+		})
+	}
+	return c
 }
 
 func (yc *YAMLNetworkConfig) validate() error {
@@ -571,6 +660,11 @@ func (yc *YAMLNetworkConfig) validate() error {
 	if yc.ClientIP != nil && *yc.ClientIP != "" && net.ParseIP(*yc.ClientIP) == nil {
 		errs = append(errs, ErrInvalidClientIP)
 	}
+	if yc.NAT != nil {
+		if natErr := yc.NAT.validate(); natErr != nil {
+			errs = append(errs, natErr)
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -579,6 +673,9 @@ func (yc *YAMLNetworkConfig) mustConvert() NetworkConfig {
 	c.ServerIP = *yc.ServerIP
 	if yc.ClientIP != nil {
 		c.ClientIP = *yc.ClientIP
+	}
+	if yc.NAT != nil {
+		c.NAT = yc.NAT.mustConvert()
 	}
 	return c
 }

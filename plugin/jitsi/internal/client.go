@@ -20,6 +20,7 @@ type Client struct {
 	log              *log.Logger
 	serverIP         string
 	clientIP         string
+	nat              call.NATConfig
 	statsBufferSize  int
 	packetCaptureDir string
 }
@@ -53,6 +54,7 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 		log:              cfg.Log.NewLogger("jitsi", ""),
 		serverIP:         cfg.Spec.Network.ServerIP,
 		clientIP:         cfg.Spec.Network.ClientIP,
+		nat:              cfg.Spec.Network.NAT,
 		statsBufferSize:  cfg.Spec.Conference.StatsBufferSize,
 		packetCaptureDir: pcapDir,
 	}

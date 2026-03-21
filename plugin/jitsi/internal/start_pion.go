@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"call.zip"
 	ivfpkg "call.zip/pkg/ivf"
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9"
@@ -54,6 +55,22 @@ func parseLocalVideoMSID(sdp string) (primarySSRC, msid string) {
 	return primarySSRC, msid
 }
 
+func iceServersFromNAT(nat call.NATConfig) []webrtc.ICEServer {
+	var servers []webrtc.ICEServer
+	if len(nat.STUNServers) > 0 {
+		servers = append(servers, webrtc.ICEServer{URLs: nat.STUNServers})
+	}
+	for _, turn := range nat.TURNServers {
+		servers = append(servers, webrtc.ICEServer{
+			URLs:           []string{turn.URL},
+			Username:       turn.Username,
+			Credential:     turn.Credential,
+			CredentialType: webrtc.ICECredentialTypePassword,
+		})
+	}
+	return servers
+}
+
 func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) (*webrtc.PeerConnection, error) {
 	state.Log.Infof("[startPion] initializing pion PeerConnection...")
 
@@ -68,6 +85,9 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
 	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	if c.nat.PublicIP != "" {
+		se.SetNAT1To1IPs([]string{c.nat.PublicIP}, webrtc.ICECandidateTypeHost)
+	}
 
 	m := &webrtc.MediaEngine{}
 
@@ -86,7 +106,9 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		webrtc.WithMediaEngine(m),
 	)
 
-	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	pc, err := api.NewPeerConnection(webrtc.Configuration{
+		ICEServers: iceServersFromNAT(c.nat),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create PeerConnection failed: %w", err)
 	}

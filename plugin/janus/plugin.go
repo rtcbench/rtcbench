@@ -41,6 +41,7 @@ type Plugin struct {
 	logRegistry        *log.Registry
 	serverIP           string
 	clientIP           string
+	nat                call.NATConfig
 	cameras            *ivf.Cameras
 	enableRecording    bool
 	recordingDirectory string
@@ -76,6 +77,7 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 
 	p.serverIP = config.Spec.Network.ServerIP
 	p.clientIP = config.Spec.Network.ClientIP
+	p.nat = config.Spec.Network.NAT
 	p.enableRecording = config.Spec.Conference.Recording.Enabled
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
 	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
@@ -194,7 +196,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 	}
 	l.Infof("joined room %d as publisher", roomID)
 
-	pc, track, offerSDP, err := janus.StartPionPublisher(l, p.clientIP)
+	pc, track, offerSDP, err := janus.StartPionPublisher(l, p.clientIP, p.nat)
 	if err != nil {
 		return fmt.Errorf("%w: pion publisher: %v", call.ErrCannotJoinRoom, err)
 	}
@@ -311,7 +313,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	}
 	l.Infof("attached, got JSEP offer from Janus")
 
-	pc, answerSDP, err := janus.StartPionSubscriber(l, p.clientIP, attached.JSEP.SDP)
+	pc, answerSDP, err := janus.StartPionSubscriber(l, p.clientIP, p.nat, attached.JSEP.SDP)
 	if err != nil {
 		return fmt.Errorf("%w: pion subscriber: %v", call.ErrCannotJoinRoom, err)
 	}

@@ -4,15 +4,32 @@ import (
 	"fmt"
 	"net"
 
+	"call.zip"
 	"call.zip/pkg/log"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
 )
 
+func iceServersFromNAT(nat call.NATConfig) []webrtc.ICEServer {
+	var servers []webrtc.ICEServer
+	if len(nat.STUNServers) > 0 {
+		servers = append(servers, webrtc.ICEServer{URLs: nat.STUNServers})
+	}
+	for _, turn := range nat.TURNServers {
+		servers = append(servers, webrtc.ICEServer{
+			URLs:           []string{turn.URL},
+			Username:       turn.Username,
+			Credential:     turn.Credential,
+			CredentialType: webrtc.ICECredentialTypePassword,
+		})
+	}
+	return servers
+}
+
 // newPionAPI creates a pion API with a single shared UDP socket and VP9
 // registered at the given payload type. If forceActiveRole is true, the
 // answering DTLS role is forced to client (active).
-func newPionAPI(clientIP string, vp9PayloadType uint8, forceActiveRole bool) (*webrtc.API, error) {
+func newPionAPI(clientIP string, nat call.NATConfig, vp9PayloadType uint8, forceActiveRole bool) (*webrtc.API, error) {
 	bindAddr := clientIP
 	if bindAddr == "" {
 		bindAddr = "0.0.0.0"
@@ -26,6 +43,9 @@ func newPionAPI(clientIP string, vp9PayloadType uint8, forceActiveRole bool) (*w
 	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
 	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	if nat.PublicIP != "" {
+		se.SetNAT1To1IPs([]string{nat.PublicIP}, webrtc.ICECandidateTypeHost)
+	}
 	if forceActiveRole {
 		se.SetAnsweringDTLSRole(webrtc.DTLSRoleClient)
 	}
@@ -50,15 +70,17 @@ func newPionAPI(clientIP string, vp9PayloadType uint8, forceActiveRole bool) (*w
 
 // StartSendPC creates a PeerConnection with a VP9 send track and returns the
 // PC, the local track (for IVF streaming), and the offer SDP.
-func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8) (
+func StartSendPC(l *log.Logger, clientIP string, nat call.NATConfig, vp9PT uint8) (
 	*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error,
 ) {
-	api, err := newPionAPI(clientIP, vp9PT, false)
+	api, err := newPionAPI(clientIP, nat, vp9PT, false)
 	if err != nil {
 		return nil, nil, "", err
 	}
 
-	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	pc, err := api.NewPeerConnection(webrtc.Configuration{
+		ICEServers: iceServersFromNAT(nat),
+	})
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
@@ -93,13 +115,15 @@ func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8) (
 
 // StartRecvPC creates a PeerConnection for receiving tracks. It forces the
 // DTLS answering role to client (active) to work with mediasoup ICE Lite.
-func StartRecvPC(l *log.Logger, clientIP string, vp9PT uint8) (*webrtc.PeerConnection, error) {
-	api, err := newPionAPI(clientIP, vp9PT, true)
+func StartRecvPC(l *log.Logger, clientIP string, nat call.NATConfig, vp9PT uint8) (*webrtc.PeerConnection, error) {
+	api, err := newPionAPI(clientIP, nat, vp9PT, true)
 	if err != nil {
 		return nil, err
 	}
 
-	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	pc, err := api.NewPeerConnection(webrtc.Configuration{
+		ICEServers: iceServersFromNAT(nat),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("NewPeerConnection: %w", err)
 	}

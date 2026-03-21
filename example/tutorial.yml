@@ -101,6 +101,27 @@ spec:
     # -
     # clientIP: 10.99.0.2
 
+    # NAT traversal configuration (optional). Use when the client is behind NAT
+    # and needs to reach an SFU on the public internet (or vice versa).
+    # All fields are optional and can be combined.
+    # nat:
+    #   # Static public IP — rewrites ICE host candidates to this address.
+    #   # Use when you have a known public IP (port-forwarded, elastic IP, etc.).
+    #   publicIP: 203.0.113.50
+    #
+    #   # STUN servers for discovering the client's server-reflexive (srflx) address.
+    #   # URLs must use the stun: or stuns: scheme.
+    #   stunServers:
+    #     - stun:stun.l.google.com:19302
+    #
+    #   # TURN relay servers for connectivity through symmetric NAT.
+    #   # URLs must use the turn: or turns: scheme. Credentials are required.
+    #   # Use $env:VAR for secrets to avoid hardcoding them in the config file.
+    #   turnServers:
+    #     - url: turn:turn.example.com:3478
+    #       username: user
+    #       credential: $env:TURN_PASSWORD
+
   # Each plugin may have some ad-hoc settings that would be configured here with optional string interpolation.
   pluginConfig:
     jitsi:

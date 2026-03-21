@@ -35,6 +35,7 @@ const (
 type Plugin struct {
 	serverURL          string
 	clientIP           string
+	nat                call.NATConfig
 	cameras            *ivf.Cameras
 	log                *log.Logger
 	logRegistry        *log.Registry
@@ -59,6 +60,7 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	p.log = config.Log.NewLogger("mediasoup", "")
 	p.logRegistry = config.Log
 	p.clientIP = config.Spec.Network.ClientIP
+	p.nat = config.Spec.Network.NAT
 	p.enableRecording = config.Spec.Conference.Recording.Enabled
 	p.recordingDirectory = config.Spec.Conference.Recording.Directory
 	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
@@ -208,7 +210,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	l.Infof("joined room %s", roomID)
 
 	// 5. Create pion PeerConnection with VP9 send track.
-	pc, track, offerSDP, err := ms.StartSendPC(l, p.clientIP, p.vp9PT)
+	pc, track, offerSDP, err := ms.StartSendPC(l, p.clientIP, p.nat, p.vp9PT)
 	if err != nil {
 		return fmt.Errorf("%w: pion send: %v", call.ErrCannotJoinRoom, err)
 	}
@@ -375,7 +377,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 	l.Infof("recv transport created: %s", transport.ID)
 
 	// 4. Create recv PeerConnection.
-	recvPC, err = ms.StartRecvPC(l, p.clientIP, p.vp9PT)
+	recvPC, err = ms.StartRecvPC(l, p.clientIP, p.nat, p.vp9PT)
 	if err != nil {
 		return fmt.Errorf("%w: pion recv: %v", call.ErrCannotJoinRoom, err)
 	}
