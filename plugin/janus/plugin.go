@@ -48,6 +48,9 @@ type Plugin struct {
 	statsBufferSize    int
 	viewerManager      *viewer.Manager
 	publisher          *vp9_stats.Publisher
+
+	mu       sync.Mutex
+	sessions []*janus.Session
 }
 
 func NewPlugin() call.Plugin {
@@ -137,6 +140,15 @@ func roomIDFromName(name string) (int64, error) {
 }
 
 func (p *Plugin) Shutdown(ctx context.Context) error {
+	p.mu.Lock()
+	sessions := p.sessions
+	p.sessions = nil
+	p.mu.Unlock()
+
+	for _, s := range sessions {
+		s.Close()
+	}
+
 	p.viewerManager.StopAll()
 	p.publisher.Stop()
 	return nil
@@ -172,10 +184,10 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 	l.Infof("session created: %d", sessionID)
 
 	session := janus.NewSession(ctx, p.client, sessionID, l)
-	defer session.Close()
 
 	handleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: attach plugin: %v", call.ErrCannotJoinRoom, err)
 	}
 	l.Infof("handle attached: %d", handleID)
@@ -187,27 +199,23 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		"display": userID,
 	}, nil)
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: join: %v", call.ErrCannotJoinRoom, err)
 	}
 	if joined.PluginData == nil || joined.PluginData.Data["videoroom"] != "joined" {
+		session.Close()
 		return fmt.Errorf("%w: unexpected join response: %v", call.ErrCannotJoinRoom, joined)
 	}
 	l.Infof("joined room %d as publisher", roomID)
 
 	pc, track, offerSDP, err := janus.StartPionPublisher(l, p.clientIP)
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: pion publisher: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	done := make(chan struct{})
-	var once sync.Once
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		l.Infof("[pion] ConnectionState: %s", s)
-		if s == webrtc.PeerConnectionStateFailed ||
-			s == webrtc.PeerConnectionStateDisconnected ||
-			s == webrtc.PeerConnectionStateClosed {
-			once.Do(func() { close(done) })
-		}
 	})
 
 	configured, err := session.Send(handleID, map[string]any{
@@ -215,15 +223,18 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		"videocodec": "vp9",
 	}, &janus.JSEP{Type: "offer", SDP: offerSDP})
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: publish: %v", call.ErrCannotJoinRoom, err)
 	}
 	if configured.PluginData != nil {
 		if errMsg, ok := configured.PluginData.Data["error"].(string); ok {
 			errCode, _ := configured.PluginData.Data["error_code"].(float64)
+			session.Close()
 			return fmt.Errorf("%w: publish: janus error %d: %s", call.ErrCannotJoinRoom, int(errCode), errMsg)
 		}
 	}
 	if configured.JSEP == nil {
+		session.Close()
 		return fmt.Errorf("%w: publish response missing JSEP answer", call.ErrCannotJoinRoom)
 	}
 	l.Infof("configured, got JSEP answer")
@@ -232,15 +243,16 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		Type: webrtc.SDPTypeAnswer,
 		SDP:  configured.JSEP.SDP,
 	}); err != nil {
+		session.Close()
 		return fmt.Errorf("%w: SetRemoteDescription: %v", call.ErrCannotJoinRoom, err)
 	}
 
 	go ivf.LoopIntoTrack(l, track, p.cameras.NewSource())
 
-	select {
-	case <-ctx.Done():
-	case <-done:
-	}
+	p.mu.Lock()
+	p.sessions = append(p.sessions, session)
+	p.mu.Unlock()
+
 	return nil
 }
 
@@ -252,11 +264,11 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	l.Infof("session created: %d", sessionID)
 
 	session := janus.NewSession(ctx, p.client, sessionID, l)
-	defer session.Close()
 
 	// Attach a publisher handle just to discover active publishers.
 	pubHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: attach pub handle: %v", call.ErrCannotJoinRoom, err)
 	}
 
@@ -267,14 +279,17 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 		"display": userID + "-discovery",
 	}, nil)
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: publisher join: %v", call.ErrCannotJoinRoom, err)
 	}
 	if joined.PluginData == nil || joined.PluginData.Data["videoroom"] != "joined" {
+		session.Close()
 		return fmt.Errorf("%w: unexpected publisher join response", call.ErrCannotJoinRoom)
 	}
 
 	pubs, _ := joined.PluginData.Data["publishers"].([]any)
 	if len(pubs) == 0 {
+		session.Close()
 		return fmt.Errorf("%w: no publishers in room %d", call.ErrCannotJoinRoom, roomID)
 	}
 	streams := make([]map[string]any, 0, len(pubs))
@@ -288,12 +303,14 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 		}
 	}
 	if len(streams) == 0 {
+		session.Close()
 		return fmt.Errorf("%w: could not extract publisher IDs", call.ErrCannotJoinRoom)
 	}
 	l.Infof("found %d publisher(s), subscribing", len(streams))
 
 	subHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: attach sub handle: %v", call.ErrCannotJoinRoom, err)
 	}
 
@@ -304,15 +321,18 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 		"streams": streams,
 	}, nil)
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: subscriber join: %v", call.ErrCannotJoinRoom, err)
 	}
 	if attached.JSEP == nil {
+		session.Close()
 		return fmt.Errorf("%w: subscriber join response missing JSEP offer", call.ErrCannotJoinRoom)
 	}
 	l.Infof("attached, got JSEP offer from Janus")
 
 	pc, answerSDP, err := janus.StartPionSubscriber(l, p.clientIP, attached.JSEP.SDP)
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: pion subscriber: %v", call.ErrCannotJoinRoom, err)
 	}
 
@@ -342,31 +362,26 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 		}
 	})
 
-	done := make(chan struct{})
-	var once sync.Once
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		l.Infof("[pion] ConnectionState: %s", s)
-		if s == webrtc.PeerConnectionStateFailed ||
-			s == webrtc.PeerConnectionStateDisconnected ||
-			s == webrtc.PeerConnectionStateClosed {
-			once.Do(func() { close(done) })
-		}
 	})
 
 	started, err := session.Send(subHandleID, map[string]any{
 		"request": "start",
 	}, &janus.JSEP{Type: "answer", SDP: answerSDP})
 	if err != nil {
+		session.Close()
 		return fmt.Errorf("%w: start: %v", call.ErrCannotJoinRoom, err)
 	}
 	if started.PluginData == nil {
+		session.Close()
 		return fmt.Errorf("%w: unexpected start response", call.ErrCannotJoinRoom)
 	}
 	l.Infof("started, streaming")
 
-	select {
-	case <-ctx.Done():
-	case <-done:
-	}
+	p.mu.Lock()
+	p.sessions = append(p.sessions, session)
+	p.mu.Unlock()
+
 	return nil
 }

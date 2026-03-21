@@ -129,19 +129,12 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
 
-	done := make(chan struct{})
-	var once sync.Once
-
 	room, err := lksdk.ConnectToRoom(p.wsURL, lksdk.ConnectInfo{
 		APIKey:              p.apiKey,
 		APISecret:           p.apiSecret,
 		RoomName:            roomID,
 		ParticipantIdentity: userID,
-	}, &lksdk.RoomCallback{
-		OnDisconnected: func() {
-			once.Do(func() { close(done) })
-		},
-	})
+	}, &lksdk.RoomCallback{})
 	if err != nil {
 		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
 	}
@@ -172,17 +165,10 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 
 	go ivf.LoopIntoTrack(l, track, p.cameras.NewSource())
 
-	select {
-	case <-ctx.Done():
-	case <-done:
-	}
 	return nil
 }
 
 func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID string) error {
-	done := make(chan struct{})
-	var once sync.Once
-
 	room, err := lksdk.ConnectToRoom(p.wsURL, lksdk.ConnectInfo{
 		APIKey:              p.apiKey,
 		APISecret:           p.apiSecret,
@@ -216,9 +202,6 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 				}
 			},
 		},
-		OnDisconnected: func() {
-			once.Do(func() { close(done) })
-		},
 	})
 	if err != nil {
 		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
@@ -229,9 +212,5 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 	p.rooms = append(p.rooms, room)
 	p.mu.Unlock()
 
-	select {
-	case <-ctx.Done():
-	case <-done:
-	}
 	return nil
 }
