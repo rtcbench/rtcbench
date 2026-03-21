@@ -15,8 +15,6 @@ rsync:
     - "__pycache__/"
     - "e2e/screenshots/*/"
     - "/call.zip"
-    - "/cztest-client"
-    - "/cztest-server"
     - ".idea/"
     - ".vscode/"
     - "*.exe"

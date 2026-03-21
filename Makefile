@@ -2,7 +2,7 @@
 	e2e e2e-janus e2e-jitsi e2e-livekit e2e-mediasoup screenshots \
 	_build-all _build-e2e-runner _build-janus _build-jitsi _build-livekit _build-mediasoup \
 	_e2e-run remote-ci remote-run remote-seed remote-status remote-clean remote-estimate \
-	ci cztest-client cztest-server cztest-payload-zip
+	ci
 
 VERSION := $(shell git describe --tags --always --dirty)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -12,22 +12,6 @@ all:
 
 install:
 	go install -v $(LDFLAGS) ./cmd/call.zip
-
-cztest-client:
-	go build -v ./cmd/cztest-client
-
-cztest-server:
-	go build -v ./cmd/cztest-server
-
-cztest-payload:
-	@test -f cztest-config.yml || (echo "missing ./cztest-config.yml" && exit 1)
-	rm -rf target/cztest-build target/cztest-payload.zip
-	mkdir -p target/cztest-build
-	GOOS=darwin GOARCH=arm64 go build -v $(LDFLAGS) -o target/cztest-build/cztest-binary-os_darwin-arch_arm64 ./cmd/call.zip
-	GOOS=linux  GOARCH=amd64 go build -v $(LDFLAGS) -o target/cztest-build/cztest-binary-os_linux-arch_amd64  ./cmd/call.zip
-	cp -f cztest-config.yml target/cztest-build/config.yml
-	cd target/cztest-build && zip -9 -r ../cztest-payload.zip config.yml cztest-binary-os_darwin-arch_arm64 cztest-binary-os_linux-arch_amd64
-	@echo "*** DONE ***\nPlease upload ./target/cztest-payload.zip to the cztest server."
 
 test:
 	go vet ./...
@@ -151,8 +135,7 @@ clean-screenshots:
 	rm -rf e2e/screenshots/*/
 
 clean:
-	rm -f call.zip call.zip.exe cztest-client cztest-client.exe cztest-server cztest-server.exe
-	rm -rf target/cztest-build target/cztest-payload.zip
+	rm -f call.zip call.zip.exe
 	go clean -cache
 	go clean -testcache
 	go clean -modcache
