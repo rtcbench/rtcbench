@@ -19,24 +19,28 @@ JANUS_SCENARIOS = [
     ("smoke.yml",      1, 120),
     ("smoke-1s3v.yml", 3, 120),
     ("smoke-2s3v.yml", 6, 120),
+    ("smoke-2s2v-serial.yml", 2, 90),
 ]
 
 JITSI_SCENARIOS = [
     ("smoke.yml",      1, 300),
     ("smoke-1s3v.yml", 3, 300),
     ("smoke-2s3v.yml", 6, 300),
+    ("smoke-2s2v-serial.yml", 2, 90),
 ]
 
 LIVEKIT_SCENARIOS = [
     ("smoke.yml",      1, 120),
     ("smoke-1s3v.yml", 3, 120),
     ("smoke-2s3v.yml", 6, 300),
+    ("smoke-2s2v-serial.yml", 2, 90),
 ]
 
 MEDIASOUP_SCENARIOS = [
     ("smoke.yml",      1, 120),
     ("smoke-1s3v.yml", 3, 120),
     ("smoke-2s3v.yml", 6, 120),
+    ("smoke-2s2v-serial.yml", 2, 90),
 ]
 
 

@@ -47,6 +47,9 @@ type Plugin struct {
 
 	routerCaps ms.RtpCapabilities
 	vp9PT      uint8 // VP9 payload type from router capabilities
+
+	mu      sync.Mutex
+	protoos []*ms.Protoo
 }
 
 // NewPlugin returns a zero-initialized mediasoup plugin.
@@ -137,6 +140,15 @@ func (p *Plugin) probeRouterCapabilities(ctx context.Context) (ms.RtpCapabilitie
 }
 
 func (p *Plugin) Shutdown(ctx context.Context) error {
+	p.mu.Lock()
+	protoos := p.protoos
+	p.protoos = nil
+	p.mu.Unlock()
+
+	for _, pr := range protoos {
+		pr.Close()
+	}
+
 	p.viewerManager.StopAll()
 	p.publisher.Stop()
 	return nil
@@ -170,16 +182,17 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	if err != nil {
 		return fmt.Errorf("%w: protoo: %v", call.ErrCannotJoinRoom, err)
 	}
-	defer protoo.Close()
 	l.Infof("protoo connected")
 
 	// 2. Get router RTP capabilities.
 	capsData, err := protoo.Request("getRouterRtpCapabilities", nil)
 	if err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: getRouterRtpCapabilities: %v", call.ErrCannotJoinRoom, err)
 	}
 	var caps ms.RtpCapabilities
 	if err := json.Unmarshal(capsData, &caps); err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: unmarshal caps: %v", call.ErrCannotJoinRoom, err)
 	}
 
@@ -188,10 +201,12 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		"producing": true, "consuming": false,
 	})
 	if err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: createWebRtcTransport: %v", call.ErrCannotJoinRoom, err)
 	}
 	var transport ms.TransportOptions
 	if err := json.Unmarshal(transportData, &transport); err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: unmarshal transport: %v", call.ErrCannotJoinRoom, err)
 	}
 	l.Infof("send transport created: %s", transport.ID)
@@ -203,6 +218,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		"device":          map[string]any{"name": "CallZIP", "flag": "go"},
 	})
 	if err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: join: %v", call.ErrCannotJoinRoom, err)
 	}
 	l.Infof("joined room %s", roomID)
@@ -210,18 +226,12 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	// 5. Create pion PeerConnection with VP9 send track.
 	pc, track, offerSDP, err := ms.StartSendPC(l, p.clientIP, p.vp9PT)
 	if err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: pion send: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	done := make(chan struct{})
-	var once sync.Once
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		l.Infof("[pion] ConnectionState: %s", s)
-		if s == webrtc.PeerConnectionStateFailed ||
-			s == webrtc.PeerConnectionStateDisconnected ||
-			s == webrtc.PeerConnectionStateClosed {
-			once.Do(func() { close(done) })
-		}
 	})
 
 	// 6. Build fake SDP answer from mediasoup transport params.
@@ -230,6 +240,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		Type: webrtc.SDPTypeAnswer,
 		SDP:  answerSDP,
 	}); err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: SetRemoteDescription: %v", call.ErrCannotJoinRoom, err)
 	}
 	l.Infof("remote description set (fake answer)")
@@ -244,6 +255,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		},
 	})
 	if err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: connectWebRtcTransport: %v", call.ErrCannotJoinRoom, err)
 	}
 	l.Infof("transport connected")
@@ -257,6 +269,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		"appData":       map[string]any{"source": "webcam"},
 	})
 	if err != nil {
+		protoo.Close()
 		return fmt.Errorf("%w: produce: %v", call.ErrCannotJoinRoom, err)
 	}
 	var result ms.ProduceResult
@@ -266,10 +279,10 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	// 9. Start streaming IVF frames.
 	go ivf.LoopIntoTrack(l, track, p.cameras.NewSource())
 
-	select {
-	case <-ctx.Done():
-	case <-done:
-	}
+	p.mu.Lock()
+	p.protoos = append(p.protoos, protoo)
+	p.mu.Unlock()
+
 	return nil
 }
 
@@ -353,12 +366,12 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 	if err != nil {
 		return fmt.Errorf("%w: protoo: %v", call.ErrCannotJoinRoom, err)
 	}
-	defer protooClient.Close()
 	l.Infof("protoo connected")
 
 	// 2. Get router capabilities.
 	capsData, err := protooClient.Request("getRouterRtpCapabilities", nil)
 	if err != nil {
+		protooClient.Close()
 		return fmt.Errorf("%w: getRouterRtpCapabilities: %v", call.ErrCannotJoinRoom, err)
 	}
 	var caps ms.RtpCapabilities
@@ -369,6 +382,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		"producing": false, "consuming": true,
 	})
 	if err != nil {
+		protooClient.Close()
 		return fmt.Errorf("%w: createWebRtcTransport: %v", call.ErrCannotJoinRoom, err)
 	}
 	json.Unmarshal(transportData, &transport)
@@ -377,6 +391,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 	// 4. Create recv PeerConnection.
 	recvPC, err = ms.StartRecvPC(l, p.clientIP, p.vp9PT)
 	if err != nil {
+		protooClient.Close()
 		return fmt.Errorf("%w: pion recv: %v", call.ErrCannotJoinRoom, err)
 	}
 
@@ -407,15 +422,8 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		}
 	})
 
-	done := make(chan struct{})
-	var once sync.Once
 	recvPC.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		l.Infof("[pion] ConnectionState: %s", s)
-		if s == webrtc.PeerConnectionStateFailed ||
-			s == webrtc.PeerConnectionStateDisconnected ||
-			s == webrtc.PeerConnectionStateClosed {
-			once.Do(func() { close(done) })
-		}
 	})
 
 	// 6. Join room — triggers newConsumer requests for existing producers.
@@ -425,13 +433,14 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		"device":          map[string]any{"name": "CallZIP", "flag": "go"},
 	})
 	if err != nil {
+		protooClient.Close()
 		return fmt.Errorf("%w: join: %v", call.ErrCannotJoinRoom, err)
 	}
 	l.Infof("joined room %s", roomID)
 
-	select {
-	case <-ctx.Done():
-	case <-done:
-	}
+	p.mu.Lock()
+	p.protoos = append(p.protoos, protooClient)
+	p.mu.Unlock()
+
 	return nil
 }
