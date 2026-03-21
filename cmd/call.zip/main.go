@@ -8,6 +8,7 @@ import (
 	stdlog "log"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"syscall"
 	"time"
 
@@ -36,6 +37,7 @@ func main() {
 		sigtermCancel, shutdownCancel context.CancelFunc
 	)
 
+	cpuprofile := flag.String("cpuprofile", "", "Write CPU profile to file")
 	startAt := flag.Int64("start-at", 0, "Unix timestamp to wait until before joining rooms")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
@@ -43,6 +45,20 @@ func main() {
 	if *showVersion {
 		fmt.Println(version)
 		os.Exit(0)
+	}
+
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			stdlog.Fatalf("Failed to create CPU profile: %v", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			stdlog.Fatalf("Failed to start CPU profile: %v", err)
+		}
+		defer func() {
+			pprof.StopCPUProfile()
+			f.Close()
+		}()
 	}
 
 	if flag.NArg() != 1 {
