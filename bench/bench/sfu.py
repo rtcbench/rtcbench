@@ -5,6 +5,7 @@ import logging
 from bench.config import (
     SFUS, SFU_CONTAINER_NAME, WEB_CONTAINER_NAME, JITSI_IMAGE_TAG,
     CALLZIP_SENDER_CONTAINER, CALLZIP_VIEWER_CONTAINER, WRP_CONTAINER_NAME,
+    data_ip,
 )
 
 log = logging.getLogger("bench")
@@ -45,14 +46,19 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
                 "callzip-livekit-web:latest", timeout=30)
     elif sfu_name == "mediasoup":
         ws_port = cluster.get("mediasoup_ws_port", 4443) if cluster else 4443
+        announced = data_ip(cluster, sfu_host) if cluster else sfu_host
         ssh.run(sfu_host,
                 f"docker run -d --name {SFU_CONTAINER_NAME} --network host "
                 "--ulimit nofile=65536:65536 "
-                f"-e ANNOUNCED_IP={sfu_host} "
+                f"-e DOMAIN={announced} "
+                f"-e MEDIASOUP_ANNOUNCED_ADDRESS={announced} "
                 "callzip-mediasoup:latest", timeout=60)
         ssh.run(sfu_host,
-                f"for i in $(seq 30); do curl -sf http://localhost:{ws_port}/health >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1",
-                timeout=60)
+                f"for i in $(seq 60); do curl -kso /dev/null https://localhost:{ws_port}/ 2>&1 && exit 0; sleep 1; done; exit 1",
+                timeout=90)
+        ssh.run(sfu_host,
+                f"docker run -d --name {WEB_CONTAINER_NAME} --network host "
+                "callzip-mediasoup-web:latest", timeout=30)
     log.info("SFU %s is up on %s", sfu_name, sfu_host)
 
 
@@ -150,7 +156,7 @@ def _start_jitsi(ssh, cluster):
         f"-e XMPP_PORT=5222 "
         f"-e JVB_AUTH_USER=jvb "
         f"-e JVB_AUTH_PASSWORD=jvbsecret "
-        f"-e JVB_ADVERTISE_IPS={jvb_ip} "
+        f"-e JVB_ADVERTISE_IPS={data_ip(cluster, jvb_ip)} "
         f"-e JVB_PORT=10000 "
         f"-e JVB_TCP_HARVESTER_DISABLED=true "
         f"-e TZ=UTC"

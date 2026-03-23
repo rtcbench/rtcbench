@@ -2,8 +2,11 @@ package internal
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,8 +65,26 @@ func NewProtoo(
 	onReq RequestHandler,
 	onNotify NotificationHandler,
 ) (*Protoo, error) {
+	// mediasoup-demo validates the Origin header against its configured domain.
+	// Derive the origin from the WebSocket URL so the check passes.
+	parsed, parseErr := url.Parse(wsURL)
+	if parseErr != nil {
+		return nil, fmt.Errorf("protoo parse %s: %w", wsURL, parseErr)
+	}
+	scheme := "https"
+	if parsed.Scheme == "ws" {
+		scheme = "http"
+	}
+	origin := fmt.Sprintf("%s://%s", scheme, parsed.Host)
+
 	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
 		Subprotocols: []string{"protoo"},
+		HTTPHeader:   http.Header{"Origin": {origin}},
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("protoo dial %s: %w", wsURL, err)

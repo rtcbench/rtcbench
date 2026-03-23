@@ -118,15 +118,22 @@ func BuildRecvOfferSDP(transport TransportOptions, consumers []ConsumerData, sdp
 			}
 		}
 
-		// SSRC.
+		// SSRC and optional RTX SSRC group.
 		if len(consumer.RtpParameters.Encodings) > 0 && consumer.RtpParameters.Encodings[0].SSRC != nil {
-			ssrc := *consumer.RtpParameters.Encodings[0].SSRC
+			enc := consumer.RtpParameters.Encodings[0]
+			ssrc := *enc.SSRC
 			cname := "mediasoup"
 			if consumer.RtpParameters.Rtcp != nil && consumer.RtpParameters.Rtcp.CNAME != "" {
 				cname = consumer.RtpParameters.Rtcp.CNAME
 			}
 			sb.WriteString(fmt.Sprintf("a=ssrc:%d cname:%s\r\n", ssrc, cname))
 			sb.WriteString(fmt.Sprintf("a=ssrc:%d msid:mediasoup mediasoup\r\n", ssrc))
+			if enc.RTX != nil {
+				rtxSSRC := enc.RTX.SSRC
+				sb.WriteString(fmt.Sprintf("a=ssrc:%d cname:%s\r\n", rtxSSRC, cname))
+				sb.WriteString(fmt.Sprintf("a=ssrc:%d msid:mediasoup mediasoup\r\n", rtxSSRC))
+				sb.WriteString(fmt.Sprintf("a=ssrc-group:FID %d %d\r\n", ssrc, rtxSSRC))
+			}
 		}
 
 		// Candidates only in first section (shared via BUNDLE).

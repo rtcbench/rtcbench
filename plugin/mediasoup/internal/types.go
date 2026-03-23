@@ -37,7 +37,7 @@ type RtpHeaderExtension struct {
 
 // TransportOptions are returned by createWebRtcTransport.
 type TransportOptions struct {
-	ID             string         `json:"id"`
+	ID             string         `json:"transportId"`
 	IceParameters  IceParameters  `json:"iceParameters"`
 	IceCandidates  []IceCandidate `json:"iceCandidates"`
 	DtlsParameters DtlsParameters `json:"dtlsParameters"`
@@ -110,10 +110,16 @@ type RtpHeaderExtParam struct {
 
 // RtpEncoding describes one encoding layer (single or SVC).
 type RtpEncoding struct {
-	SSRC            *uint32 `json:"ssrc,omitempty"`
-	Rid             string  `json:"rid,omitempty"`
-	ScalabilityMode string  `json:"scalabilityMode,omitempty"`
-	Dtx             bool    `json:"dtx,omitempty"`
+	SSRC            *uint32     `json:"ssrc,omitempty"`
+	RTX             *RtxMapping `json:"rtx,omitempty"`
+	Rid             string      `json:"rid,omitempty"`
+	ScalabilityMode string      `json:"scalabilityMode,omitempty"`
+	Dtx             bool        `json:"dtx,omitempty"`
+}
+
+// RtxMapping holds the RTX SSRC paired with a media encoding.
+type RtxMapping struct {
+	SSRC uint32 `json:"ssrc"`
 }
 
 // RtcpParameters describes RTCP behaviour for a producer/consumer.
@@ -127,7 +133,7 @@ type RtcpParameters struct {
 type ConsumerData struct {
 	PeerID         string         `json:"peerId"`
 	ProducerID     string         `json:"producerId"`
-	ID             string         `json:"id"`
+	ID             string         `json:"consumerId"`
 	Kind           string         `json:"kind"`
 	RtpParameters  RtpParameters  `json:"rtpParameters"`
 	Type           string         `json:"type"`
@@ -137,7 +143,7 @@ type ConsumerData struct {
 
 // ProduceResult is returned by the "produce" request.
 type ProduceResult struct {
-	ID string `json:"id"`
+	ID string `json:"producerId"`
 }
 
 // JoinResult is returned by the "join" request.
@@ -147,6 +153,6 @@ type JoinResult struct {
 
 // PeerInfo describes one peer in a room.
 type PeerInfo struct {
-	ID          string `json:"id"`
+	ID          string `json:"peerId"`
 	DisplayName string `json:"displayName"`
 }

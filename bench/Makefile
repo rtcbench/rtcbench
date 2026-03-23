@@ -21,6 +21,7 @@ build:
 build-web:
 	docker build -t callzip-janus-web:latest docker/janus-web
 	docker build -t callzip-livekit-web:latest docker/livekit-web
+	docker build -t callzip-mediasoup-web:latest docker/mediasoup-web
 
 build-callzip:
 	cd $(REPO_ROOT) && docker build -t callzip:latest .

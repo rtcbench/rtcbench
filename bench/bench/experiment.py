@@ -11,7 +11,7 @@ from bench.config import (
     VIEWERS_PER_ROOM, WARMUP_S, EXPERIMENT_DURATION_S, TEARDOWN_WAIT_S,
     REMOTE_STATS_DIR, REMOTE_LOG_DIR, REMOTE_IVF_DIR,
     CALLZIP_IMAGE, CALLZIP_SENDER_CONTAINER, CALLZIP_VIEWER_CONTAINER,
-    WRP_IMAGE, WRP_CONTAINER_NAME, SFU_CONTAINER_NAME,
+    WRP_IMAGE, WRP_CONTAINER_NAME, SFU_CONTAINER_NAME, data_ip,
     MIN_BITRATE_BPS, MIN_FPS,
     SENDER_CONFIG, VIEWER_CONFIGS,
     log,
@@ -35,7 +35,7 @@ class Experiment:
 
         if sfu_name == "jitsi":
             jitsi_cfg = cluster["jitsi"]
-            self.sfu_ip = jitsi_cfg["prosody_web"]
+            self.sfu_ip = data_ip(cluster, jitsi_cfg["prosody_web"])
             jitsi_hosts = {jitsi_cfg["jvb"], jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]}
             self.receiver_ips = [r for r in cluster["receivers"] if r not in jitsi_hosts]
             if not self.receiver_ips:
@@ -43,7 +43,7 @@ class Experiment:
             log.info("Jitsi: serverIP=%s, receivers=%s (excluded %s)",
                      self.sfu_ip, self.receiver_ips, jitsi_hosts)
         else:
-            self.sfu_ip = cluster["sfu"][0]
+            self.sfu_ip = data_ip(cluster, cluster["sfu"][0])
             self.receiver_ips = cluster["receivers"]
 
         # Multi-room
@@ -151,7 +151,7 @@ class Experiment:
     def _prepare_dirs(self):
         for host in [self.sender_ip] + self.receiver_ips:
             self.ssh.run(host, f"mkdir -p {REMOTE_STATS_DIR} {REMOTE_LOG_DIR}", timeout=60)
-            self.ssh.run(host, f"rm -f {REMOTE_STATS_DIR}/*.jsonl {REMOTE_STATS_DIR}/*.csv", timeout=60)
+            self.ssh.run(host, f"rm -f {REMOTE_STATS_DIR}/*.jsonl {REMOTE_STATS_DIR}/*.csv 2>/dev/null || true", timeout=60)
 
     def _create_janus_rooms(self):
         """Create Janus videoroom rooms 1234..1234+N-1 via HTTP API.
@@ -373,8 +373,13 @@ module.exports = function({{sessions, id, params}}) {{
                     f"?ws=ws://{sfu_ip}:{ws_port}"
                     f"&room={room_name}&key=devkey&secret=secret")
         elif self.sfu_name == "mediasoup":
-            raise ValueError("mediasoup does not have a web frontend yet; "
-                             "use --clients callzip for mediasoup benchmarks")
+            web_port = self.cluster.get("mediasoup_web_port", 8080)
+            return (f"https://{sfu_ip}:{web_port}/"
+                    f"?roomId={room_name}"
+                    f"&produce=false&consume=true"
+                    f"&webcam=false&mic=false"
+                    f"&forceVP9=true"
+                    f"&displayName=bench-viewer")
         else:
             raise ValueError(f"Unknown SFU: {self.sfu_name}")
 

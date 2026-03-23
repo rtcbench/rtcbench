@@ -14,7 +14,7 @@ spec:
       concurrency: $env:VIEWERS_PER_ROOM=10
   pluginConfig:
     mediasoup:
-      _serverURL: 'ws://{{spec.network.serverIP}}:4443'
+      _serverURL: 'wss://{{spec.network.serverIP}}:4443'
   network:
     serverIP: $env:SERVER_IP
   metrics:

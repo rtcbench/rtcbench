@@ -37,7 +37,7 @@ spec:
       apiKey: devkey
       apiSecret: secret
     mediasoup:
-      _serverURL: 'ws://{{spec.network.serverIP}}:4443'
+      _serverURL: 'wss://{{spec.network.serverIP}}:4443'
   logging:
     console: true
     directory: /var/log/call-zip
