@@ -113,3 +113,8 @@ def load_cluster_config(path):
         cfg.WARMUP_S = int(data["warmup_seconds"])
 
     return data
+
+
+def data_ip(cluster, ssh_ip):
+    """Return the data-plane IP for a given SSH IP, if mapped."""
+    return cluster.get("data_ips", {}).get(ssh_ip, ssh_ip)

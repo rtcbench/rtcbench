@@ -14,6 +14,13 @@ sfu:
 receivers:
   - 192.168.10.134
 
+# Optional: map SSH IPs to data-plane IPs for split-network clusters.
+# Bench SSHes to the main IPs; containers use data IPs for traffic.
+# data_ips:
+#   192.168.10.11: 10.0.0.11
+#   192.168.10.39: 10.0.0.39
+#   192.168.10.134: 10.0.0.134
+
 # Jitsi distributed topology (3 separate hosts)
 # When running Jitsi, these machines are reserved for SFU components
 # and excluded from the receiver pool automatically.
