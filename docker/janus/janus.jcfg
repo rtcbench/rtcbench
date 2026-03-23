@@ -12,7 +12,8 @@ general: {
 	session_timeout = 60
 	candidates_timeout = 45
 	no_webrtc_encryption = false
-	ignore_unreachable_ice_server = true
+
+	event_loops = 8
 }
 
 media: {
@@ -28,4 +29,5 @@ nat: {
 	# Works well with Pion (full-ICE) clients in a Docker network.
 	ice_lite = true
 	ignore_mdns = true
+	ignore_unreachable_ice_server = true
 }

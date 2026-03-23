@@ -1,7 +1,8 @@
 general: {
-	videocodec = "vp9"
 }
 
+# Pre-configured for e2e tests and single-room bench runs. Multi-room bench
+# runs create additional rooms (1235+) via the HTTP API in experiment.py.
 room-1234: {
 	description = "Demo Room"
 	secret = "adminpwd"
@@ -11,4 +12,6 @@ room-1234: {
 	fir_freq = 10
 	videocodec = "vp9"
 	record = false
+
+	threads = 4
 }

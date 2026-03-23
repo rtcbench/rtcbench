@@ -183,6 +183,7 @@ class Experiment:
                 "request": "create", "room": room_id, "publishers": 4096,
                 "bitrate": 4000000, "bitrate_cap": True,
                 "videocodec": "vp9", "fir_freq": 10, "permanent": False,
+                "threads": 4,
             })
             self.ssh.run(sfu_host,
                 f"curl -s -X POST {api}/{session_id}/{handle_id} "
