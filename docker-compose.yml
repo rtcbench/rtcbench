@@ -195,13 +195,14 @@ services:
       context: docker/mediasoup
     image: callzip-mediasoup:latest
     environment:
-      - ANNOUNCED_IP=172.23.0.10
+      - DOMAIN=172.23.0.10
+      - MEDIASOUP_ANNOUNCED_ADDRESS=172.23.0.10
     networks:
       callzip-mediasoup-net:
         ipv4_address: 172.23.0.10
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:4443/health"]
+      test: ["CMD-SHELL", "curl -kso /dev/null https://localhost:4443/ || exit 1"]
       interval: 5s
       timeout: 5s
-      start_period: 30s
-      retries: 12
+      start_period: 60s
+      retries: 24

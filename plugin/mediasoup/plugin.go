@@ -118,6 +118,19 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	return nil
 }
 
+// unmarshalRouterCaps extracts RtpCapabilities from the mediasoup-demo
+// getRouterRtpCapabilities response, which wraps them in
+// {"routerRtpCapabilities": {...}}.
+func unmarshalRouterCaps(data json.RawMessage) (ms.RtpCapabilities, error) {
+	var wrapper struct {
+		RouterRtpCapabilities ms.RtpCapabilities `json:"routerRtpCapabilities"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return ms.RtpCapabilities{}, fmt.Errorf("unmarshal capabilities: %w", err)
+	}
+	return wrapper.RouterRtpCapabilities, nil
+}
+
 // probeRouterCapabilities connects briefly to discover what codecs the
 // mediasoup router supports.
 func (p *Plugin) probeRouterCapabilities(ctx context.Context) (ms.RtpCapabilities, error) {
@@ -132,11 +145,7 @@ func (p *Plugin) probeRouterCapabilities(ctx context.Context) (ms.RtpCapabilitie
 	if err != nil {
 		return ms.RtpCapabilities{}, err
 	}
-	var caps ms.RtpCapabilities
-	if err := json.Unmarshal(data, &caps); err != nil {
-		return ms.RtpCapabilities{}, fmt.Errorf("unmarshal capabilities: %w", err)
-	}
-	return caps, nil
+	return unmarshalRouterCaps(data)
 }
 
 func (p *Plugin) Shutdown(ctx context.Context) error {
@@ -149,8 +158,12 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 		pr.Close()
 	}
 
-	p.viewerManager.StopAll()
-	p.publisher.Stop()
+	if p.viewerManager != nil {
+		p.viewerManager.StopAll()
+	}
+	if p.publisher != nil {
+		p.publisher.Stop()
+	}
 	return nil
 }
 
@@ -190,15 +203,16 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		protoo.Close()
 		return fmt.Errorf("%w: getRouterRtpCapabilities: %v", call.ErrCannotJoinRoom, err)
 	}
-	var caps ms.RtpCapabilities
-	if err := json.Unmarshal(capsData, &caps); err != nil {
+	caps, err := unmarshalRouterCaps(capsData)
+	if err != nil {
 		protoo.Close()
-		return fmt.Errorf("%w: unmarshal caps: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: %v", call.ErrCannotJoinRoom, err)
 	}
 
 	// 3. Create send transport.
 	transportData, err := protoo.Request("createWebRtcTransport", map[string]any{
-		"producing": true, "consuming": false,
+		"forceTcp": false,
+		"appData":  map[string]any{"direction": "producer"},
 	})
 	if err != nil {
 		protoo.Close()
@@ -374,12 +388,16 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		protooClient.Close()
 		return fmt.Errorf("%w: getRouterRtpCapabilities: %v", call.ErrCannotJoinRoom, err)
 	}
-	var caps ms.RtpCapabilities
-	json.Unmarshal(capsData, &caps)
+	caps, capsErr := unmarshalRouterCaps(capsData)
+	if capsErr != nil {
+		protooClient.Close()
+		return fmt.Errorf("%w: %v", call.ErrCannotJoinRoom, capsErr)
+	}
 
 	// 3. Create recv transport.
 	transportData, err := protooClient.Request("createWebRtcTransport", map[string]any{
-		"producing": false, "consuming": true,
+		"forceTcp": false,
+		"appData":  map[string]any{"direction": "consumer"},
 	})
 	if err != nil {
 		protooClient.Close()
