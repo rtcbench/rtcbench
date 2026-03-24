@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"call.zip/pkg/log"
+	"call.zip/pkg/vp9_stats"
 	"github.com/google/uuid"
 )
 
@@ -26,14 +27,38 @@ var (
 )
 
 type Plugin interface {
-	Setup(ctx context.Context, config *Config) error
+	Setup(ctx context.Context, e PluginEnv) error
 	Shutdown(ctx context.Context) error
 	JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error
+}
+
+type PluginEnv interface {
+	Config() *Config
+	LogRegistry() *log.Registry
+	StatsConsumers() []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
 }
 
 type PluginFactory func() Plugin
 
 type PluginRegistry map[string]PluginFactory
+
+type pluginEnv struct {
+	config         *Config
+	logRegistry    *log.Registry
+	statsConsumers []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
+}
+
+func (e *pluginEnv) Config() *Config {
+	return e.config
+}
+
+func (e *pluginEnv) LogRegistry() *log.Registry {
+	return e.logRegistry
+}
+
+func (e *pluginEnv) StatsConsumers() []func(vp9_stats.Period, vp9_stats.VideoQualitySample) {
+	return e.statsConsumers
+}
 
 type joinRoomConfig struct {
 	roomName     string
@@ -61,19 +86,25 @@ type wrappedSignalingError struct {
 }
 
 type Client struct {
-	config   *Config
+	env      *pluginEnv
 	registry PluginRegistry
 	plugin   Plugin
 	log      *log.Logger
 }
 
-func NewClient(config *Config) *Client {
+func NewClient(config *Config, logRegistry *log.Registry) *Client {
 	return &Client{
-		config:   config,
+		env: &pluginEnv{
+			config:      config,
+			logRegistry: logRegistry,
+		},
 		registry: make(PluginRegistry),
-		plugin:   nil,
-		log:      config.Log.NewLogger("general", ""),
+		log:      logRegistry.NewLogger("general", ""),
 	}
+}
+
+func (c *Client) AddStatsConsumer(fn func(vp9_stats.Period, vp9_stats.VideoQualitySample)) {
+	c.env.statsConsumers = append(c.env.statsConsumers, fn)
 }
 
 func (c *Client) RegisterPlugin(pluginID string, factory PluginFactory) {
@@ -101,22 +132,22 @@ func (c *Client) Shutdown(ctx context.Context) error {
 
 func (c *Client) JoinAllRooms(ctx context.Context) error {
 	if c.plugin == nil {
-		factory, exists := c.registry[c.config.Spec.Plugin]
+		factory, exists := c.registry[c.env.config.Spec.Plugin]
 		if !exists {
 			return ErrUnknownPlugin
 		}
 		c.plugin = factory()
-		err := c.plugin.Setup(ctx, c.config)
+		err := c.plugin.Setup(ctx, c.env)
 		if err != nil {
 			return err
 		}
 	}
 	wg := sync.WaitGroup{}
-	for i := 0; i < c.config.Spec.Conference.TotalRooms; i++ {
+	for i := 0; i < c.env.config.Spec.Conference.TotalRooms; i++ {
 		wg.Add(1)
-		fmtRoomName := expandRoomName(c.config.Spec.Conference.Name, i)
+		fmtRoomName := expandRoomName(c.env.config.Spec.Conference.Name, i)
 		go func() {
-			c.log.Infof("joining room %q (%d users)", fmtRoomName, c.config.Spec.Conference.UsersPerRoom)
+			c.log.Infof("joining room %q (%d users)", fmtRoomName, c.env.config.Spec.Conference.UsersPerRoom)
 			c.joinRoomByName(ctx, fmtRoomName)
 			c.log.Infof("finished joining room %q", fmtRoomName)
 			wg.Done()
@@ -154,15 +185,15 @@ func expandRoomName(base string, offset int) string {
 }
 
 func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
-	if c.config.Spec.Conference.JoinPolicy.AlwaysRetryFailedJoins {
-		nUsersRemaining := c.config.Spec.Conference.UsersPerRoom
+	if c.env.config.Spec.Conference.JoinPolicy.AlwaysRetryFailedJoins {
+		nUsersRemaining := c.env.config.Spec.Conference.UsersPerRoom
 		var errs []wrappedSignalingError
 		for {
 			errs = c.joinRoom(ctx, joinRoomConfig{
 				roomName:     roomName,
 				usersPerRoom: nUsersRemaining,
 				signaling: signalingConfig{
-					concurrency: c.config.Spec.Conference.JoinPolicy.Concurrency,
+					concurrency: c.env.config.Spec.Conference.JoinPolicy.Concurrency,
 				},
 			})
 			if len(errs) == 0 {
@@ -170,7 +201,7 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 				break
 			}
 
-			retryDelay := c.config.Spec.Conference.JoinPolicy.JoinStartSpacing
+			retryDelay := c.env.config.Spec.Conference.JoinPolicy.JoinStartSpacing
 			if retryDelay < 1*time.Second {
 				retryDelay = 1 * time.Second
 			}
@@ -186,9 +217,9 @@ func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
 	} else {
 		if errs := c.joinRoom(ctx, joinRoomConfig{
 			roomName:     roomName,
-			usersPerRoom: c.config.Spec.Conference.UsersPerRoom,
+			usersPerRoom: c.env.config.Spec.Conference.UsersPerRoom,
 			signaling: signalingConfig{
-				concurrency: c.config.Spec.Conference.JoinPolicy.Concurrency,
+				concurrency: c.env.config.Spec.Conference.JoinPolicy.Concurrency,
 			},
 		}); errs != nil {
 			c.log.Errorf("%d errors from JoinRoom: %v", len(errs), errs)
@@ -209,8 +240,8 @@ func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSign
 	go func() {
 		defer close(cfgCh)
 
-		spacing := c.config.Spec.Conference.JoinPolicy.JoinStartSpacing
-		senders := c.config.Spec.Conference.Cameras.PerRoom
+		spacing := c.env.config.Spec.Conference.JoinPolicy.JoinStartSpacing
+		senders := c.env.config.Spec.Conference.Cameras.PerRoom
 
 		for i := 0; i < cfg.usersPerRoom; i++ {
 			if i > 0 && spacing > 0 {

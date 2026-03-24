@@ -12,7 +12,7 @@ import (
 	jitsi "call.zip/plugin/jitsi/internal"
 )
 
-const statsInputChanSize = 1 << 20 // TODO: configurable statsInputChanSize
+const PluginID = "jitsi"
 
 type Plugin struct {
 	client             *jitsi.Client
@@ -26,29 +26,29 @@ func NewPlugin() call.Plugin {
 	return &Plugin{}
 }
 
-func (e *Plugin) Setup(_ context.Context, config *call.Config) error {
-	e.client = jitsi.NewClient(config, statsInputChanSize)
-	e.log = config.Log.NewLogger("jitsi", "")
-	e.enableRecording = config.Spec.Conference.Recording.Enabled
-	e.recordingDirectory = config.Spec.Conference.Recording.Directory
+func (p *Plugin) Setup(_ context.Context, e call.PluginEnv) error {
+	p.client = jitsi.NewClient(e)
+	p.log = e.LogRegistry().NewLogger("jitsi", "")
+	p.enableRecording = e.Config().Spec.Conference.Recording.Enabled
+	p.recordingDirectory = e.Config().Spec.Conference.Recording.Directory
 
-	if config.Spec.Conference.Cameras.PerRoom > 0 {
-		cams, err := ivfpkg.NewCameras(config.Spec.Conference.Cameras.Directory, config.Spec.Conference.Cameras.InMemory)
+	if e.Config().Spec.Conference.Cameras.PerRoom > 0 {
+		cams, err := ivfpkg.NewCameras(e.Config().Spec.Conference.Cameras.Directory, e.Config().Spec.Conference.Cameras.InMemory)
 		if err != nil {
 			return errors.Join(call.ErrCannotJoinRoom, err)
 		}
-		e.cameras = cams
+		p.cameras = cams
 	}
 
 	return nil
 }
 
-func (e *Plugin) Shutdown(ctx context.Context) error {
-	e.client.Shutdown() // TODO: pass ctx
+func (p *Plugin) Shutdown(ctx context.Context) error {
+	p.client.Shutdown() // TODO: pass ctx
 	return nil
 }
 
-func (e *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userID string) error {
+func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userID string) error {
 	if role != call.Viewer && role != call.Sender {
 		return call.ErrUnsupportedRole
 	}
@@ -58,23 +58,23 @@ func (e *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 		err error
 	)
 
-	if e.enableRecording {
-		recDir := path.Join(e.recordingDirectory, "/room="+roomID+"/user="+userID)
+	if p.enableRecording {
+		recDir := path.Join(p.recordingDirectory, "/room="+roomID+"/user="+userID)
 		ivf, err = vp9.NewIvfSegmenter(recDir)
 		// TODO: addShutdownHook(func() { ivf.Close() })
 		if err != nil {
 			return errors.Join(call.ErrCannotJoinRoom, err)
 		}
 		ivf.Enable()
-		e.log.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
+		p.log.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
 	}
 
 	var src ivfpkg.FrameSource
-	if role == call.Sender && e.cameras != nil {
-		src = e.cameras.NewSource()
+	if role == call.Sender && p.cameras != nil {
+		src = p.cameras.NewSource()
 	}
 
-	err = e.client.ConnectViewer(roomID, userID, ivf, src) // TODO: pass ctx
+	err = p.client.ConnectViewer(roomID, userID, ivf, src) // TODO: pass ctx
 	if err != nil {
 		return errors.Join(call.ErrCannotJoinRoom, err)
 	}
