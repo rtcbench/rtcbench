@@ -24,17 +24,18 @@ type Client struct {
 	packetCaptureDir string
 }
 
-func NewClient(cfg *call.Config, inputChanSize int64) *Client {
-	input := make(chan vp9_stats.VideoQualitySample, inputChanSize)
+func NewClient(e call.PluginEnv) *Client {
+	cfg := e.Config()
+	input := make(chan vp9_stats.VideoQualitySample, cfg.Spec.Conference.StatsBufferSize)
 
-	statsLog := cfg.Log.NewLogger("video_stats", "")
+	statsLog := e.LogRegistry().NewLogger("video_stats", "")
 	botManager := viewer.NewManager(input, statsLog)
 	publisher := vp9_stats.NewPublisher(input)
 
 	publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
 		statsLog.Infof("bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
-	for _, consumer := range cfg.StatsConsumers {
+	for _, consumer := range e.StatsConsumers() {
 		publisher.AddSubscriber(consumer)
 	}
 
@@ -50,7 +51,7 @@ func NewClient(cfg *call.Config, inputChanSize int64) *Client {
 	return &Client{
 		botManager:       botManager,
 		publisher:        publisher,
-		log:              cfg.Log.NewLogger("jitsi", ""),
+		log:              e.LogRegistry().NewLogger("jitsi", ""),
 		serverIP:         cfg.Spec.Network.ServerIP,
 		clientIP:         cfg.Spec.Network.ClientIP,
 		statsBufferSize:  cfg.Spec.Conference.StatsBufferSize,

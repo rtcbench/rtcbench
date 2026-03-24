@@ -85,9 +85,8 @@ func main() {
 		stdlog.Fatalf("Failed to initialize logging: %v", err)
 	}
 	defer reg.Close()
-	cfg.Log = reg
 
-	mainLog := cfg.Log.NewLogger("general", "")
+	mainLog := reg.NewLogger("general", "")
 
 	if cfg.Spec.Network.ClientIP == "" {
 		detectedClientIP, err = netutil.DetectClientIP(cfg.Spec.Network.ServerIP)
@@ -98,9 +97,15 @@ func main() {
 		cfg.Spec.Network.ClientIP = detectedClientIP
 	}
 
+	client = call.NewClient(cfg, reg)
+	client.RegisterPlugin(jitsi.PluginID, jitsi.NewPlugin)
+	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
+	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
+	client.RegisterPlugin(mediasoup.PluginID, mediasoup.NewPlugin)
+
 	if cfg.Spec.Metrics.Port > 0 {
 		ms := metricsserver.New(cfg.Spec.Metrics.Port)
-		cfg.StatsConsumers = append(cfg.StatsConsumers, ms.Subscriber())
+		client.AddStatsConsumer(ms.Subscriber())
 		metricsCtx, metricsCancel := context.WithCancel(context.Background())
 		defer metricsCancel()
 		go func() {
@@ -117,17 +122,11 @@ func main() {
 		if err != nil {
 			mainLog.Errorf("failed to create JSONL stats writer: %v", err)
 		} else {
-			cfg.StatsConsumers = append(cfg.StatsConsumers, jw.Subscriber())
+			client.AddStatsConsumer(jw.Subscriber())
 			defer jw.Close()
 			mainLog.Infof("[stats-jsonl] writing to %s", cfg.Spec.Metrics.StatsJSONLPath)
 		}
 	}
-
-	client = call.NewClient(cfg)
-	client.RegisterPlugin("jitsi", jitsi.NewPlugin)
-	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
-	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
-	client.RegisterPlugin(mediasoup.PluginID, mediasoup.NewPlugin)
 
 	if *startAt > 0 {
 		waitDuration := time.Until(time.Unix(*startAt, 0))

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"call.zip/pkg/log"
 	"call.zip/pkg/vp9_stats"
 )
 
@@ -54,9 +53,9 @@ var (
 	ErrNegativeJoinPolicyConcurrency = errors.New("invalid spec.conference.joinPolicy.concurrency, must be >= 0")
 	ErrNegativeJoinStartSpacing      = errors.New("invalid spec.conference.joinPolicy.joinStartSpacing, must be >= 0")
 
-	ErrInvalidStatsBufferSize    = errors.New("invalid spec.conference.statsBufferSize integer, must be in range [64..4096]")
-	ErrMissingRecordingDirectory      = errors.New("missing spec.conference.recording.directory pathname")
-	ErrMissingPacketCaptureDirectory  = errors.New("missing spec.conference.packetCapture.directory pathname")
+	ErrInvalidStatsBufferSize        = errors.New("invalid spec.conference.statsBufferSize integer, must be in range [64..4096]")
+	ErrMissingRecordingDirectory     = errors.New("missing spec.conference.recording.directory pathname")
+	ErrMissingPacketCaptureDirectory = errors.New("missing spec.conference.packetCapture.directory pathname")
 
 	ErrMissingServerIP = errors.New("missing spec.network.serverIP address")
 	ErrInvalidServerIP = errors.New("invalid spec.network.serverIP address")
@@ -82,12 +81,10 @@ var (
 )
 
 type Config struct {
-	APIVersion     string
-	Kind           string
-	Metadata       MetadataConfig
-	Spec           SpecConfig
-	StatsConsumers []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
-	Log            *log.Registry
+	APIVersion string
+	Kind       string
+	Metadata   MetadataConfig
+	Spec       SpecConfig
 }
 
 type YAMLConfig struct {

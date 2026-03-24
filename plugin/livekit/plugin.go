@@ -53,28 +53,28 @@ func NewPlugin() call.Plugin {
 	return &Plugin{}
 }
 
-func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
-	cfg := config.Spec.PluginConfig[PluginID].(map[string]any)
+func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
+	cfg := e.Config().Spec.PluginConfig[PluginID].(map[string]any)
 	p.wsURL = cfg[cfgWSURL].(string)
 	p.apiKey = cfg[cfgAPIKey].(string)
 	p.apiSecret = cfg[cfgAPISecret].(string)
 
-	p.log = config.Log.NewLogger("livekit", "")
-	p.logRegistry = config.Log
-	p.enableRecording = config.Spec.Conference.Recording.Enabled
-	p.recordingDirectory = config.Spec.Conference.Recording.Directory
-	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
+	p.log = e.LogRegistry().NewLogger("livekit", "")
+	p.logRegistry = e.LogRegistry()
+	p.enableRecording = e.Config().Spec.Conference.Recording.Enabled
+	p.recordingDirectory = e.Config().Spec.Conference.Recording.Directory
+	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
 
-	if config.Spec.Conference.PacketCapture.Enabled {
+	if e.Config().Spec.Conference.PacketCapture.Enabled {
 		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
-		p.packetCaptureDir = filepath.Join(config.Spec.Conference.PacketCapture.Directory, ts)
+		p.packetCaptureDir = filepath.Join(e.Config().Spec.Conference.PacketCapture.Directory, ts)
 		if err := os.MkdirAll(p.packetCaptureDir, 0o755); err != nil {
 			return fmt.Errorf("livekit: packet capture directory: %w", err)
 		}
 	}
 
-	if config.Spec.Conference.Cameras.PerRoom > 0 {
-		cams, err := ivf.NewCameras(config.Spec.Conference.Cameras.Directory, config.Spec.Conference.Cameras.InMemory)
+	if e.Config().Spec.Conference.Cameras.PerRoom > 0 {
+		cams, err := ivf.NewCameras(e.Config().Spec.Conference.Cameras.Directory, e.Config().Spec.Conference.Cameras.InMemory)
 		if err != nil {
 			return fmt.Errorf("livekit: %w", err)
 		}
@@ -82,13 +82,13 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	}
 
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
-	statsLog := config.Log.NewLogger("video_stats", "")
+	statsLog := e.LogRegistry().NewLogger("video_stats", "")
 	p.viewerManager = viewer.NewManager(statsInput, statsLog)
 	p.publisher = vp9_stats.NewPublisher(statsInput)
 	p.publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
 		statsLog.Infof("bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
-	for _, consumer := range config.StatsConsumers {
+	for _, consumer := range e.StatsConsumers() {
 		p.publisher.AddSubscriber(consumer)
 	}
 	go p.publisher.Run()

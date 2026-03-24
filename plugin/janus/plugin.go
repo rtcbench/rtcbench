@@ -57,9 +57,9 @@ func NewPlugin() call.Plugin {
 	return &Plugin{}
 }
 
-func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
-	baseURL := config.Spec.PluginConfig[PluginID].(map[string]any)[cfgServerRoot].(string)
-	allowInsecure := config.Spec.PluginConfig[PluginID].(map[string]any)[cfgAllowInsecure].(bool)
+func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
+	baseURL := e.Config().Spec.PluginConfig[PluginID].(map[string]any)[cfgServerRoot].(string)
+	allowInsecure := e.Config().Spec.PluginConfig[PluginID].(map[string]any)[cfgAllowInsecure].(bool)
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if allowInsecure {
@@ -68,8 +68,8 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	httpClient := &http.Client{Transport: transport}
 
 	p.client = janus.NewClient(httpClient, baseURL)
-	p.log = config.Log.NewLogger("janus", "")
-	p.logRegistry = config.Log
+	p.log = e.LogRegistry().NewLogger("janus", "")
+	p.logRegistry = e.LogRegistry()
 
 	info, err := p.client.GetInfo()
 	if err != nil {
@@ -77,28 +77,28 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 	}
 	p.log.Infof("found Janus server: %q; version: %q", info["name"], info["version_string"])
 
-	p.serverIP = config.Spec.Network.ServerIP
-	p.clientIP = config.Spec.Network.ClientIP
-	p.enableRecording = config.Spec.Conference.Recording.Enabled
-	p.recordingDirectory = config.Spec.Conference.Recording.Directory
-	p.statsBufferSize = config.Spec.Conference.StatsBufferSize
+	p.serverIP = e.Config().Spec.Network.ServerIP
+	p.clientIP = e.Config().Spec.Network.ClientIP
+	p.enableRecording = e.Config().Spec.Conference.Recording.Enabled
+	p.recordingDirectory = e.Config().Spec.Conference.Recording.Directory
+	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
 
-	if config.Spec.Conference.PacketCapture.Enabled {
+	if e.Config().Spec.Conference.PacketCapture.Enabled {
 		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
-		p.packetCaptureDir = filepath.Join(config.Spec.Conference.PacketCapture.Directory, ts)
+		p.packetCaptureDir = filepath.Join(e.Config().Spec.Conference.PacketCapture.Directory, ts)
 		if err := os.MkdirAll(p.packetCaptureDir, 0o755); err != nil {
 			return fmt.Errorf("janus: packet capture directory: %w", err)
 		}
 	}
 
 	// Validate that the conference name contains a parseable integer for the Janus room ID.
-	if _, err := roomIDFromName(config.Spec.Conference.Name); err != nil {
+	if _, err := roomIDFromName(e.Config().Spec.Conference.Name); err != nil {
 		return err
 	}
 
 	// Load IVF camera files for senders.
-	if config.Spec.Conference.Cameras.PerRoom > 0 {
-		cams, err := ivf.NewCameras(config.Spec.Conference.Cameras.Directory, config.Spec.Conference.Cameras.InMemory)
+	if e.Config().Spec.Conference.Cameras.PerRoom > 0 {
+		cams, err := ivf.NewCameras(e.Config().Spec.Conference.Cameras.Directory, e.Config().Spec.Conference.Cameras.InMemory)
 		if err != nil {
 			return fmt.Errorf("janus: %w", err)
 		}
@@ -107,13 +107,13 @@ func (p *Plugin) Setup(ctx context.Context, config *call.Config) error {
 
 	// Stats pipeline shared across all viewer goroutines.
 	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
-	statsLog := config.Log.NewLogger("video_stats", "")
+	statsLog := e.LogRegistry().NewLogger("video_stats", "")
 	p.viewerManager = viewer.NewManager(statsInput, statsLog)
 	p.publisher = vp9_stats.NewPublisher(statsInput)
 	p.publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
 		statsLog.Infof("bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
 	})
-	for _, consumer := range config.StatsConsumers {
+	for _, consumer := range e.StatsConsumers() {
 		p.publisher.AddSubscriber(consumer)
 	}
 	go p.publisher.Run()
