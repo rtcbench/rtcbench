@@ -15,7 +15,7 @@ import (
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
-	lksdk "github.com/livekit/server-sdk-go"
+	lksdk "github.com/livekit/server-sdk-go/v2"
 	"github.com/pion/webrtc/v3"
 )
 
