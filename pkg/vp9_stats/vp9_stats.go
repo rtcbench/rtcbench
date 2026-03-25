@@ -19,7 +19,22 @@ const (
 
 	fpsEWMAAlpha     = float32(0.9)
 	bitrateEWMAAlpha = fpsEWMAAlpha
+
+	// frameJitterGain is 1/16, matching RFC 3550 jitter EWMA gain but applied per-frame
+	frameJitterGain = 1.0 / 16.0
 )
+
+// pendingFrame accumulates packets for the current in-progress frame
+type pendingFrame struct {
+	rtpTimestamp uint32
+	firstArrival int64
+	lastArrival  int64
+	firstSeqNo   uint16
+	nextSeqNo    uint16 // expected next sequence number (firstSeqNo + packetCount)
+	packetCount  int
+	totalBytes   int
+	complete     bool // false if any sequence gap detected
+}
 
 type FrameStatistics struct {
 	// bufferSize ring buffer capacity
@@ -63,6 +78,41 @@ type FrameStatistics struct {
 
 	// sample contains measurements that reset on successful publish
 	sample SampleData
+
+	// --- frame tracking ---
+
+	// currentFrame accumulates packets for the in-progress frame (nil before first packet)
+	currentFrame *pendingFrame
+
+	// prevFrameFirstArrival first packet arrival time of the previously finalized frame
+	prevFrameFirstArrival int64
+
+	// hasPrevFrame indicates that prevFrameFirstArrival is valid
+	hasPrevFrame bool
+
+	// frameComplete tracks whether each finalized frame (by RTP timestamp) was complete
+	frameComplete map[uint32]bool
+
+	// uniqueCompleteFrames count of complete frames currently in the ring buffer
+	uniqueCompleteFrames int
+
+	// latestDecoderBufferFPS most recent decoder buffer FPS (excludes incomplete frames)
+	latestDecoderBufferFPS float32
+
+	// latestSmoothDecoderFPS EWMA-smoothed decoder FPS
+	latestSmoothDecoderFPS float32
+
+	// lastInterarrivalUS previous frame interarrival delta (microseconds)
+	lastInterarrivalUS int64
+
+	// frameJitterUS EWMA of |interarrival(i) - interarrival(i-1)| in microseconds
+	frameJitterUS float64
+
+	// framesComplete monotonic count of finalized complete frames
+	framesComplete int64
+
+	// framesLost monotonic count of finalized incomplete frames
+	framesLost int64
 }
 
 // SampleData per-sample data which is reset on EndSample()
@@ -78,6 +128,9 @@ type frameInfo struct {
 
 	// rtpTimestamp remote timestamp (all packets of the same frame have the same timestamp)
 	rtpTimestamp uint32
+
+	// seqNo RTP sequence number
+	seqNo uint16
 
 	// nBytes is byte count of the packet used to calculate bitrate (configured by caller of AcceptPacket)
 	nBytes int
@@ -117,6 +170,24 @@ type VideoQualitySample struct {
 	// EstimatedFPS best frame per second value we offer
 	EstimatedFPS int `json:"est_fps"`
 
+	// DecoderSmoothFPS EWMA-smoothed FPS counting only decodable (complete) frames
+	DecoderSmoothFPS float32 `json:"dec_sm_fps"`
+
+	// DecoderBufferFPS buffer-window FPS counting only decodable (complete) frames
+	DecoderBufferFPS float32 `json:"dec_buf_fps"`
+
+	// EstimatedDecoderFPS best decodable frame per second value we offer
+	EstimatedDecoderFPS int `json:"est_dec_fps"`
+
+	// FrameJitterUS EWMA frame interarrival jitter in microseconds
+	FrameJitterUS float64 `json:"frame_jitter_us"`
+
+	// FramesComplete monotonic count of complete frames
+	FramesComplete int64 `json:"frames_complete"`
+
+	// FramesLost monotonic count of incomplete (undecodable) frames
+	FramesLost int64 `json:"frames_lost"`
+
 	// SVC scalable video coding specific measurements
 	SVC SVCData `json:"svc"`
 
@@ -132,13 +203,16 @@ type SVCData struct {
 // NewFrameStatistics creates a FrameStatistics with the given ring buffer capacity.
 func NewFrameStatistics(bufferSize int) *FrameStatistics {
 	return &FrameStatistics{
-		bufferSize: bufferSize,
-		packets:    make([]frameInfo, bufferSize),
+		bufferSize:    bufferSize,
+		packets:       make([]frameInfo, bufferSize),
+		frameComplete: make(map[uint32]bool),
 	}
 }
 
-// AcceptPacket updates the stat tracker with information about the newly arrived VP9 RTP packet
-func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp uint32, nBytes int, payloadDesc *vp9.PayloadDescriptor) {
+// AcceptPacket updates the stat tracker with information about the newly arrived VP9 RTP packet.
+// seqNo is the RTP sequence number used for frame completeness detection.
+// Out-of-order packets (sequence gap within a frame) mark the frame as incomplete.
+func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, seqNo uint16, rtpTimestamp uint32, nBytes int, payloadDesc *vp9.PayloadDescriptor) {
 	spatialID := payloadDesc.SID
 	temporalID := payloadDesc.TID
 
@@ -147,11 +221,16 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 		return
 	}
 
+	// --- frame boundary tracking (before ring buffer logic) ---
+	stats.trackFrame(clientReadTime, seqNo, rtpTimestamp, nBytes)
+
+	// --- ring buffer logic ---
 	evictedPacket := stats.packets[stats.pos]
 
 	stats.packets[stats.pos] = frameInfo{
 		clientReadTime: clientReadTime,
 		rtpTimestamp:   rtpTimestamp,
+		seqNo:          seqNo,
 		nBytes:         nBytes,
 		bufferFPS:      float32(0),
 		bufferBitrate:  float32(0),
@@ -171,6 +250,14 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 	if stats.rtpTimestamps[evictedPacket.rtpTimestamp] == 0 {
 		delete(stats.rtpTimestamps, evictedPacket.rtpTimestamp)
 		stats.uniqueRtpTimestamps--
+
+		// evict frame completeness and update decoder frame count
+		if complete, ok := stats.frameComplete[evictedPacket.rtpTimestamp]; ok {
+			if complete {
+				stats.uniqueCompleteFrames--
+			}
+			delete(stats.frameComplete, evictedPacket.rtpTimestamp)
+		}
 	}
 
 	stats.sumBytes -= int64(evictedPacket.nBytes)
@@ -181,6 +268,11 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 
 	if !frameExists {
 		stats.uniqueRtpTimestamps++
+
+		// if frame was already finalized, count it for decoder FPS
+		if complete, ok := stats.frameComplete[rtpTimestamp]; ok && complete {
+			stats.uniqueCompleteFrames++
+		}
 	}
 
 	elapsedUS := stats.packets[stats.pos].clientReadTime - stats.packets[(stats.pos+1)%stats.bufferSize].clientReadTime
@@ -194,8 +286,12 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 	bufferBitrate := float32(stats.sumBytes*8) / (float32(elapsedUS) / float32(1_000_000))
 	stats.packets[stats.pos].bufferBitrate = bufferBitrate
 
+	decoderBufferFPS := float32(stats.uniqueCompleteFrames) / (float32(elapsedUS) / float32(1_000_000))
+	stats.latestDecoderBufferFPS = decoderBufferFPS
+
 	if !frameExists {
 		stats.latestSmoothFPS = fpsEWMAAlpha*stats.latestSmoothFPS + (1.0-fpsEWMAAlpha)*bufferFPS
+		stats.latestSmoothDecoderFPS = fpsEWMAAlpha*stats.latestSmoothDecoderFPS + (1.0-fpsEWMAAlpha)*decoderBufferFPS
 	}
 
 	stats.latestSmoothBitrate = bitrateEWMAAlpha*stats.latestSmoothBitrate + (1.0-bitrateEWMAAlpha)*bufferBitrate
@@ -208,6 +304,88 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, rtpTimestamp ui
 		stats.sample.FirstPacketClientReadTime = clientReadTime
 	}
 	stats.sample.LastPacketClientReadTime = clientReadTime
+}
+
+// trackFrame handles frame boundary detection and finalization.
+// Must be called before ring buffer insertion so that frameComplete
+// is populated before the new timestamp enters the buffer.
+func (stats *FrameStatistics) trackFrame(clientReadTime int64, seqNo uint16, rtpTimestamp uint32, nBytes int) {
+	if stats.currentFrame == nil {
+		stats.currentFrame = &pendingFrame{
+			rtpTimestamp: rtpTimestamp,
+			firstArrival: clientReadTime,
+			lastArrival:  clientReadTime,
+			firstSeqNo:   seqNo,
+			nextSeqNo:    seqNo + 1,
+			packetCount:  1,
+			totalBytes:   nBytes,
+			complete:     true,
+		}
+		return
+	}
+
+	if rtpTimestamp != stats.currentFrame.rtpTimestamp {
+		// new frame — finalize previous
+		stats.finalizeFrame(stats.currentFrame)
+
+		stats.currentFrame = &pendingFrame{
+			rtpTimestamp: rtpTimestamp,
+			firstArrival: clientReadTime,
+			lastArrival:  clientReadTime,
+			firstSeqNo:   seqNo,
+			nextSeqNo:    seqNo + 1,
+			packetCount:  1,
+			totalBytes:   nBytes,
+			complete:     true,
+		}
+		return
+	}
+
+	// same frame — accumulate
+	if seqNo != stats.currentFrame.nextSeqNo {
+		stats.currentFrame.complete = false
+	}
+	stats.currentFrame.lastArrival = clientReadTime
+	stats.currentFrame.nextSeqNo = seqNo + 1
+	stats.currentFrame.packetCount++
+	stats.currentFrame.totalBytes += nBytes
+}
+
+// finalizeFrame records completeness and computes frame-level jitter.
+func (stats *FrameStatistics) finalizeFrame(f *pendingFrame) {
+	// record completeness
+	stats.frameComplete[f.rtpTimestamp] = f.complete
+
+	if f.complete {
+		stats.framesComplete++
+	} else {
+		stats.framesLost++
+	}
+
+	// if buffer is initialized and this frame is in the buffer, update decoder count
+	if stats.initialized {
+		if _, inBuffer := stats.rtpTimestamps[f.rtpTimestamp]; inBuffer && f.complete {
+			stats.uniqueCompleteFrames++
+		}
+	}
+
+	// frame jitter — computed for all frames regardless of completeness
+	if stats.hasPrevFrame {
+		interarrivalUS := f.firstArrival - stats.prevFrameFirstArrival
+
+		if stats.lastInterarrivalUS != 0 {
+			d := interarrivalUS - stats.lastInterarrivalUS
+			if d < 0 {
+				d = -d
+			}
+			stats.frameJitterUS += (float64(d) - stats.frameJitterUS) * frameJitterGain
+		}
+
+		stats.lastInterarrivalUS = interarrivalUS
+	}
+
+	stats.prevFrameFirstArrival = f.firstArrival
+	stats.hasPrevFrame = true
 }
 
 func (stats *FrameStatistics) bufferGrowthPhase() {
@@ -230,6 +408,14 @@ func (stats *FrameStatistics) initBufferStats() {
 		stats.sumBytes += int64(stats.packets[i].nBytes)
 	}
 
+	// count complete frames in the buffer
+	stats.uniqueCompleteFrames = 0
+	for ts := range stats.rtpTimestamps {
+		if complete, ok := stats.frameComplete[ts]; ok && complete {
+			stats.uniqueCompleteFrames++
+		}
+	}
+
 	elapsedUS := stats.packets[stats.bufferSize-1].clientReadTime - stats.packets[0].clientReadTime
 	if elapsedUS <= 0 {
 		elapsedUS = 1
@@ -240,6 +426,10 @@ func (stats *FrameStatistics) initBufferStats() {
 
 	bufferBitrate := float32(stats.sumBytes*8) / (float32(elapsedUS) / float32(1_000_000))
 	stats.latestSmoothBitrate = bufferBitrate
+
+	decoderBufferFPS := float32(stats.uniqueCompleteFrames) / (float32(elapsedUS) / float32(1_000_000))
+	stats.latestDecoderBufferFPS = decoderBufferFPS
+	stats.latestSmoothDecoderFPS = decoderBufferFPS
 
 	for i := 0; i < stats.bufferSize; i++ {
 		stats.packets[i].bufferFPS = bufferFPS
@@ -279,6 +469,18 @@ func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
 	sample.BufferBitrate = stats.packets[lastPos].bufferBitrate
 
 	sample.EstimatedFPS = int(math.Ceil(float64(sample.SmoothFPS))) - 2 /* we overcount the first and last frames */
+
+	// decoder FPS (complete frames only)
+	sample.DecoderSmoothFPS = stats.latestSmoothDecoderFPS
+	sample.DecoderBufferFPS = stats.latestDecoderBufferFPS
+	sample.EstimatedDecoderFPS = int(math.Ceil(float64(sample.DecoderSmoothFPS))) - 2
+
+	// frame jitter
+	sample.FrameJitterUS = stats.frameJitterUS
+
+	// frame counts
+	sample.FramesComplete = stats.framesComplete
+	sample.FramesLost = stats.framesLost
 }
 
 // EndSample must be called if your data in TakeSample was successfully published,
