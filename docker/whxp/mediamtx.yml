@@ -1,0 +1,21 @@
+logLevel: info
+
+api: yes
+apiAddress: :9997
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcICEServers2: []
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: ""
+webrtcIPsFromInterfaces: yes
+webrtcAdditionalHosts:
+  - 172.24.0.10
+
+rtsp: no
+rtmp: no
+hls: no
+srt: no
+
+paths:
+  all_others:

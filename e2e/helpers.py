@@ -23,10 +23,12 @@ JANUS_PROJECT = "callzip-janus"
 JITSI_PROJECT = "callzip-jitsi"
 LIVEKIT_PROJECT = "callzip-livekit"
 MEDIASOUP_PROJECT = "callzip-mediasoup"
+WHXP_PROJECT = "callzip-whxp"
 JANUS_NETWORK = f"{JANUS_PROJECT}_callzip-net"                     # 172.20.0.0/24
 JITSI_NETWORK = f"{JITSI_PROJECT}_callzip-jitsi-net"              # 172.21.0.0/24
 LIVEKIT_NETWORK = f"{LIVEKIT_PROJECT}_callzip-livekit-net"         # 172.22.0.0/24
 MEDIASOUP_NETWORK = f"{MEDIASOUP_PROJECT}_callzip-mediasoup-net"   # 172.23.0.0/24
+WHXP_NETWORK = f"{WHXP_PROJECT}_callzip-whxp-net"                 # 172.24.0.0/24
 
 # Environment variables needed by the generic ci/ smoke configs ($env: substitution).
 PLUGIN_ENV = {
@@ -34,6 +36,7 @@ PLUGIN_ENV = {
     "jitsi":     {"PLUGIN_ID": "jitsi",     "SERVER_IP": "172.21.0.20"},
     "livekit":   {"PLUGIN_ID": "livekit",   "SERVER_IP": "172.22.0.10"},
     "mediasoup": {"PLUGIN_ID": "mediasoup", "SERVER_IP": "172.23.0.10"},
+    "whxp":      {"PLUGIN_ID": "whxp",      "SERVER_IP": "172.24.0.10"},
 }
 
 # Accumulated delivery results for the terminal summary (populated by record_result).

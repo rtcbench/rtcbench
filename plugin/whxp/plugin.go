@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -168,7 +169,8 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		l.Infof("[pion] ConnectionState: %s", s)
 	})
 
-	answerSDP, resourceURL, err := p.client.WHIP(p.whipURL, offerSDP)
+	whipURL := strings.ReplaceAll(p.whipURL, "{room}", roomID)
+	answerSDP, resourceURL, err := p.client.WHIP(whipURL, offerSDP)
 	if err != nil {
 		pc.Close()
 		return fmt.Errorf("%w: WHIP: %v", call.ErrCannotJoinRoom, err)
@@ -232,7 +234,8 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		l.Infof("[pion] ConnectionState: %s", s)
 	})
 
-	answerSDP, resourceURL, err := p.client.WHEP(p.whepURL, offerSDP)
+	whepURL := strings.ReplaceAll(p.whepURL, "{room}", roomID)
+	answerSDP, resourceURL, err := p.client.WHEP(whepURL, offerSDP)
 	if err != nil {
 		pc.Close()
 		return fmt.Errorf("%w: WHEP: %v", call.ErrCannotJoinRoom, err)

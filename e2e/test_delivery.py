@@ -11,7 +11,7 @@ No Makefile changes needed — pytest discovers and names the test automatically
 import pytest
 
 from helpers import (
-    JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK, MEDIASOUP_NETWORK,
+    JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK, MEDIASOUP_NETWORK, WHXP_NETWORK,
     PLUGIN_ENV, callzip_run, poll_health, record_result,
 )
 
@@ -37,6 +37,13 @@ LIVEKIT_SCENARIOS = [
 ]
 
 MEDIASOUP_SCENARIOS = [
+    ("smoke.yml",      1, 120),
+    ("smoke-1s3v.yml", 3, 120),
+    ("smoke-2s3v.yml", 6, 120),
+    ("smoke-2s2v-serial.yml", 2, 90),
+]
+
+WHXP_SCENARIOS = [
     ("smoke.yml",      1, 120),
     ("smoke-1s3v.yml", 3, 120),
     ("smoke-2s3v.yml", 6, 120),
@@ -130,6 +137,30 @@ def test_mediasoup_delivery(mediasoup_infra, test_video_dir, config, min_active,
             pytest.fail(str(e))
 
     record_result(f"mediasoup-{config.removesuffix('.yml')}", result)
+
+    active = [v for v in result["viewers"] if v["last_seen_ago_ms"] <= 30_000]
+    assert result["viewers_active"] >= min_active
+    for v in active:
+        assert v["smooth_bitrate_bps"] >= 3_000_000, (
+            f"{v['nickname']}: bitrate {v['smooth_bitrate_bps']/1000:.0f}kbps < 3000kbps"
+        )
+        assert v["smooth_fps"] > 0, f"{v['nickname']}: fps is 0"
+
+
+@pytest.mark.xdist_group("whxp")
+@pytest.mark.parametrize(
+    "config,min_active,timeout",
+    WHXP_SCENARIOS,
+    ids=[f"whxp-{s[0].removesuffix('.yml')}" for s in WHXP_SCENARIOS],
+)
+def test_whxp_delivery(whxp_infra, test_video_dir, config, min_active, timeout):
+    with callzip_run(config, test_video_dir, network=WHXP_NETWORK, env=PLUGIN_ENV["whxp"]) as (url, _proc):
+        try:
+            result = poll_health(url, timeout, min_active)
+        except TimeoutError as e:
+            pytest.fail(str(e))
+
+    record_result(f"whxp-{config.removesuffix('.yml')}", result)
 
     active = [v for v in result["viewers"] if v["last_seen_ago_ms"] <= 30_000]
     assert result["viewers_active"] >= min_active

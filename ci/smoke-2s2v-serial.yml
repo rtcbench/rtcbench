@@ -39,6 +39,9 @@ spec:
       apiSecret: secret
     mediasoup:
       _serverURL: 'wss://{{spec.network.serverIP}}:4443'
+    whxp:
+      _whipURL: 'http://{{spec.network.serverIP}}:8889/{room}/whip'
+      _whepURL: 'http://{{spec.network.serverIP}}:8889/{room}/whep'
   logging:
     console: true
     directory: /var/log/call-zip

@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from helpers import REPO_ROOT, JANUS_PROJECT, JITSI_PROJECT, LIVEKIT_PROJECT, MEDIASOUP_PROJECT, _compose, get_delivery_results
+from helpers import REPO_ROOT, JANUS_PROJECT, JITSI_PROJECT, LIVEKIT_PROJECT, MEDIASOUP_PROJECT, WHXP_PROJECT, _compose, get_delivery_results
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +94,22 @@ def mediasoup_infra(ensure_docker_images):
     yield
     subprocess.run(
         _compose("down", "-v", project=MEDIASOUP_PROJECT, profiles=("mediasoup",)),
+        check=True,
+        cwd=REPO_ROOT,
+    )
+
+
+@pytest.fixture(scope="session")
+def whxp_infra(ensure_docker_images):
+    """Start the MediaMTX (WHIP/WHEP) stack and wait for it to be healthy."""
+    subprocess.run(
+        _compose("up", "-d", "--wait", project=WHXP_PROJECT, profiles=("whxp",)),
+        check=True,
+        cwd=REPO_ROOT,
+    )
+    yield
+    subprocess.run(
+        _compose("down", "-v", project=WHXP_PROJECT, profiles=("whxp",)),
         check=True,
         cwd=REPO_ROOT,
     )

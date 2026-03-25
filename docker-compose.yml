@@ -32,6 +32,14 @@ networks:
       config:
         - subnet: 172.23.0.0/24
 
+  # WHXP (MediaMTX) uses 172.24.0.0/24 — project callzip-whxp creates callzip-whxp_callzip-whxp-net
+  callzip-whxp-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.24.0.0/24
+
 services:
   janus:
     profiles: [janus]
@@ -206,3 +214,18 @@ services:
       timeout: 5s
       start_period: 60s
       retries: 24
+
+  mediamtx:
+    profiles: [whxp]
+    build:
+      context: docker/whxp
+    image: callzip-mediamtx:latest
+    networks:
+      callzip-whxp-net:
+        ipv4_address: 172.24.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9997/v3/paths/list || exit 1"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 12
