@@ -12,14 +12,20 @@ import (
 
 // Sample is the JSON structure written to the JSONL file.
 type Sample struct {
-	Timestamp  float64          `json:"ts"`
-	Client     string           `json:"client"`
-	Host       string           `json:"host"`
-	Instance   int              `json:"instance"`
-	Viewer     string           `json:"viewer"`
-	BitrateBps float64          `json:"bitrate_bps"`
-	FPS        float64          `json:"fps"`
-	Errors     map[string]int32 `json:"errors,omitempty"`
+	Timestamp           float64          `json:"ts"`
+	Client              string           `json:"client"`
+	Host                string           `json:"host"`
+	Instance            int              `json:"instance"`
+	Viewer              string           `json:"viewer"`
+	BitrateBps          float64          `json:"bitrate_bps"`
+	FPS                 float64          `json:"fps"`
+	DecoderSmoothFPS    float64          `json:"dec_sm_fps"`
+	DecoderBufferFPS    float64          `json:"dec_buf_fps"`
+	EstimatedDecoderFPS int              `json:"est_dec_fps"`
+	FrameJitterUS       float64          `json:"frame_jitter_us"`
+	FramesComplete      int64            `json:"frames_complete"`
+	FramesLost          int64            `json:"frames_lost"`
+	Errors              map[string]int32 `json:"errors,omitempty"`
 }
 
 // Writer writes JSONL stats samples to a file.
@@ -59,14 +65,20 @@ func (w *Writer) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySampl
 			}
 		}
 		s := Sample{
-			Timestamp:  float64(time.Now().UnixMicro()) / 1e6,
-			Client:     "callzip",
-			Host:       w.host,
-			Instance:   w.instance,
-			Viewer:     sample.Nickname,
-			BitrateBps: float64(sample.SmoothBitrate),
-			FPS:        float64(sample.SmoothFPS),
-			Errors:     errMap,
+			Timestamp:           float64(time.Now().UnixMicro()) / 1e6,
+			Client:              "callzip",
+			Host:                w.host,
+			Instance:            w.instance,
+			Viewer:              sample.Nickname,
+			BitrateBps:          float64(sample.SmoothBitrate),
+			FPS:                 float64(sample.SmoothFPS),
+			DecoderSmoothFPS:    float64(sample.DecoderSmoothFPS),
+			DecoderBufferFPS:    float64(sample.DecoderBufferFPS),
+			EstimatedDecoderFPS: sample.EstimatedDecoderFPS,
+			FrameJitterUS:       sample.FrameJitterUS,
+			FramesComplete:      sample.FramesComplete,
+			FramesLost:          sample.FramesLost,
+			Errors:              errMap,
 		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
