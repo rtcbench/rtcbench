@@ -12,13 +12,14 @@ import (
 
 // Sample is the JSON structure written to the JSONL file.
 type Sample struct {
-	Timestamp  float64 `json:"ts"`
-	Client     string  `json:"client"`
-	Host       string  `json:"host"`
-	Instance   int     `json:"instance"`
-	Viewer     string  `json:"viewer"`
-	BitrateBps float64 `json:"bitrate_bps"`
-	FPS        float64 `json:"fps"`
+	Timestamp  float64          `json:"ts"`
+	Client     string           `json:"client"`
+	Host       string           `json:"host"`
+	Instance   int              `json:"instance"`
+	Viewer     string           `json:"viewer"`
+	BitrateBps float64          `json:"bitrate_bps"`
+	FPS        float64          `json:"fps"`
+	Errors     map[string]int32 `json:"errors,omitempty"`
 }
 
 // Writer writes JSONL stats samples to a file.
@@ -47,7 +48,16 @@ func New(dir string, host string, instance int) (*Writer, error) {
 
 // Subscriber returns a function compatible with vp9_stats.Publisher.AddSubscriber.
 func (w *Writer) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySample) {
-	return func(_ vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+	return func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+		var errMap map[string]int32
+		for i, count := range period.Errors {
+			if count > 0 {
+				if errMap == nil {
+					errMap = make(map[string]int32)
+				}
+				errMap[vp9_stats.ErrIDToString(i)] = count
+			}
+		}
 		s := Sample{
 			Timestamp:  float64(time.Now().UnixMicro()) / 1e6,
 			Client:     "callzip",
@@ -56,6 +66,7 @@ func (w *Writer) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySampl
 			Viewer:     sample.Nickname,
 			BitrateBps: float64(sample.SmoothBitrate),
 			FPS:        float64(sample.SmoothFPS),
+			Errors:     errMap,
 		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
