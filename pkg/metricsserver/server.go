@@ -14,11 +14,17 @@ import (
 const activeViewerWindow = 30 * time.Second
 
 type viewerState struct {
-	Nickname         string
-	SmoothBitrateBps float32
-	SmoothFPS        float32
-	SampleCount      int64
-	LastSeenAt       time.Time
+	Nickname            string
+	SmoothBitrateBps    float32
+	SmoothFPS           float32
+	DecoderSmoothFPS    float32
+	DecoderBufferFPS    float32
+	EstimatedDecoderFPS int
+	FrameJitterUS       float64
+	FramesComplete      int64
+	FramesLost          int64
+	SampleCount         int64
+	LastSeenAt          time.Time
 }
 
 // Server is a lightweight HTTP metrics server that tracks per-viewer stats.
@@ -49,6 +55,12 @@ func (s *Server) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySampl
 		}
 		vs.SmoothBitrateBps = sample.SmoothBitrate
 		vs.SmoothFPS = sample.SmoothFPS
+		vs.DecoderSmoothFPS = sample.DecoderSmoothFPS
+		vs.DecoderBufferFPS = sample.DecoderBufferFPS
+		vs.EstimatedDecoderFPS = sample.EstimatedDecoderFPS
+		vs.FrameJitterUS = sample.FrameJitterUS
+		vs.FramesComplete = sample.FramesComplete
+		vs.FramesLost = sample.FramesLost
 		vs.SampleCount++
 		vs.LastSeenAt = time.Now()
 		s.errors = period.Errors
@@ -92,11 +104,17 @@ type healthResponse struct {
 }
 
 type viewerReport struct {
-	Nickname        string  `json:"nickname"`
-	SmoothBitrateBps float32 `json:"smooth_bitrate_bps"`
-	SmoothFPS       float32 `json:"smooth_fps"`
-	SampleCount     int64   `json:"sample_count"`
-	LastSeenAgoMs   int64   `json:"last_seen_ago_ms"`
+	Nickname            string  `json:"nickname"`
+	SmoothBitrateBps    float32 `json:"smooth_bitrate_bps"`
+	SmoothFPS           float32 `json:"smooth_fps"`
+	DecoderSmoothFPS    float32 `json:"dec_sm_fps"`
+	DecoderBufferFPS    float32 `json:"dec_buf_fps"`
+	EstimatedDecoderFPS int     `json:"est_dec_fps"`
+	FrameJitterUS       float64 `json:"frame_jitter_us"`
+	FramesComplete      int64   `json:"frames_complete"`
+	FramesLost          int64   `json:"frames_lost"`
+	SampleCount         int64   `json:"sample_count"`
+	LastSeenAgoMs       int64   `json:"last_seen_ago_ms"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -112,11 +130,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	for _, vs := range s.viewers {
 		agoMs := now.Sub(vs.LastSeenAt).Milliseconds()
 		reports = append(reports, viewerReport{
-			Nickname:         vs.Nickname,
-			SmoothBitrateBps: vs.SmoothBitrateBps,
-			SmoothFPS:        vs.SmoothFPS,
-			SampleCount:      vs.SampleCount,
-			LastSeenAgoMs:    agoMs,
+			Nickname:            vs.Nickname,
+			SmoothBitrateBps:    vs.SmoothBitrateBps,
+			SmoothFPS:           vs.SmoothFPS,
+			DecoderSmoothFPS:    vs.DecoderSmoothFPS,
+			DecoderBufferFPS:    vs.DecoderBufferFPS,
+			EstimatedDecoderFPS: vs.EstimatedDecoderFPS,
+			FrameJitterUS:       vs.FrameJitterUS,
+			FramesComplete:      vs.FramesComplete,
+			FramesLost:          vs.FramesLost,
+			SampleCount:         vs.SampleCount,
+			LastSeenAgoMs:       agoMs,
 		})
 		if now.Sub(vs.LastSeenAt) <= activeViewerWindow {
 			activeCount++
