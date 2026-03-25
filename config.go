@@ -268,14 +268,15 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 }
 
 type ConferenceConfig struct {
-	Name            string
-	UsersPerRoom    int
-	TotalRooms      int
-	StatsBufferSize int
-	Cameras         CameraConfig
-	JoinPolicy      JoinPolicyConfig
-	Recording       RecordingConfig
-	PacketCapture   PacketCaptureConfig
+	Name               string
+	UsersPerRoom       int
+	TotalRooms         int
+	StatsBufferSize    int
+	StatsInputChanSize int
+	Cameras            CameraConfig
+	JoinPolicy         JoinPolicyConfig
+	Recording          RecordingConfig
+	PacketCapture      PacketCaptureConfig
 }
 
 type YAMLConferenceConfig struct {
@@ -287,6 +288,8 @@ type YAMLConferenceConfig struct {
 	TotalRooms *int `yaml:"totalRooms,omitempty"`
 	// StatsBufferSize optional ring buffer size for video quality stats (default 768)
 	StatsBufferSize *int `yaml:"statsBufferSize,omitempty"`
+	// StatsInputChanSize optional channel buffer size for stats input (default 65536)
+	StatsInputChanSize *int `yaml:"statsInputChanSize,omitempty"`
 	// Cameras optional config for some (or all) users to turn on their cameras
 	Cameras    *YAMLCameraConfig     `yaml:"cameras,omitempty"`
 	JoinPolicy *YAMLJoinPolicyConfig `yaml:"joinPolicy,omitempty"`
@@ -361,6 +364,10 @@ func (yc *YAMLConferenceConfig) mustConvert() ConferenceConfig {
 	c.StatsBufferSize = vp9_stats.DefaultStatsBufferSize
 	if yc.StatsBufferSize != nil {
 		c.StatsBufferSize = *yc.StatsBufferSize
+	}
+	c.StatsInputChanSize = 1 << 16 // 65536
+	if yc.StatsInputChanSize != nil {
+		c.StatsInputChanSize = *yc.StatsInputChanSize
 	}
 	c.JoinPolicy = yc.JoinPolicy.mustConvert()
 	if yc.Recording != nil {

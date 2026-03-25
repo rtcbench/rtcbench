@@ -26,7 +26,7 @@ type Client struct {
 
 func NewClient(e call.PluginEnv) *Client {
 	cfg := e.Config()
-	input := make(chan vp9_stats.VideoQualitySample, cfg.Spec.Conference.StatsBufferSize)
+	input := make(chan vp9_stats.VideoQualitySample, cfg.Spec.Conference.StatsInputChanSize)
 
 	statsLog := e.LogRegistry().NewLogger("video_stats", "")
 	botManager := viewer.NewManager(input, statsLog)
