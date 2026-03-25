@@ -21,6 +21,7 @@ import (
 	"call.zip/plugin/jitsi"
 	"call.zip/plugin/livekit"
 	"call.zip/plugin/mediasoup"
+	"call.zip/plugin/whxp"
 	"github.com/goccy/go-yaml"
 	"github.com/joho/godotenv"
 )
@@ -102,6 +103,7 @@ func main() {
 	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
 	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
 	client.RegisterPlugin(mediasoup.PluginID, mediasoup.NewPlugin)
+	client.RegisterPlugin(whxp.PluginID, whxp.NewPlugin)
 
 	if cfg.Spec.Metrics.Port > 0 {
 		ms := metricsserver.New(cfg.Spec.Metrics.Port)
