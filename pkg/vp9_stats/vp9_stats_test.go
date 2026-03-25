@@ -1,6 +1,7 @@
 package vp9_stats
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -21,6 +22,7 @@ const (
 
 type testPacket struct {
 	clientReadTime int64
+	seqNo          uint16
 	rtpTimestamp   uint32
 	nBytes         int
 	payloadDesc    vp9.PayloadDescriptor
@@ -90,6 +92,9 @@ func createTestPackets1080p25fps(seconds int) []testPacket {
 
 	frameRTPTimestamp := rtpTimestamp
 
+	// seqNo starts at a random offset and wraps naturally via uint16
+	seqNo := uint16(rand.Intn(math.MaxUint16))
+
 	// clientReadTime ends just before current time, so all tests will have different times
 	clientReadTime := time.Now().Add(time.Duration(-seconds)*time.Second - 1*time.Second)
 
@@ -101,6 +106,7 @@ func createTestPackets1080p25fps(seconds int) []testPacket {
 
 		pkts[i] = testPacket{
 			clientReadTime: clientReadTime.UnixMicro(),
+			seqNo:          seqNo,
 			rtpTimestamp:   frameRTPTimestamp,
 			nBytes:         int(size),
 			payloadDesc: vp9.PayloadDescriptor{
@@ -108,6 +114,7 @@ func createTestPackets1080p25fps(seconds int) []testPacket {
 				TID: maxLayerTemporalID,
 			},
 		}
+		seqNo++
 		tpp_ := tpp
 		rtpTimestamp += uint32(int64(tpp_))
 
@@ -236,7 +243,7 @@ func TestFrameStatistics_AcceptPacketAndTakeSample_SimpleVideos(t *testing.T) {
 		}
 
 		for _, pkt := range testPackets {
-			stats.AcceptPacket(pkt.clientReadTime, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
+			stats.AcceptPacket(pkt.clientReadTime, pkt.seqNo, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
 			stats.TakeSample(&sample)
 			stats.EndSample()
 			checkSample()
@@ -260,7 +267,7 @@ func TestFrameStatistics_CustomBufferSize(t *testing.T) {
 		initialized := false
 		var lastSample VideoQualitySample
 		for _, pkt := range testPackets {
-			stats.AcceptPacket(pkt.clientReadTime, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
+			stats.AcceptPacket(pkt.clientReadTime, pkt.seqNo, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
 			stats.TakeSample(&sample)
 			stats.EndSample()
 
@@ -340,7 +347,7 @@ func TestFrameStatistics_EndSample_Resets(t *testing.T) {
 	testPackets := createTestPackets1080p25fps(2)
 
 	for _, pkt := range testPackets {
-		stats.AcceptPacket(pkt.clientReadTime, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
+		stats.AcceptPacket(pkt.clientReadTime, pkt.seqNo, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
 	}
 
 	var sample VideoQualitySample
@@ -371,6 +378,7 @@ func TestFrameStatistics_Initialized_Boundary(t *testing.T) {
 
 	baseTime := time.Now().UnixMicro()
 	var rtpTS uint32 = 1000
+	var seqNo uint16 = 0
 
 	pd := vp9.PayloadDescriptor{
 		SID: maxLayerSpatialID,
@@ -379,7 +387,8 @@ func TestFrameStatistics_Initialized_Boundary(t *testing.T) {
 
 	// Feed 63 packets (one less than bufferSize)
 	for i := 0; i < bufferSize-1; i++ {
-		stats.AcceptPacket(baseTime+int64(i)*1000, rtpTS, 100, &pd)
+		stats.AcceptPacket(baseTime+int64(i)*1000, seqNo, rtpTS, 100, &pd)
+		seqNo++
 		rtpTS += 3600 // increment per packet
 	}
 
@@ -388,7 +397,7 @@ func TestFrameStatistics_Initialized_Boundary(t *testing.T) {
 	}
 
 	// Feed the 64th packet
-	stats.AcceptPacket(baseTime+int64(bufferSize-1)*1000, rtpTS, 100, &pd)
+	stats.AcceptPacket(baseTime+int64(bufferSize-1)*1000, seqNo, rtpTS, 100, &pd)
 
 	if !stats.Initialized() {
 		t.Fatalf("expected Initialized() == true after %d packets (bufferSize=%d)", bufferSize, bufferSize)
@@ -400,6 +409,7 @@ func TestFrameStatistics_TakeSample_BeforeInitialized(t *testing.T) {
 
 	baseTime := time.Now().UnixMicro()
 	var rtpTS uint32 = 5000
+	var seqNo uint16 = 0
 
 	pd := vp9.PayloadDescriptor{
 		SID: maxLayerSpatialID,
@@ -408,7 +418,8 @@ func TestFrameStatistics_TakeSample_BeforeInitialized(t *testing.T) {
 
 	// Feed only 10 packets (well below the 768 buffer size)
 	for i := 0; i < 10; i++ {
-		stats.AcceptPacket(baseTime+int64(i)*1000, rtpTS, 200, &pd)
+		stats.AcceptPacket(baseTime+int64(i)*1000, seqNo, rtpTS, 200, &pd)
+		seqNo++
 		rtpTS += 3600
 	}
 
@@ -433,6 +444,390 @@ func TestFrameStatistics_TakeSample_BeforeInitialized(t *testing.T) {
 	}
 }
 
+// TestFrameStatistics_DecoderFPS_PerfectStream verifies that with no packet loss,
+// DecoderSmoothFPS equals SmoothFPS and FramesLost is zero.
+func TestFrameStatistics_DecoderFPS_PerfectStream(t *testing.T) {
+	stats := NewFrameStatistics(DefaultStatsBufferSize)
+	testPackets := createTestPackets1080p25fps(10)
+
+	var sample VideoQualitySample
+	for _, pkt := range testPackets {
+		stats.AcceptPacket(pkt.clientReadTime, pkt.seqNo, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
+	}
+
+	stats.TakeSample(&sample)
+
+	if sample.FramesLost != 0 {
+		t.Fatalf("expected FramesLost=0 for perfect stream, got %d", sample.FramesLost)
+	}
+
+	if sample.FramesComplete <= 0 {
+		t.Fatalf("expected FramesComplete > 0, got %d", sample.FramesComplete)
+	}
+
+	// With no loss, decoder FPS should match regular FPS
+	fpsDelta := math.Abs(float64(sample.DecoderSmoothFPS - sample.SmoothFPS))
+	if fpsDelta > 1.0 {
+		t.Fatalf("expected DecoderSmoothFPS ≈ SmoothFPS for perfect stream, got decoder=%f smooth=%f delta=%f",
+			sample.DecoderSmoothFPS, sample.SmoothFPS, fpsDelta)
+	}
+
+	if sample.EstimatedDecoderFPS != sample.EstimatedFPS {
+		t.Fatalf("expected EstimatedDecoderFPS=%d == EstimatedFPS=%d for perfect stream",
+			sample.EstimatedDecoderFPS, sample.EstimatedFPS)
+	}
+}
+
+// TestFrameStatistics_DecoderFPS_WithLoss verifies that dropping a packet within a frame
+// causes that frame to be marked as lost and reduces decoder FPS.
+func TestFrameStatistics_DecoderFPS_WithLoss(t *testing.T) {
+	stats := NewFrameStatistics(128) // smaller buffer for faster init
+	pd := vp9.PayloadDescriptor{
+		SID: maxLayerSpatialID,
+		TID: maxLayerTemporalID,
+	}
+
+	baseTime := time.Now().UnixMicro()
+
+	const (
+		ppf         = 4     // packets per frame
+		fps         = 25    // frames per second
+		frameTimeUS = 40000 // 1/25 second in microseconds
+		pktTimeUS   = frameTimeUS / ppf
+		tpf         = 3600 // RTP ticks per frame
+		nFrames     = 200  // enough to fill buffer and run steady state
+	)
+
+	var seqNo uint16 = 0
+	var rtpTS uint32 = 1000
+
+	lostFrames := 0
+	completeFrames := 0
+
+	for f := 0; f < nFrames; f++ {
+		dropPacket := (f%10 == 5) // drop 1 packet in every 10th frame (at frame index 5, 15, 25, ...)
+
+		for p := 0; p < ppf; p++ {
+			pktTime := baseTime + int64(f)*frameTimeUS + int64(p)*pktTimeUS
+
+			if dropPacket && p == 2 {
+				// skip this packet — simulates loss
+				seqNo++
+				continue
+			}
+
+			stats.AcceptPacket(pktTime, seqNo, rtpTS, paySize, &pd)
+			seqNo++
+		}
+
+		if dropPacket {
+			lostFrames++
+		} else {
+			completeFrames++
+		}
+
+		rtpTS += tpf
+	}
+
+	var sample VideoQualitySample
+	stats.TakeSample(&sample)
+
+	if sample.FramesLost == 0 {
+		t.Fatalf("expected FramesLost > 0, got 0")
+	}
+
+	if sample.FramesComplete == 0 {
+		t.Fatalf("expected FramesComplete > 0, got 0")
+	}
+
+	// FramesLost should be approximately 10% of total frames
+	totalFrames := sample.FramesComplete + sample.FramesLost
+	lossRate := float64(sample.FramesLost) / float64(totalFrames)
+	if lossRate < 0.05 || lossRate > 0.15 {
+		t.Fatalf("expected ~10%% frame loss rate, got %.1f%% (complete=%d lost=%d)",
+			lossRate*100, sample.FramesComplete, sample.FramesLost)
+	}
+
+	// Decoder FPS should be lower than regular FPS
+	if sample.DecoderSmoothFPS >= sample.SmoothFPS {
+		t.Fatalf("expected DecoderSmoothFPS(%f) < SmoothFPS(%f) when frames are lost",
+			sample.DecoderSmoothFPS, sample.SmoothFPS)
+	}
+}
+
+// TestFrameStatistics_FrameJitter_PerfectStream verifies that with perfectly spaced frames,
+// frame jitter converges to near zero.
+func TestFrameStatistics_FrameJitter_PerfectStream(t *testing.T) {
+	stats := NewFrameStatistics(DefaultStatsBufferSize)
+	testPackets := createTestPackets1080p25fps(30) // 30 seconds for EWMA to converge
+
+	for _, pkt := range testPackets {
+		stats.AcceptPacket(pkt.clientReadTime, pkt.seqNo, pkt.rtpTimestamp, pkt.nBytes, &pkt.payloadDesc)
+	}
+
+	var sample VideoQualitySample
+	stats.TakeSample(&sample)
+
+	// With perfectly even spacing, frame jitter should converge near zero.
+	// Allow small tolerance for integer microsecond rounding.
+	if sample.FrameJitterUS > 100.0 {
+		t.Fatalf("expected FrameJitterUS ≈ 0 for perfect stream, got %f", sample.FrameJitterUS)
+	}
+}
+
+// TestFrameStatistics_FrameJitter_WithVariance verifies that frame jitter is nonzero
+// when frame arrival times have variance.
+func TestFrameStatistics_FrameJitter_WithVariance(t *testing.T) {
+	stats := NewFrameStatistics(128)
+	pd := vp9.PayloadDescriptor{
+		SID: maxLayerSpatialID,
+		TID: maxLayerTemporalID,
+	}
+
+	baseTime := time.Now().UnixMicro()
+
+	const (
+		ppf         = 4
+		frameTimeUS = 40000 // 25fps
+		pktTimeUS   = frameTimeUS / ppf
+		tpf         = 3600
+		nFrames     = 200
+	)
+
+	var seqNo uint16 = 0
+	var rtpTS uint32 = 1000
+	rng := rand.New(rand.NewSource(42))
+
+	for f := 0; f < nFrames; f++ {
+		// add random jitter: ±5ms to frame start time
+		jitterUS := int64(rng.Intn(10000) - 5000)
+		frameStart := baseTime + int64(f)*frameTimeUS + jitterUS
+
+		for p := 0; p < ppf; p++ {
+			pktTime := frameStart + int64(p)*pktTimeUS
+			stats.AcceptPacket(pktTime, seqNo, rtpTS, paySize, &pd)
+			seqNo++
+		}
+		rtpTS += tpf
+	}
+
+	var sample VideoQualitySample
+	stats.TakeSample(&sample)
+
+	// With ±5ms jitter, frame jitter should be significantly nonzero
+	if sample.FrameJitterUS < 100.0 {
+		t.Fatalf("expected FrameJitterUS > 100 with ±5ms variance, got %f", sample.FrameJitterUS)
+	}
+
+	// But shouldn't be insanely high — ±5ms jitter means max deviation ~10ms
+	if sample.FrameJitterUS > 15000.0 {
+		t.Fatalf("expected FrameJitterUS < 15000 with ±5ms variance, got %f", sample.FrameJitterUS)
+	}
+}
+
+// TestFrameStatistics_FrameCompleteness_SequenceGap verifies that a gap in sequence numbers
+// within a frame marks it as incomplete.
+func TestFrameStatistics_FrameCompleteness_SequenceGap(t *testing.T) {
+	stats := NewFrameStatistics(64)
+	pd := vp9.PayloadDescriptor{
+		SID: maxLayerSpatialID,
+		TID: maxLayerTemporalID,
+	}
+
+	baseTime := time.Now().UnixMicro()
+
+	// Frame 1: packets seq 0,1,2 (complete)
+	var rtpTS uint32 = 1000
+	stats.AcceptPacket(baseTime, 0, rtpTS, 100, &pd)
+	stats.AcceptPacket(baseTime+100, 1, rtpTS, 100, &pd)
+	stats.AcceptPacket(baseTime+200, 2, rtpTS, 100, &pd)
+
+	// Frame 2: packets seq 3,5 (gap — missing seq 4)
+	rtpTS = 4600
+	stats.AcceptPacket(baseTime+40000, 3, rtpTS, 100, &pd)
+	stats.AcceptPacket(baseTime+40100, 5, rtpTS, 100, &pd) // seq 5, expected 4
+
+	// Frame 3: packets seq 6,7 (complete — triggers finalization of frame 2)
+	rtpTS = 8200
+	stats.AcceptPacket(baseTime+80000, 6, rtpTS, 100, &pd)
+	stats.AcceptPacket(baseTime+80100, 7, rtpTS, 100, &pd)
+
+	// Frame 4: trigger finalization of frame 3 by starting frame 4
+	rtpTS = 11800
+	stats.AcceptPacket(baseTime+120000, 8, rtpTS, 100, &pd)
+
+	// At this point: frame 1 complete, frame 2 incomplete, frame 3 complete
+	// (frame 4 is still in-progress, not finalized)
+	if stats.framesComplete != 2 {
+		t.Fatalf("expected framesComplete=2, got %d", stats.framesComplete)
+	}
+	if stats.framesLost != 1 {
+		t.Fatalf("expected framesLost=1, got %d", stats.framesLost)
+	}
+}
+
+// TestFrameStatistics_FrameJitter_IgnoresCompleteness verifies that frame jitter is computed
+// for all frames regardless of whether they are complete.
+func TestFrameStatistics_FrameJitter_IgnoresCompleteness(t *testing.T) {
+	stats := NewFrameStatistics(128)
+	pd := vp9.PayloadDescriptor{
+		SID: maxLayerSpatialID,
+		TID: maxLayerTemporalID,
+	}
+
+	baseTime := time.Now().UnixMicro()
+
+	const (
+		ppf         = 4
+		frameTimeUS = int64(40000)
+		pktTimeUS   = frameTimeUS / ppf
+		tpf         = uint32(3600)
+		nFrames     = 150 // enough to fill 128-packet buffer and converge EWMA
+	)
+
+	var seqNo uint16 = 0
+	var rtpTS uint32 = 1000
+
+	for f := 0; f < nFrames; f++ {
+		// every 5th frame has a gap (incomplete)
+		dropPacket := (f%5 == 3)
+
+		for p := 0; p < ppf; p++ {
+			pktTime := baseTime + int64(f)*frameTimeUS + int64(p)*pktTimeUS
+
+			if dropPacket && p == 1 {
+				seqNo++ // skip
+				continue
+			}
+
+			stats.AcceptPacket(pktTime, seqNo, rtpTS, 100, &pd)
+			seqNo++
+		}
+		rtpTS += tpf
+	}
+
+	// Jitter should still be computed (near zero since timing is perfect)
+	if stats.frameJitterUS < 0 {
+		t.Fatalf("expected non-negative frameJitterUS, got %f", stats.frameJitterUS)
+	}
+
+	// Even with packet loss, frames still arrive at regular intervals,
+	// so jitter should be very low
+	if stats.frameJitterUS > 200.0 {
+		t.Fatalf("expected low frameJitterUS for evenly-spaced frames (even with loss), got %f",
+			stats.frameJitterUS)
+	}
+
+	// Verify we actually had some lost frames
+	if stats.framesLost == 0 {
+		t.Fatalf("expected framesLost > 0 in this test")
+	}
+}
+
+// TestFrameStatistics_DecoderFPS_SampleOutput verifies that TakeSample correctly
+// populates the decoder FPS and frame count fields.
+func TestFrameStatistics_DecoderFPS_SampleOutput(t *testing.T) {
+	stats := NewFrameStatistics(128)
+	pd := vp9.PayloadDescriptor{
+		SID: maxLayerSpatialID,
+		TID: maxLayerTemporalID,
+	}
+
+	baseTime := time.Now().UnixMicro()
+
+	const (
+		ppf         = 4
+		frameTimeUS = int64(40000)
+		pktTimeUS   = frameTimeUS / ppf
+		tpf         = uint32(3600)
+		nFrames     = 200
+	)
+
+	var seqNo uint16 = 0
+	var rtpTS uint32 = 1000
+
+	for f := 0; f < nFrames; f++ {
+		for p := 0; p < ppf; p++ {
+			pktTime := baseTime + int64(f)*frameTimeUS + int64(p)*pktTimeUS
+			stats.AcceptPacket(pktTime, seqNo, rtpTS, paySize, &pd)
+			seqNo++
+		}
+		rtpTS += tpf
+	}
+
+	var sample VideoQualitySample
+	stats.TakeSample(&sample)
+
+	// Verify all new fields are populated in the sample
+	if sample.DecoderSmoothFPS <= 0 {
+		t.Fatalf("expected DecoderSmoothFPS > 0, got %f", sample.DecoderSmoothFPS)
+	}
+	if sample.DecoderBufferFPS <= 0 {
+		t.Fatalf("expected DecoderBufferFPS > 0, got %f", sample.DecoderBufferFPS)
+	}
+	if sample.FramesComplete <= 0 {
+		t.Fatalf("expected FramesComplete > 0, got %d", sample.FramesComplete)
+	}
+	if sample.FramesLost != 0 {
+		t.Fatalf("expected FramesLost=0, got %d", sample.FramesLost)
+	}
+
+	// For a perfect stream, EstimatedDecoderFPS should be close to 25
+	if sample.EstimatedDecoderFPS < 20 || sample.EstimatedDecoderFPS > 30 {
+		t.Fatalf("expected EstimatedDecoderFPS ≈ 25, got %d", sample.EstimatedDecoderFPS)
+	}
+
+	// frame jitter should be present in serialized output
+	s := sample.String()
+	if len(s) == 0 {
+		t.Fatalf("expected non-empty String() output")
+	}
+	// Verify JSON contains new fields
+	for _, field := range []string{"dec_sm_fps", "dec_buf_fps", "est_dec_fps", "frame_jitter_us", "frames_complete", "frames_lost"} {
+		found := false
+		for i := 0; i <= len(s)-len(field); i++ {
+			if s[i:i+len(field)] == field {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected String() to contain %q, got %s", field, s)
+		}
+	}
+}
+
+// TestFrameStatistics_SeqNoWrapAround verifies that uint16 sequence number wraparound
+// within a frame does not falsely mark the frame as incomplete.
+func TestFrameStatistics_SeqNoWrapAround(t *testing.T) {
+	stats := NewFrameStatistics(64)
+	pd := vp9.PayloadDescriptor{
+		SID: maxLayerSpatialID,
+		TID: maxLayerTemporalID,
+	}
+
+	baseTime := time.Now().UnixMicro()
+
+	// Frame spanning uint16 wraparound: seq 65534, 65535, 0, 1
+	var rtpTS uint32 = 1000
+	stats.AcceptPacket(baseTime, 65534, rtpTS, 100, &pd)
+	stats.AcceptPacket(baseTime+100, 65535, rtpTS, 100, &pd)
+	stats.AcceptPacket(baseTime+200, 0, rtpTS, 100, &pd) // wraps to 0
+	stats.AcceptPacket(baseTime+300, 1, rtpTS, 100, &pd)
+
+	// Start next frame to finalize the first
+	rtpTS = 4600
+	stats.AcceptPacket(baseTime+40000, 2, rtpTS, 100, &pd)
+
+	// The first frame should be complete — uint16 addition handles wraparound naturally
+	if stats.framesComplete != 1 {
+		t.Fatalf("expected framesComplete=1 after seqNo wraparound, got %d", stats.framesComplete)
+	}
+	if stats.framesLost != 0 {
+		t.Fatalf("expected framesLost=0 after seqNo wraparound, got %d", stats.framesLost)
+	}
+}
+
 func BenchmarkAcceptPacket(b *testing.B) {
 	benchmarks := []struct {
 		name       string
@@ -450,8 +845,30 @@ func BenchmarkAcceptPacket(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				pkt := &testPackets[i%len(testPackets)]
-				stats.AcceptPacket(pkt.clientReadTime, pkt.rtpTimestamp, pkt.nBytes, pd)
+				stats.AcceptPacket(pkt.clientReadTime, pkt.seqNo, pkt.rtpTimestamp, pkt.nBytes, pd)
 			}
 		})
 	}
+}
+
+func BenchmarkAcceptPacket_WithLoss(b *testing.B) {
+	testPackets := createTestPackets1080p25fps(60)
+	stats := NewFrameStatistics(DefaultStatsBufferSize)
+	pd := &testPackets[0].payloadDesc
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// skip every 50th packet to simulate loss
+		if i%50 == 0 {
+			continue
+		}
+		pkt := &testPackets[i%len(testPackets)]
+		stats.AcceptPacket(pkt.clientReadTime, pkt.seqNo, pkt.rtpTimestamp, pkt.nBytes, pd)
+	}
+}
+
+func ExampleVideoQualitySample_Mbps() {
+	sample := VideoQualitySample{SmoothBitrate: 3_500_000}
+	fmt.Println(sample.Mbps())
+	// Output: 3.50 Mbps
 }

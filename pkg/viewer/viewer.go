@@ -152,7 +152,7 @@ loop:
 			continue
 		}
 
-		vp9FrameStats.AcceptPacket(clientReadTime, pkt.Timestamp, len(pkt.Payload), &vp9PayloadDesc)
+		vp9FrameStats.AcceptPacket(clientReadTime, pkt.SequenceNumber, pkt.Timestamp, len(pkt.Payload), &vp9PayloadDesc)
 
 		// TODO: map[uint32]*vp9.IvfSegmenter to split by SSRC
 		if v.ivf != nil {
