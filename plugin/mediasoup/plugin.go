@@ -28,7 +28,6 @@ const (
 
 	viewerPacketsPerSample = 1000
 	viewerTrackBufferSize  = 1500
-	statsInputChanSize     = 1 << 16 // 65536
 )
 
 // Plugin implements call.Plugin for the mediasoup SFU.
@@ -103,7 +102,7 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 	p.log.Infof("router supports VP9 (PT=%d), %d header extensions", p.vp9PT, len(caps.HeaderExtensions))
 
 	// Stats pipeline shared across all viewer goroutines.
-	statsInput := make(chan vp9_stats.VideoQualitySample, statsInputChanSize)
+	statsInput := make(chan vp9_stats.VideoQualitySample, e.Config().Spec.Conference.StatsInputChanSize)
 	statsLog := e.LogRegistry().NewLogger("video_stats", "")
 	p.viewerManager = viewer.NewManager(statsInput, statsLog)
 	p.publisher = vp9_stats.NewPublisher(statsInput)
