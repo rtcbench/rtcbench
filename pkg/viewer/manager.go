@@ -34,8 +34,9 @@ func (m *Manager) SpawnViewer(
 	nickname string,
 	config *Config,
 	ivf *vp9.IvfSegmenter,
+	pub *vp9_stats.Publisher,
 ) (*Viewer, error) {
-	v, err := newViewer(track, receiver, m.input, nickname, config, ivf)
+	v, err := newViewer(track, receiver, m.input, nickname, config, ivf, pub)
 	if err != nil {
 		return nil, err
 	}
