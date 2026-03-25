@@ -196,7 +196,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 						l.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
 					}
 				}
-				if _, err := p.viewerManager.SpawnViewer(track, nil, userID, cfg, seg); err != nil {
+				if _, err := p.viewerManager.SpawnViewer(track, nil, userID, cfg, seg, p.publisher); err != nil {
 					l.Errorf("[viewer] SpawnViewer failed: %v", err)
 				}
 			},

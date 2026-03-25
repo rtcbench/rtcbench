@@ -264,6 +264,39 @@ func TestServer_handleHealth_MixedActiveStale(t *testing.T) {
 	}
 }
 
+func TestServer_handleHealth_Errors(t *testing.T) {
+	s := New(0)
+	sub := s.Subscriber()
+
+	period := vp9_stats.Period{}
+	period.Errors[vp9_stats.ErrViewerSeqNoJumpID] = 7
+	period.Errors[vp9_stats.ErrViewerPcapWriteID] = 3
+
+	sub(period, vp9_stats.VideoQualitySample{
+		Nickname:      "v1",
+		SmoothBitrate: 1_000_000,
+		SmoothFPS:     25,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/health", nil)
+	s.handleHealth(rec, req)
+
+	var resp healthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode JSON: %v", err)
+	}
+	if len(resp.Errors) != 2 {
+		t.Fatalf("len(Errors) = %d, want 2", len(resp.Errors))
+	}
+	if resp.Errors["vp9_stats.Publisher.ErrViewerSeqNoJumpID"] != 7 {
+		t.Fatalf("ErrViewerSeqNoJumpID = %d, want 7", resp.Errors["vp9_stats.Publisher.ErrViewerSeqNoJumpID"])
+	}
+	if resp.Errors["vp9_stats.Publisher.ErrViewerPcapWriteID"] != 3 {
+		t.Fatalf("ErrViewerPcapWriteID = %d, want 3", resp.Errors["vp9_stats.Publisher.ErrViewerPcapWriteID"])
+	}
+}
+
 func TestServer_ListenAndServe_ContextCancellation(t *testing.T) {
 	s := New(19876)
 	ctx, cancel := context.WithCancel(context.Background())

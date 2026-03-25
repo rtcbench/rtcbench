@@ -26,6 +26,7 @@ type Server struct {
 	port    int
 	mu      sync.RWMutex
 	viewers map[string]*viewerState
+	errors  [vp9_stats.NumErrIDs]int32
 }
 
 // New creates a Server that will listen on the given port.
@@ -38,7 +39,7 @@ func New(port int) *Server {
 
 // Subscriber returns a func compatible with vp9_stats.Publisher.AddSubscriber.
 func (s *Server) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySample) {
-	return func(_ vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+	return func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		vs, ok := s.viewers[sample.Nickname]
@@ -50,6 +51,7 @@ func (s *Server) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySampl
 		vs.SmoothFPS = sample.SmoothFPS
 		vs.SampleCount++
 		vs.LastSeenAt = time.Now()
+		s.errors = period.Errors
 	}
 }
 
@@ -81,11 +83,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 type healthResponse struct {
-	Status               string         `json:"status"`
-	ViewersTotal         int            `json:"viewers_total"`
-	ViewersActive        int            `json:"viewers_active"`
-	AggregateBitrateMbps float32        `json:"aggregate_bitrate_mbps"`
-	Viewers              []viewerReport `json:"viewers"`
+	Status               string            `json:"status"`
+	ViewersTotal         int               `json:"viewers_total"`
+	ViewersActive        int               `json:"viewers_active"`
+	AggregateBitrateMbps float32           `json:"aggregate_bitrate_mbps"`
+	Errors               map[string]int32  `json:"errors,omitempty"`
+	Viewers              []viewerReport    `json:"viewers"`
 }
 
 type viewerReport struct {
@@ -126,11 +129,22 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = "ok"
 	}
 
+	var errMap map[string]int32
+	for i, count := range s.errors {
+		if count > 0 {
+			if errMap == nil {
+				errMap = make(map[string]int32)
+			}
+			errMap[vp9_stats.ErrIDToString(i)] = count
+		}
+	}
+
 	resp := healthResponse{
 		Status:               status,
 		ViewersTotal:         len(s.viewers),
 		ViewersActive:        activeCount,
 		AggregateBitrateMbps: totalBitrate / 1_000_000,
+		Errors:               errMap,
 		Viewers:              reports,
 	}
 

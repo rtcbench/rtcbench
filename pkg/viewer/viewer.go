@@ -13,17 +13,6 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
-const (
-	errViewerReadFromTrackID int = iota
-	errViewerUnmarshalPacketID
-	errViewerParseVP9PayloadID
-	errViewerSeqNoJumpID
-	errViewerInputChannelID
-	errViewerIVFSegmenterFailed
-	errViewerPcapWriteID
-	numViewerErrIDs
-)
-
 // Viewer connects to a conference and receives 1 VP9 video stream
 type Viewer struct {
 	track    *webrtc.TrackRemote
@@ -33,6 +22,7 @@ type Viewer struct {
 	config   Config
 	ivf      *vp9.IvfSegmenter
 	pcap     *pcap.Writer
+	pub      *vp9_stats.Publisher
 }
 
 type Config struct {
@@ -64,6 +54,7 @@ func newViewer(
 	nickname string,
 	config *Config,
 	ivf *vp9.IvfSegmenter,
+	pub *vp9_stats.Publisher,
 ) (*Viewer, error) {
 	if err := config.verify(); err != nil {
 		return nil, err
@@ -75,6 +66,7 @@ func newViewer(
 		nickname: nickname,
 		config:   *config,
 		ivf:      ivf,
+		pub:      pub,
 	}
 	if config.PacketCaptureDir != "" {
 		trackNickname := fmt.Sprintf("%s[%d]", nickname, track.SSRC())
@@ -111,8 +103,7 @@ func (v *Viewer) run(done <-chan struct{}) error {
 		packetsInSample  int
 		packetsPerSample = v.config.PacketsPerSample
 
-		err  error
-		errs [numViewerErrIDs]int64
+		err error
 	)
 
 loop:
@@ -125,7 +116,7 @@ loop:
 			case <-done:
 				break loop
 			default:
-				errs[errViewerReadFromTrackID]++
+				v.pub.IncrError(vp9_stats.ErrViewerReadFromTrackID)
 				continue
 			}
 		}
@@ -134,19 +125,19 @@ loop:
 
 		if v.pcap != nil {
 			if err = v.pcap.WritePacket(raw, time.UnixMicro(clientReadTime)); err != nil {
-				errs[errViewerPcapWriteID]++
+				v.pub.IncrError(vp9_stats.ErrViewerPcapWriteID)
 			}
 		}
 
 		if err = pkt.Unmarshal(raw); err != nil {
-			errs[errViewerUnmarshalPacketID]++
+			v.pub.IncrError(vp9_stats.ErrViewerUnmarshalPacketID)
 			continue
 		}
 
 		packetsInSample++
 
 		if seq != 0 && pkt.SequenceNumber != seq+1 {
-			errs[errViewerSeqNoJumpID]++
+			v.pub.IncrError(vp9_stats.ErrViewerSeqNoJumpID)
 			// fall-through
 		}
 
@@ -157,7 +148,7 @@ loop:
 		}
 
 		if err = vp9.ParseVP9PayloadDescriptor(pkt.Payload, &vp9PayloadDesc); err != nil {
-			errs[errViewerParseVP9PayloadID]++
+			v.pub.IncrError(vp9_stats.ErrViewerParseVP9PayloadID)
 			continue
 		}
 
@@ -166,7 +157,7 @@ loop:
 		// TODO: map[uint32]*vp9.IvfSegmenter to split by SSRC
 		if v.ivf != nil {
 			if err = v.ivf.Push(pkt.Payload, pkt.Timestamp, &vp9PayloadDesc); err != nil {
-				errs[errViewerIVFSegmenterFailed]++
+				v.pub.IncrError(vp9_stats.ErrViewerIVFSegmenterFailed)
 				continue
 			}
 		}
@@ -180,13 +171,13 @@ loop:
 				vp9FrameStats.EndSample()
 			default:
 				// TODO: adaptively lower the sampling rate due to detected consumer bottleneck
-				errs[errViewerInputChannelID]++
+				v.pub.IncrError(vp9_stats.ErrViewerInputChannelID)
 			}
 		}
 	}
 
 	if err != nil {
-		return joinErrors(err, errs)
+		return errors.Join(err, fmt.Errorf("total viewer errs: %v", v.pub.Errors()))
 	}
 
 	return nil
@@ -199,9 +190,4 @@ func (v *Viewer) stop() {
 	if v.pcap != nil {
 		_ = v.pcap.Close()
 	}
-}
-
-func joinErrors(err error, errs [numViewerErrIDs]int64) error {
-	// TODO friendlier error message than an array of counts
-	return errors.Join(err, fmt.Errorf("total viewer errs: %v", errs))
 }
