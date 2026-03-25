@@ -97,6 +97,77 @@ func TestSubscriberWritesJSONL(t *testing.T) {
 	}
 }
 
+func TestSubscriberWritesErrors(t *testing.T) {
+	dir := t.TempDir()
+	w, err := New(dir, "node-01", 0)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	period := vp9_stats.Period{}
+	period.Errors[vp9_stats.ErrViewerSeqNoJumpID] = 5
+	period.Errors[vp9_stats.ErrViewerPcapWriteID] = 2
+
+	sub := w.Subscriber()
+	sub(period, vp9_stats.VideoQualitySample{
+		Nickname:      "viewer-1",
+		SmoothBitrate: 3500000,
+		SmoothFPS:     25.0,
+	})
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "bench-callzip-node-01-0.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+
+	var s Sample
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(s.Errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d", len(s.Errors))
+	}
+	if s.Errors["vp9_stats.Publisher.ErrViewerSeqNoJumpID"] != 5 {
+		t.Fatalf("ErrViewerSeqNoJumpID = %d, want 5", s.Errors["vp9_stats.Publisher.ErrViewerSeqNoJumpID"])
+	}
+	if s.Errors["vp9_stats.Publisher.ErrViewerPcapWriteID"] != 2 {
+		t.Fatalf("ErrViewerPcapWriteID = %d, want 2", s.Errors["vp9_stats.Publisher.ErrViewerPcapWriteID"])
+	}
+}
+
+func TestSubscriberOmitsEmptyErrors(t *testing.T) {
+	dir := t.TempDir()
+	w, err := New(dir, "node-01", 0)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	sub := w.Subscriber()
+	sub(vp9_stats.Period{}, vp9_stats.VideoQualitySample{
+		Nickname:      "viewer-1",
+		SmoothBitrate: 3500000,
+		SmoothFPS:     25.0,
+	})
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "bench-callzip-node-01-0.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+
+	line := strings.TrimSpace(string(data))
+	if strings.Contains(line, `"errors"`) {
+		t.Fatalf("expected no errors key in JSON when no errors, got: %s", line)
+	}
+}
+
 func TestSubscriberConcurrentWrites(t *testing.T) {
 	dir := t.TempDir()
 	w, err := New(dir, "concurrent-host", 1)

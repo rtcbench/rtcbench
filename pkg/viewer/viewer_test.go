@@ -1,7 +1,6 @@
 package viewer
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -120,23 +119,6 @@ func TestConfig_verify_StatsBufferSize(t *testing.T) {
 	}
 }
 
-func TestJoinErrors(t *testing.T) {
-	baseErr := errors.New("base")
-	var errs [numViewerErrIDs]int64
-	errs[errViewerReadFromTrackID] = 3
-	errs[errViewerSeqNoJumpID] = 7
-
-	result := joinErrors(baseErr, errs)
-	if result == nil {
-		t.Fatalf("expected non-nil error from joinErrors")
-	}
-	if !errors.Is(result, baseErr) {
-		t.Fatalf("expected result to wrap baseErr via errors.Is")
-	}
-	if !strings.Contains(result.Error(), "total viewer errs") {
-		t.Fatalf("expected error message to contain 'total viewer errs', got: %v", result)
-	}
-}
 
 func TestNewManager(t *testing.T) {
 	ch := make(chan vp9_stats.VideoQualitySample, 1)

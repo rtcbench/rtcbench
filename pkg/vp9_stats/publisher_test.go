@@ -1,6 +1,7 @@
 package vp9_stats
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -109,6 +110,31 @@ func TestPublisher_FanOut(t *testing.T) {
 	if lastPeriod.TotalBytes != 600 {
 		t.Fatalf("last Period.TotalBytes = %d, want 600", lastPeriod.TotalBytes)
 	}
+}
+
+func TestErrIDToString_AllIDs(t *testing.T) {
+	for id := 0; id < NumErrIDs; id++ {
+		s := ErrIDToString(id)
+		if s == "" {
+			t.Fatalf("ErrIDToString(%d) returned empty string", id)
+		}
+		if !strings.HasPrefix(s, "vp9_stats.Publisher.") {
+			t.Fatalf("ErrIDToString(%d) = %q, want prefix 'vp9_stats.Publisher.'", id, s)
+		}
+	}
+	// smoke test a specific one
+	if got := ErrIDToString(ErrViewerSeqNoJumpID); got != "vp9_stats.Publisher.ErrViewerSeqNoJumpID" {
+		t.Fatalf("ErrIDToString(ErrViewerSeqNoJumpID) = %q, want %q", got, "vp9_stats.Publisher.ErrViewerSeqNoJumpID")
+	}
+}
+
+func TestErrIDToString_InvalidPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic for invalid errID")
+		}
+	}()
+	ErrIDToString(NumErrIDs)
 }
 
 func TestPublisher_Stop_Idempotent(t *testing.T) {
