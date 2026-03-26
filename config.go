@@ -54,6 +54,9 @@ var (
 	ErrNegativeJoinStartSpacing      = errors.New("invalid spec.conference.joinPolicy.joinStartSpacing, must be >= 0")
 
 	ErrInvalidStatsBufferSize        = errors.New("invalid spec.conference.statsBufferSize integer, must be in range [64..4096]")
+	ErrInvalidSVCMode                = errors.New("invalid spec.conference.cameras.svc.mode, must be auto|on|off")
+	ErrInvalidSVCSpatialLayers       = errors.New("invalid spec.conference.cameras.svc.spatialLayers, must be 1-3")
+	ErrInvalidSVCTemporalLayers      = errors.New("invalid spec.conference.cameras.svc.temporalLayers, must be 1-3")
 	ErrMissingRecordingDirectory     = errors.New("missing spec.conference.recording.directory pathname")
 	ErrMissingPacketCaptureDirectory = errors.New("missing spec.conference.packetCapture.directory pathname")
 
@@ -400,14 +403,63 @@ type CameraConfig struct {
 	VideoCodec string
 	Directory  string
 	InMemory   bool
+	SVC        SVCCameraConfig
+}
+
+// SVCCameraConfig controls VP9 SVC (Scalable Video Coding) behavior for senders.
+//
+//   - Mode "auto": detect from IVF file. Non-SVC files use simple path, SVC files use SVC path.
+//   - Mode "on": force SVC path. SpatialLayers/TemporalLayers override auto-detection (0 = auto).
+//   - Mode "off": force simple path regardless of IVF file content.
+type SVCCameraConfig struct {
+	Mode           string // "auto" (default), "on", "off"
+	SpatialLayers  int    // 1-3 when Mode="on", 0 = auto-detect from IVF
+	TemporalLayers int    // 1-3 when Mode="on", 0 = auto-detect from IVF
 }
 
 type YAMLCameraConfig struct {
-	PerRoom    *int    `yaml:"perRoom,omitempty"`
-	FileType   *string `yaml:"fileType,omitempty"`
-	VideoCodec *string `yaml:"videoCodec,omitempty"`
-	Directory  *string `yaml:"directory,omitempty"`
-	InMemory   *bool   `yaml:"inMemory,omitempty"`
+	PerRoom    *int              `yaml:"perRoom,omitempty"`
+	FileType   *string           `yaml:"fileType,omitempty"`
+	VideoCodec *string           `yaml:"videoCodec,omitempty"`
+	Directory  *string           `yaml:"directory,omitempty"`
+	InMemory   *bool             `yaml:"inMemory,omitempty"`
+	SVC        *YAMLSVCCamConfig `yaml:"svc,omitempty"`
+}
+
+type YAMLSVCCamConfig struct {
+	Mode           *string `yaml:"mode,omitempty"`
+	SpatialLayers  *int    `yaml:"spatialLayers,omitempty"`
+	TemporalLayers *int    `yaml:"temporalLayers,omitempty"`
+}
+
+var validSVCModes = []string{"auto", "on", "off"}
+
+func (yc *YAMLSVCCamConfig) validate() error {
+	var errs []error
+	if yc.Mode != nil && !slices.Contains(validSVCModes, *yc.Mode) {
+		errs = append(errs, ErrInvalidSVCMode)
+	}
+	if yc.SpatialLayers != nil && (*yc.SpatialLayers < 1 || *yc.SpatialLayers > 3) {
+		errs = append(errs, ErrInvalidSVCSpatialLayers)
+	}
+	if yc.TemporalLayers != nil && (*yc.TemporalLayers < 1 || *yc.TemporalLayers > 3) {
+		errs = append(errs, ErrInvalidSVCTemporalLayers)
+	}
+	return errors.Join(errs...)
+}
+
+func (yc *YAMLSVCCamConfig) mustConvert() SVCCameraConfig {
+	c := SVCCameraConfig{Mode: "auto"}
+	if yc.Mode != nil {
+		c.Mode = *yc.Mode
+	}
+	if yc.SpatialLayers != nil {
+		c.SpatialLayers = *yc.SpatialLayers
+	}
+	if yc.TemporalLayers != nil {
+		c.TemporalLayers = *yc.TemporalLayers
+	}
+	return c
 }
 
 func (yc *YAMLCameraConfig) validate() error {
@@ -432,6 +484,11 @@ func (yc *YAMLCameraConfig) validate() error {
 	if yc.Directory == nil || strings.TrimSpace(*yc.Directory) == "" {
 		errs = append(errs, ErrMissingCameraDirectory)
 	}
+	if yc.SVC != nil {
+		if svcErr := yc.SVC.validate(); svcErr != nil {
+			errs = append(errs, svcErr)
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -446,6 +503,10 @@ func (yc *YAMLCameraConfig) mustConvert() CameraConfig {
 	c.Directory = *yc.Directory
 	if yc.InMemory != nil {
 		c.InMemory = *yc.InMemory
+	}
+	c.SVC = SVCCameraConfig{Mode: "auto"}
+	if yc.SVC != nil {
+		c.SVC = yc.SVC.mustConvert()
 	}
 	return c
 }
