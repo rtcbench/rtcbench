@@ -70,11 +70,13 @@ func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 	}
 
 	var src ivfpkg.FrameSource
+	var cameraPaths []string
 	if role == call.Sender && p.cameras != nil {
 		src = p.cameras.NewSource()
+		cameraPaths = p.cameras.Paths()
 	}
 
-	err = p.client.ConnectViewer(roomID, userID, ivf, src) // TODO: pass ctx
+	err = p.client.ConnectViewer(roomID, userID, ivf, src, cameraPaths) // TODO: pass ctx
 	if err != nil {
 		return errors.Join(call.ErrCannotJoinRoom, err)
 	}

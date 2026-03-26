@@ -7,11 +7,14 @@ import (
 	"regexp"
 	"strings"
 
+	"call.zip/pkg/gcc"
 	ivfpkg "call.zip/pkg/ivf"
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9"
+	"call.zip/pkg/vp9_stats"
 	"call.zip/plugin/jitsi/internal/model"
 	"github.com/pion/dtls/v2"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -54,6 +57,8 @@ func parseLocalVideoMSID(sdp string) (primarySSRC, msid string) {
 	return primarySSRC, msid
 }
 
+const initialBitrateBps = 3_500_000
+
 func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) (*webrtc.PeerConnection, error) {
 	state.Log.Infof("[startPion] initializing pion PeerConnection...")
 
@@ -81,10 +86,23 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		PayloadType: 101,
 	}, webrtc.RTPCodecTypeVideo)
 
-	api := webrtc.NewAPI(
+	apiOpts := []func(*webrtc.API){
 		webrtc.WithSettingEngine(se),
 		webrtc.WithMediaEngine(m),
-	)
+	}
+
+	// Add GCC interceptors for senders
+	var getTargetBitrate func() int
+	if state.Sender {
+		factories, getBitrate, err := gcc.SenderFactories(initialBitrateBps)
+		if err != nil {
+			return nil, fmt.Errorf("build interceptors: %w", err)
+		}
+		getTargetBitrate = getBitrate
+		apiOpts = append(apiOpts, webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories)))
+	}
+
+	api := webrtc.NewAPI(apiOpts...)
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
@@ -107,24 +125,24 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	})
 
 	// Build either a viewer (recvonly transceiver) or a sender (local track).
-	var localVideoTrack *webrtc.TrackLocalStaticSample
+	var svcTrack *webrtc.TrackLocalStaticRTP
 	if state.Sender {
 		if state.FrameSource == nil {
 			return nil, errors.New("expected a frame source for sending")
 		}
-		localVideoTrack, err = webrtc.NewTrackLocalStaticSample(
+		svcTrack, err = webrtc.NewTrackLocalStaticRTP(
 			webrtc.RTPCodecCapability{
 				MimeType:    webrtc.MimeTypeVP9,
 				ClockRate:   90000,
 				SDPFmtpLine: "profile-id=0",
 			},
 			"video",
-			state.Nickname, // unique per sender; avoids "MSID already used" rejection from Jicofo
+			state.Nickname,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("NewTrackLocalStaticSample failed: %w", err)
+			return nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
 		}
-		if _, err := pc.AddTrack(localVideoTrack); err != nil {
+		if _, err := pc.AddTrack(svcTrack); err != nil {
 			return nil, fmt.Errorf("AddTrack failed: %w", err)
 		}
 		state.Log.Infof("[startPion] sender mode: frame source ready")
@@ -190,9 +208,11 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 
 	state.Log.Debugf("[after SetLocalDescription] generated SDP answer:\n%s", pc.LocalDescription().SDP)
 
-	// Start IVF pumping after local description is set.
-	if state.Sender && localVideoTrack != nil {
-		go ivfpkg.LoopIntoTrack(state.Log, localVideoTrack, state.FrameSource)
+	// Start SVC-aware send loop after local description is set.
+	if state.Sender && svcTrack != nil {
+		svcCfg := ivfpkg.ProbeAndBuildSVCConfig(state.CameraPaths, initialBitrateBps)
+		state.Log.Infof("[startPion] SVC config: %d spatial x %d temporal layers", svcCfg.NumSpatialLayers, svcCfg.NumTemporalLayers)
+		go ivfpkg.SVCLoopIntoTrack(state.Log, svcTrack, state.FrameSource, svcCfg, getTargetBitrate)
 	}
 
 	ufrag, pwd, fingerprint := parseIceCredentials(pc.LocalDescription().SDP)
@@ -216,8 +236,21 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	state.Log.Infof("[startPion] local SDP ufrag=%s pwd=%s fingerprint=%s", ufrag, pwd, fingerprint)
 	state.Log.Infof("[startPion] pion PeerConnection ready with SDP answer generated.")
 
+	const pliMinIntervalNanos = 100_000_000 // 100ms
+
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		go func() {
+			rtcpTracker := &vp9_stats.RTCPTracker{}
+			ssrc := track.SSRC()
+			sendPLI := func() {
+				if writeErr := pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(ssrc)}}); writeErr != nil {
+					state.Log.Errorf("[rtcp] WritePLI: %v", writeErr)
+				} else {
+					state.Log.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
+				}
+			}
+			throttle := vp9_stats.NewPLIThrottle(sendPLI, rtcpTracker, pliMinIntervalNanos)
+
 			cfg := &viewer.Config{
 				PacketsPerSample:  1000,
 				VP9RTPPayloadType: 101,
@@ -226,7 +259,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 				PacketCaptureDir:  c.packetCaptureDir,
 			}
 
-			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg, ivf, c.publisher, nil, nil); err != nil {
+			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg, ivf, c.publisher, rtcpTracker, throttle.OnFrameLost); err != nil {
 				panic(err) // TODO don't panic (manager refactor)
 			}
 

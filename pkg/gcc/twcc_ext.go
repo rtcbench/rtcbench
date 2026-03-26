@@ -1,4 +1,4 @@
-package internal
+package gcc
 
 import (
 	"sync/atomic"
@@ -8,8 +8,14 @@ import (
 	"github.com/pion/sdp/v3"
 )
 
-// twccExtInterceptor adds transport-cc sequence numbers to outgoing RTP
+// TWCCExtFactory adds transport-cc sequence numbers to outgoing RTP
 // packets so GCC can track them.
+type TWCCExtFactory struct{}
+
+func (TWCCExtFactory) NewInterceptor(_ string) (interceptor.Interceptor, error) {
+	return &twccExtInterceptor{}, nil
+}
+
 type twccExtInterceptor struct {
 	interceptor.NoOp
 	seqNo atomic.Uint32
@@ -43,10 +49,4 @@ func (t *twccExtInterceptor) BindLocalStream(
 		}
 		return writer.Write(header, payload, attributes)
 	})
-}
-
-type twccExtFactory struct{}
-
-func (twccExtFactory) NewInterceptor(_ string) (interceptor.Interceptor, error) {
-	return &twccExtInterceptor{}, nil
 }

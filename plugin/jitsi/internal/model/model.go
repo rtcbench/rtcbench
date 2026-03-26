@@ -21,6 +21,7 @@ type ConnectionState struct {
 	SenderSSRC  *string
 	SenderMSID  *string
 	FrameSource ivf.FrameSource
+	CameraPaths []string // IVF file paths for SVC probe
 
 	// === Static config ===
 	BoshURL    string // e.g. https://10.99.0.210/http-bind
