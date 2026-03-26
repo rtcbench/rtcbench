@@ -9,14 +9,25 @@ import (
 	"call.zip/plugin/jitsi/internal/util"
 )
 
+// jingleOfferTimeout is how long Step09 waits for JVB's Jingle session-initiate
+// before giving up. This matters when a sender is alone in the room: JVB won't
+// send the offer until a second participant joins. With serial join concurrency,
+// a shorter timeout lets the retry loop unblock the worker so the next user can
+// start joining.
+const jingleOfferTimeout = 30 * time.Second
+
 func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 	var err error
 
 	// Start with whatever Step08 already received — Jicofo may have included
 	// a disco#info query in that same BOSH response body.
 	respXML := state.PendingBOSHResponse
+	deadline := time.Now().Add(jingleOfferTimeout)
 
 	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s waiting for Jingle offer (is this sender alone in the room?)", jingleOfferTimeout)
+		}
 		// Only poll for a fresh response when we have nothing to process.
 		if respXML == "" {
 			state.RID++

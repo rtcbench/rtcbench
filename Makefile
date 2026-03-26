@@ -95,17 +95,21 @@ _build-mediasoup:
 
 SPT_IMAGE := ghcr.io/ioqr/ssh-parallel-test:latest
 REMOTE_CFG ?= scripts/remote-e2e/config.yml
-SPT_RUN := docker run --rm -t -e HOME=$(HOME) -v /var/run/docker.sock:/var/run/docker.sock -v $(CURDIR):$(CURDIR) -v /tmp:/tmp -v $(HOME)/.ssh:$(HOME)/.ssh:ro -v $(HOME)/.ssh-parallel-test:$(HOME)/.ssh-parallel-test --network host -w $(CURDIR) $(SPT_IMAGE)
+SPT_RUN := docker run --rm -t -e HOME=$(HOME) -e SSH_AUTH_SOCK=/ssh-agent -v $(SSH_AUTH_SOCK):/ssh-agent -v /var/run/docker.sock:/var/run/docker.sock -v $(CURDIR):$(CURDIR) -v /tmp:/tmp -v $(HOME)/.ssh:$(HOME)/.ssh:ro -v $(HOME)/.ssh-parallel-test:$(HOME)/.ssh-parallel-test --network host -w $(CURDIR) $(SPT_IMAGE)
+REMOTE_GROUP ?=
+ifneq ($(REMOTE_GROUP),)
+SPT_GROUP := -g $(REMOTE_GROUP)
+endif
 
 remote-seed:
 	$(SPT_RUN) -c $(REMOTE_CFG) seed
 
 remote-run:
-	$(SPT_RUN) -c $(REMOTE_CFG) run
+	$(SPT_RUN) -c $(REMOTE_CFG) run $(SPT_GROUP)
 
 remote-ci:
 	$(MAKE) test
-	$(SPT_RUN) -c $(REMOTE_CFG) run
+	$(SPT_RUN) -c $(REMOTE_CFG) run $(SPT_GROUP)
 
 remote-status:
 	$(SPT_RUN) -c $(REMOTE_CFG) status
