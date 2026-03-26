@@ -152,11 +152,11 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		APISecret:           p.apiSecret,
 		RoomName:            roomID,
 		ParticipantIdentity: userID,
-	}, &lksdk.RoomCallback{}, lksdk.WithInterceptors(interceptors))
+	}, &lksdk.RoomCallback{}, lksdk.WithInterceptors(interceptors), lksdk.WithAutoSubscribe(false))
 	if err != nil {
 		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
 	}
-	l.Infof("connected to room %s (GCC enabled, initial=%d bps)", roomID, initialBitrateBps)
+	l.Infof("connected to room %s (GCC enabled, initial=%d bps, autoSubscribe=false)", roomID, initialBitrateBps)
 
 	p.mu.Lock()
 	p.rooms = append(p.rooms, room)
