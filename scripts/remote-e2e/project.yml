@@ -5,7 +5,7 @@ remote:
   workdir: ~/call.zip
 
 ssh:
-  key: ~/.ssh/id_callzip
+  key: ~/.ssh/id_ed25519
 
 rsync:
   excludes:
@@ -20,6 +20,7 @@ rsync:
     - "*.exe"
     - ".env"
     - ".env.*"
+    - "bench/"
 
 discover:
   command: "docker run --rm -v {root}:{root} -w {root} callzip-e2e-runner:latest -m pytest e2e/ --collect-only -q"
