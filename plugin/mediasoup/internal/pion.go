@@ -52,6 +52,47 @@ func newPionAPI(clientIP string, vp9PayloadType uint8, forceActiveRole bool, ext
 	return webrtc.NewAPI(opts...), nil
 }
 
+// StartSendPCSimple creates a PeerConnection with a VP9 sample track (no SVC/GCC).
+func StartSendPCSimple(l *log.Logger, clientIP string, vp9PT uint8) (
+	*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error,
+) {
+	api, err := newPionAPI(clientIP, vp9PT, false)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
+	}
+	registerLoggingCallbacks(l, pc)
+
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeVP9,
+			ClockRate:   90000,
+			SDPFmtpLine: "profile-id=0",
+		},
+		"video", "ivf",
+	)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("NewTrackLocalStaticSample: %w", err)
+	}
+	if _, err := pc.AddTrack(track); err != nil {
+		return nil, nil, "", fmt.Errorf("AddTrack: %w", err)
+	}
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("CreateOffer: %w", err)
+	}
+	if err := pc.SetLocalDescription(offer); err != nil {
+		return nil, nil, "", fmt.Errorf("SetLocalDescription: %w", err)
+	}
+
+	l.Infof("[pion] send offer SDP ready")
+	return pc, track, pc.LocalDescription().SDP, nil
+}
+
 // StartSendPC creates a PeerConnection with a VP9 send track and GCC
 // bandwidth estimation. Returns the PC, RTP track, bandwidth getter, and
 // the offer SDP.

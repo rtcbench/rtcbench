@@ -91,15 +91,22 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		webrtc.WithMediaEngine(m),
 	}
 
-	// Add GCC interceptors for senders
+	// Resolve SVC mode for senders.
+	var useSVC bool
+	var svcCfg ivfpkg.SVCConfig
 	var getTargetBitrate func() int
 	if state.Sender {
-		factories, getBitrate, err := gcc.SenderFactories(initialBitrateBps)
-		if err != nil {
-			return nil, fmt.Errorf("build interceptors: %w", err)
+		svc := ivfpkg.ResolveSVC(state.CameraPaths, c.svcMode, c.svcSpatialLayers, c.svcTemporalLayers, initialBitrateBps)
+		useSVC = svc.Enabled
+		svcCfg = svc.Config
+		if useSVC {
+			factories, getBitrate, err := gcc.SenderFactories(initialBitrateBps)
+			if err != nil {
+				return nil, fmt.Errorf("build interceptors: %w", err)
+			}
+			getTargetBitrate = getBitrate
+			apiOpts = append(apiOpts, webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories)))
 		}
-		getTargetBitrate = getBitrate
-		apiOpts = append(apiOpts, webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories)))
 	}
 
 	api := webrtc.NewAPI(apiOpts...)
@@ -126,26 +133,45 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 
 	// Build either a viewer (recvonly transceiver) or a sender (local track).
 	var svcTrack *webrtc.TrackLocalStaticRTP
+	var sampleTrack *webrtc.TrackLocalStaticSample
 	if state.Sender {
 		if state.FrameSource == nil {
 			return nil, errors.New("expected a frame source for sending")
 		}
-		svcTrack, err = webrtc.NewTrackLocalStaticRTP(
-			webrtc.RTPCodecCapability{
-				MimeType:    webrtc.MimeTypeVP9,
-				ClockRate:   90000,
-				SDPFmtpLine: "profile-id=0",
-			},
-			"video",
-			state.Nickname,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
+		if useSVC {
+			svcTrack, err = webrtc.NewTrackLocalStaticRTP(
+				webrtc.RTPCodecCapability{
+					MimeType:    webrtc.MimeTypeVP9,
+					ClockRate:   90000,
+					SDPFmtpLine: "profile-id=0",
+				},
+				"video",
+				state.Nickname,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
+			}
+			if _, err := pc.AddTrack(svcTrack); err != nil {
+				return nil, fmt.Errorf("AddTrack failed: %w", err)
+			}
+		} else {
+			sampleTrack, err = webrtc.NewTrackLocalStaticSample(
+				webrtc.RTPCodecCapability{
+					MimeType:    webrtc.MimeTypeVP9,
+					ClockRate:   90000,
+					SDPFmtpLine: "profile-id=0",
+				},
+				"video",
+				state.Nickname,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("NewTrackLocalStaticSample failed: %w", err)
+			}
+			if _, err := pc.AddTrack(sampleTrack); err != nil {
+				return nil, fmt.Errorf("AddTrack failed: %w", err)
+			}
 		}
-		if _, err := pc.AddTrack(svcTrack); err != nil {
-			return nil, fmt.Errorf("AddTrack failed: %w", err)
-		}
-		state.Log.Infof("[startPion] sender mode: frame source ready")
+		state.Log.Infof("[startPion] sender mode: frame source ready (svc=%v)", useSVC)
 	} else {
 		// Viewer mode: ensure we have a recvonly video transceiver.
 		if _, err := pc.AddTransceiverFromKind(
@@ -208,11 +234,14 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 
 	state.Log.Debugf("[after SetLocalDescription] generated SDP answer:\n%s", pc.LocalDescription().SDP)
 
-	// Start SVC-aware send loop after local description is set.
-	if state.Sender && svcTrack != nil {
-		svcCfg := ivfpkg.ProbeAndBuildSVCConfig(state.CameraPaths, initialBitrateBps)
-		state.Log.Infof("[startPion] SVC config: %d spatial x %d temporal layers", svcCfg.NumSpatialLayers, svcCfg.NumTemporalLayers)
-		go ivfpkg.SVCLoopIntoTrack(state.Log, svcTrack, state.FrameSource, svcCfg, getTargetBitrate)
+	// Start send loop after local description is set.
+	if state.Sender {
+		if useSVC && svcTrack != nil {
+			state.Log.Infof("[startPion] SVC config: %d spatial x %d temporal layers", svcCfg.NumSpatialLayers, svcCfg.NumTemporalLayers)
+			go ivfpkg.SVCLoopIntoTrack(state.Log, svcTrack, state.FrameSource, svcCfg, getTargetBitrate)
+		} else if sampleTrack != nil {
+			go ivfpkg.LoopIntoTrack(state.Log, sampleTrack, state.FrameSource)
+		}
 	}
 
 	ufrag, pwd, fingerprint := parseIceCredentials(pc.LocalDescription().SDP)

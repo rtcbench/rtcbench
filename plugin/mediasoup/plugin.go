@@ -36,6 +36,7 @@ type Plugin struct {
 	serverURL          string
 	clientIP           string
 	cameras            *ivf.Cameras
+	svcConfig          call.SVCCameraConfig
 	log                *log.Logger
 	logRegistry        *log.Registry
 	enableRecording    bool
@@ -65,6 +66,7 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 	p.enableRecording = e.Config().Spec.Conference.Recording.Enabled
 	p.recordingDirectory = e.Config().Spec.Conference.Recording.Directory
 	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
+	p.svcConfig = e.Config().Spec.Conference.Cameras.SVC
 
 	if e.Config().Spec.Conference.PacketCapture.Enabled {
 		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
@@ -239,10 +241,36 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 
 	// 5. Create pion PeerConnection with VP9 send track.
 	const initialBitrateBps = 3_500_000
-	pc, track, getTargetBitrate, offerSDP, err := ms.StartSendPC(l, p.clientIP, p.vp9PT, initialBitrateBps)
-	if err != nil {
-		protoo.Close()
-		return fmt.Errorf("%w: pion send: %v", call.ErrCannotJoinRoom, err)
+	svc := ivf.ResolveSVC(p.cameras.Paths(), p.svcConfig.Mode, p.svcConfig.SpatialLayers, p.svcConfig.TemporalLayers, initialBitrateBps)
+
+	var (
+		pc        *webrtc.PeerConnection
+		offerSDP  string
+		startLoop func()
+	)
+
+	if svc.Enabled {
+		var rtpTrack *webrtc.TrackLocalStaticRTP
+		var getBitrate func() int
+		pc, rtpTrack, getBitrate, offerSDP, err = ms.StartSendPC(l, p.clientIP, p.vp9PT, initialBitrateBps)
+		if err != nil {
+			protoo.Close()
+			return fmt.Errorf("%w: pion send: %v", call.ErrCannotJoinRoom, err)
+		}
+		l.Infof("SVC config: %d spatial x %d temporal layers", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers)
+		startLoop = func() {
+			go ivf.SVCLoopIntoTrack(l, rtpTrack, p.cameras.NewSource(), svc.Config, getBitrate)
+		}
+	} else {
+		var sampleTrack *webrtc.TrackLocalStaticSample
+		pc, sampleTrack, offerSDP, err = ms.StartSendPCSimple(l, p.clientIP, p.vp9PT)
+		if err != nil {
+			protoo.Close()
+			return fmt.Errorf("%w: pion send: %v", call.ErrCannotJoinRoom, err)
+		}
+		startLoop = func() {
+			go ivf.LoopIntoTrack(l, sampleTrack, p.cameras.NewSource())
+		}
 	}
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -292,9 +320,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	l.Infof("producing [id:%s]", result.ID)
 
 	// 9. Start streaming IVF frames.
-	svcCfg := ivf.ProbeAndBuildSVCConfig(p.cameras.Paths(), initialBitrateBps)
-	l.Infof("SVC config: %d spatial x %d temporal layers", svcCfg.NumSpatialLayers, svcCfg.NumTemporalLayers)
-	go ivf.SVCLoopIntoTrack(l, track, p.cameras.NewSource(), svcCfg, getTargetBitrate)
+	startLoop()
 
 	p.mu.Lock()
 	p.protoos = append(p.protoos, protoo)

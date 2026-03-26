@@ -15,13 +15,16 @@ import (
 )
 
 type Client struct {
-	botManager       *viewer.Manager
-	publisher        *vp9_stats.Publisher
-	log              *log.Logger
-	serverIP         string
-	clientIP         string
-	statsBufferSize  int
-	packetCaptureDir string
+	botManager         *viewer.Manager
+	publisher          *vp9_stats.Publisher
+	log                *log.Logger
+	serverIP           string
+	clientIP           string
+	statsBufferSize    int
+	packetCaptureDir   string
+	svcMode            string
+	svcSpatialLayers   int
+	svcTemporalLayers  int
 }
 
 func NewClient(e call.PluginEnv) *Client {
@@ -48,14 +51,18 @@ func NewClient(e call.PluginEnv) *Client {
 		_ = os.MkdirAll(pcapDir, 0o755)
 	}
 
+	svc := cfg.Spec.Conference.Cameras.SVC
 	return &Client{
-		botManager:       botManager,
-		publisher:        publisher,
-		log:              e.LogRegistry().NewLogger("jitsi", ""),
-		serverIP:         cfg.Spec.Network.ServerIP,
-		clientIP:         cfg.Spec.Network.ClientIP,
-		statsBufferSize:  cfg.Spec.Conference.StatsBufferSize,
-		packetCaptureDir: pcapDir,
+		botManager:        botManager,
+		publisher:         publisher,
+		log:               e.LogRegistry().NewLogger("jitsi", ""),
+		serverIP:          cfg.Spec.Network.ServerIP,
+		clientIP:          cfg.Spec.Network.ClientIP,
+		statsBufferSize:   cfg.Spec.Conference.StatsBufferSize,
+		packetCaptureDir:  pcapDir,
+		svcMode:           svc.Mode,
+		svcSpatialLayers:  svc.SpatialLayers,
+		svcTemporalLayers: svc.TemporalLayers,
 	}
 }
 

@@ -40,6 +40,7 @@ type Plugin struct {
 	apiKey             string
 	apiSecret          string
 	cameras            *ivf.Cameras
+	svcConfig          call.SVCCameraConfig
 	log                *log.Logger
 	logRegistry        *log.Registry
 	enableRecording    bool
@@ -68,6 +69,7 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 	p.enableRecording = e.Config().Spec.Conference.Recording.Enabled
 	p.recordingDirectory = e.Config().Spec.Conference.Recording.Directory
 	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
+	p.svcConfig = e.Config().Spec.Conference.Cameras.SVC
 
 	if e.Config().Spec.Conference.PacketCapture.Enabled {
 		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
@@ -157,30 +159,40 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	p.rooms = append(p.rooms, room)
 	p.mu.Unlock()
 
-	// Use TrackLocalStaticRTP for SVC-aware packetization with layer indices.
-	track, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{
-			MimeType:  webrtc.MimeTypeVP9,
-			ClockRate: 90000,
-		},
-		"video", "ivf",
-	)
-	if err != nil {
-		return fmt.Errorf("%w: create track: %v", call.ErrCannotJoinRoom, err)
+	svc := ivf.ResolveSVC(p.cameras.Paths(), p.svcConfig.Mode, p.svcConfig.SpatialLayers, p.svcConfig.TemporalLayers, initialBitrateBps)
+
+	if svc.Enabled {
+		rtpTrack, err := webrtc.NewTrackLocalStaticRTP(
+			webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypeVP9,
+				ClockRate: 90000,
+			},
+			"video", "ivf",
+		)
+		if err != nil {
+			return fmt.Errorf("%w: create track: %v", call.ErrCannotJoinRoom, err)
+		}
+		if _, err = room.LocalParticipant.PublishTrack(rtpTrack, &lksdk.TrackPublicationOptions{Name: "video"}); err != nil {
+			return fmt.Errorf("%w: publish track: %v", call.ErrCannotJoinRoom, err)
+		}
+		l.Infof("SVC config: %d spatial x %d temporal layers", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers)
+		go ivf.SVCLoopIntoTrack(l, rtpTrack, p.cameras.NewSource(), svc.Config, getTargetBitrate)
+	} else {
+		sampleTrack, err := webrtc.NewTrackLocalStaticSample(
+			webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypeVP9,
+				ClockRate: 90000,
+			},
+			"video", "ivf",
+		)
+		if err != nil {
+			return fmt.Errorf("%w: create track: %v", call.ErrCannotJoinRoom, err)
+		}
+		if _, err = room.LocalParticipant.PublishTrack(sampleTrack, &lksdk.TrackPublicationOptions{Name: "video"}); err != nil {
+			return fmt.Errorf("%w: publish track: %v", call.ErrCannotJoinRoom, err)
+		}
+		go ivf.LoopIntoTrack(l, sampleTrack, p.cameras.NewSource())
 	}
-
-	_, err = room.LocalParticipant.PublishTrack(track, &lksdk.TrackPublicationOptions{
-		Name: "video",
-	})
-	if err != nil {
-		return fmt.Errorf("%w: publish track: %v", call.ErrCannotJoinRoom, err)
-	}
-	l.Infof("published VP9 track (SVC-aware payloader)")
-
-	svcCfg := ivf.ProbeAndBuildSVCConfig(p.cameras.Paths(), initialBitrateBps)
-	l.Infof("SVC config: %d spatial x %d temporal layers", svcCfg.NumSpatialLayers, svcCfg.NumTemporalLayers)
-
-	go ivf.SVCLoopIntoTrack(l, track, p.cameras.NewSource(), svcCfg, getTargetBitrate)
 
 	return nil
 }

@@ -76,7 +76,8 @@ def _run_svc_delivery(test_svc_video_dir, network, env, config, min_active, time
     ) as (url, _proc):
         try:
             result = poll_health_svc(
-                url, timeout, min_active, min_sid=min_sid, min_tid=min_tid
+                url, timeout, min_active, min_sid=min_sid, min_tid=min_tid,
+                min_bitrate_bps=50_000,
             )
         except TimeoutError as e:
             pytest.fail(str(e))

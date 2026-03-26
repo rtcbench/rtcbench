@@ -56,6 +56,47 @@ func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
 	})
 }
 
+// StartSimplePublisher creates a sendonly PeerConnection without SVC or GCC.
+func StartSimplePublisher(l *log.Logger, clientIP string) (
+	*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error,
+) {
+	api, err := newPionAPI(clientIP)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
+	}
+	registerLoggingCallbacks(l, pc)
+
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeVP9,
+			ClockRate:   90000,
+			SDPFmtpLine: "profile-id=0",
+		},
+		"video", "ivf",
+	)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("NewTrackLocalStaticSample: %w", err)
+	}
+	if _, err := pc.AddTrack(track); err != nil {
+		return nil, nil, "", fmt.Errorf("AddTrack: %w", err)
+	}
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("CreateOffer: %w", err)
+	}
+	if err := pc.SetLocalDescription(offer); err != nil {
+		return nil, nil, "", fmt.Errorf("SetLocalDescription: %w", err)
+	}
+
+	l.Infof("[pion] publisher offer SDP ready")
+	return pc, track, pc.LocalDescription().SDP, nil
+}
+
 // StartPionPublisher creates a PeerConnection in sendonly mode with GCC
 // bandwidth estimation. Returns the PC, the RTP track, a function to get
 // the current bandwidth estimate, and the offer SDP.
