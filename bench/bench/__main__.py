@@ -1,4 +1,4 @@
-"""Benchmark CLI - find maximum concurrent viewers per SFU."""
+"""Benchmark CLI - find maximum concurrent viewers (or senders) per SFU."""
 
 import argparse
 import datetime
@@ -10,7 +10,9 @@ import sys
 import bench.config as cfg
 from bench.config import (
     SFUS, CLIENTS, VIEWERS_PER_ROOM, VIDEO_BITRATE_MBPS,
-    DEFAULT_MIN_R, DEFAULT_MAX_R, RESULTS_BASE, log,
+    DEFAULT_MIN_R, DEFAULT_MAX_R, RESULTS_BASE,
+    MODE_RECEIVER, MODE_SENDER,
+    log,
 )
 from bench.ssh import SSHRunner
 from bench.sfu import stop_sfu, cleanup
@@ -43,9 +45,9 @@ def parse_cells(cells_str):
 
 
 def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
-                   use_hints=True, quick=False):
+                   use_hints=True, quick=False, mode=MODE_RECEIVER):
     """Run the benchmark for a list of (sfu, client) cells."""
-    cluster = cfg.load_cluster_config(cluster_path)
+    cluster = cfg.load_cluster_config(cluster_path, mode=mode)
 
     if quick:
         cfg.WARMUP_S = 10
@@ -64,6 +66,7 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
 
     sfu_host = cluster["sfu"][0]
     initial_hi = cluster.get("initial_hi", {})
+    hint_prefix = "sender/" if mode == MODE_SENDER else ""
     hints = load_hints() if use_hints else {}
     if hints:
         log.info("Using hints from previous run to narrow search ranges")
@@ -73,10 +76,15 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
 
     cleanup(ssh, cluster)
 
-    log.info("Cluster config: sender=%s sfu=%s receivers=%s",
-             cluster["sender"], sfu_host, cluster["receivers"])
+    label = "S (senders/machine)" if mode == MODE_SENDER else "R (viewers/machine)"
+    if mode == MODE_SENDER:
+        log.info("Cluster config: senders=%s sfu=%s viewer=%s (mode=sender)",
+                 cluster["senders"], sfu_host, cluster["viewer"])
+    else:
+        log.info("Cluster config: sender=%s sfu=%s receivers=%s (mode=receiver)",
+                 cluster["sender"], sfu_host, cluster["receivers"])
     log.info("Cells: %s", [f"{s}/{c}" for s, c in cells])
-    log.info("Binary search default range: [%d, %d]", min_r, max_r)
+    log.info("Binary search default range: [%d, %d] (%s)", min_r, max_r, label)
     if initial_hi:
         log.info("Per-client initial_hi overrides: %s", initial_hi)
 
@@ -84,7 +92,7 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
             cell_tag = f"{sfu_name}/{client_name}"
             log.info("")
             log.info("=" * 60)
-            log.info("Starting cell: %s", cell_tag)
+            log.info("Starting cell: %s (mode=%s)", cell_tag, mode)
             log.info("=" * 60)
 
             cell_max_r = min(initial_hi.get(client_name, max_r), max_r)
@@ -92,24 +100,32 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
             # NIC ceiling
             nic_mbps = cluster.get("nic_mbps")
             if nic_mbps:
-                num_senders = math.ceil(cell_max_r / VIEWERS_PER_ROOM)
-                nic_ceiling = int(nic_mbps / VIDEO_BITRATE_MBPS) - num_senders
+                if mode == MODE_SENDER:
+                    # Sender mode: SFU receives S*M and sends S*M (to 1 viewer).
+                    # Viewer NIC limit: S*M * bitrate. Per-machine: S = nic / (M * bitrate).
+                    num_sender_machines = len(cluster["senders"])
+                    nic_ceiling = int(nic_mbps / VIDEO_BITRATE_MBPS / num_sender_machines)
+                else:
+                    num_senders = math.ceil(cell_max_r / VIEWERS_PER_ROOM)
+                    nic_ceiling = int(nic_mbps / VIDEO_BITRATE_MBPS) - num_senders
                 if nic_ceiling < cell_max_r:
-                    log.info("NIC ceiling: %d Mbps / %.1f Mbps - %d senders = %d max viewers",
-                             nic_mbps, VIDEO_BITRATE_MBPS, num_senders, nic_ceiling)
+                    log.info("NIC ceiling: %d (from %d Mbps / %.1f Mbps, mode=%s)",
+                             nic_ceiling, nic_mbps, VIDEO_BITRATE_MBPS, mode)
                     cell_max_r = min(cell_max_r, nic_ceiling)
 
             cell_lo, cell_hi = hint_range(
-                sfu_name, client_name, min_r, cell_max_r, hints)
+                sfu_name, client_name, min_r, cell_max_r, hints,
+                prefix=hint_prefix)
 
             try:
-                max_healthy_r, history = binary_search(
+                max_healthy, history = binary_search(
                     ssh, cluster, sfu_name, client_name,
                     cell_lo, cell_hi,
                     hard_min_r=min_r, hard_max_r=cell_max_r,
                     dry_run=dry_run, run_dir=run_dir,
+                    mode=mode,
                 )
-                results[(sfu_name, client_name)] = max_healthy_r
+                results[(sfu_name, client_name)] = max_healthy
                 histories[(sfu_name, client_name)] = history
             except Exception as e:
                 log.error("Binary search failed for %s: %s", cell_tag, e)
@@ -119,8 +135,9 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
                 stop_sfu(ssh, sfu_host, sfu_name, cluster)
 
     cleanup(ssh, cluster)
-    print_results(results, histories)
-    save_results(results, histories, run_dir, update_hints=(min_r != max_r))
+    print_results(results, histories, mode=mode)
+    save_results(results, histories, run_dir,
+                 update_hints=(min_r != max_r), hint_prefix=hint_prefix)
 
     return results
 
@@ -130,6 +147,10 @@ def main():
         description="Benchmark coordinator for call.zip")
     parser.add_argument("cluster_config",
                         help="Path to cluster config YAML file")
+    parser.add_argument("--mode", choices=[MODE_RECEIVER, MODE_SENDER],
+                        default=MODE_RECEIVER,
+                        help="Benchmark mode: 'receiver' finds max viewers R_max "
+                             "(default), 'sender' finds max senders S_max")
     parser.add_argument("--sfus",
                         default=",".join(SFUS),
                         help=f"Comma-separated SFUs (default: {','.join(SFUS)})")
@@ -183,6 +204,7 @@ def main():
         dry_run=args.dry_run,
         use_hints=not args.ignore_hints,
         quick=args.quick,
+        mode=args.mode,
     )
 
     if any(v < 0 for v in results.values()):
