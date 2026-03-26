@@ -10,10 +10,11 @@ import traceback
 from bench.config import (
     VIEWERS_PER_ROOM, WARMUP_S, EXPERIMENT_DURATION_S, TEARDOWN_WAIT_S,
     REMOTE_STATS_DIR, REMOTE_LOG_DIR, REMOTE_IVF_DIR,
-    CALLZIP_IMAGE, CALLZIP_SENDER_CONTAINER, CALLZIP_VIEWER_CONTAINER,
+    CALLZIP_IMAGE, CALLZIP_SENDER_CONTAINER, CALLZIP_SENDER_LOAD_CONTAINER,
+    CALLZIP_VIEWER_CONTAINER,
     WRP_IMAGE, WRP_CONTAINER_NAME, SFU_CONTAINER_NAME, data_ip,
     MIN_BITRATE_BPS, MIN_FPS,
-    SENDER_CONFIG, VIEWER_CONFIGS,
+    SENDER_CONFIG, SENDER_LOAD_CONFIG, VIEWER_CONFIGS,
     log,
 )
 from bench.sfu import start_sfu, stop_sfu
@@ -620,6 +621,449 @@ module.exports = function({{sessions, id, params}}) {{
 
     def _teardown(self):
         log.info("Tearing down experiment...")
+        for host, pids in self.pids.items():
+            for pid in pids:
+                try:
+                    if self._is_container_name(pid):
+                        self.ssh.run(host, f"docker rm -f {pid} 2>/dev/null || true",
+                                     check=False, timeout=30)
+                    else:
+                        self.ssh.kill(host, pid)
+                except Exception as e:
+                    log.warning("Teardown failed for %s on %s: %s", pid, host, e)
+
+        time.sleep(TEARDOWN_WAIT_S)
+        self.pids.clear()
+
+
+class SenderExperiment:
+    """Runs a single (SFU, S) sender-saturation experiment.
+
+    Topology: S senders (distributed across sender machines) → SFU → 1 viewer.
+    Binary-searches for S_max — the maximum concurrent senders before video
+    quality degrades on the viewer side.
+    """
+
+    def __init__(self, ssh, cluster, sfu_name, client_name, s_per_machine, run_dir):
+        self.ssh = ssh
+        self.cluster = cluster
+        self.sfu_name = sfu_name
+        self.client_name = client_name
+        self.s_per_machine = s_per_machine
+        self.run_dir = run_dir
+        self.viewer_ip = cluster["viewer"]
+        self.sender_ips = list(cluster["senders"])
+        self.pids = {}  # host -> [container_names]
+
+        if sfu_name == "jitsi":
+            jitsi_cfg = cluster["jitsi"]
+            self.sfu_ip = data_ip(cluster, jitsi_cfg["prosody_web"])
+            jitsi_hosts = {jitsi_cfg["jvb"], jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]}
+            self.sender_ips = [s for s in self.sender_ips if s not in jitsi_hosts]
+            if not self.sender_ips:
+                raise ValueError("No sender machines left after reserving Jitsi hosts")
+            log.info("Jitsi sender bench: serverIP=%s, senders=%s (excluded %s)",
+                     self.sfu_ip, self.sender_ips, jitsi_hosts)
+        else:
+            self.sfu_ip = data_ip(cluster, cluster["sfu"][0])
+
+        self.total_senders = s_per_machine * len(self.sender_ips)
+
+    def _build_topology(self):
+        """Build topology dict for JSONL logging."""
+        if self.sfu_name == "jitsi":
+            jitsi_cfg = self.cluster["jitsi"]
+            sfu_hosts = {
+                "prosody": jitsi_cfg["prosody_web"],
+                "jitsi-web": jitsi_cfg["prosody_web"],
+                "jicofo": jitsi_cfg["jicofo"],
+                "jvb": jitsi_cfg["jvb"],
+            }
+        else:
+            sfu_hosts = {SFU_CONTAINER_NAME: self.sfu_ip}
+
+        sender_cname = (CALLZIP_SENDER_LOAD_CONTAINER if self.client_name == "callzip"
+                        else WRP_CONTAINER_NAME)
+        containers = {CALLZIP_VIEWER_CONTAINER: self.viewer_ip}
+        for host in self.sender_ips:
+            containers[f"{sender_cname}@{host}"] = host
+
+        return {
+            "mode": "sender",
+            "client": self.client_name,
+            "total_senders": self.total_senders,
+            "s_per_machine": self.s_per_machine,
+            "total_viewers": 1,
+            "num_rooms": 1,
+            "hosts": {
+                "viewer": self.viewer_ip,
+                "sfu": sfu_hosts,
+                "senders": list(self.sender_ips),
+            },
+            "containers": containers,
+            "rooms": [{
+                "name": "room-1234",
+                "senders": self.total_senders,
+                "sender_hosts": list(self.sender_ips),
+                "viewers": 1,
+                "viewer_host": self.viewer_ip,
+            }],
+        }
+
+    def run(self):
+        """Execute the experiment. Returns True if viewer received all streams healthy."""
+        tag = f"{self.sfu_name}/{self.client_name}/S={self.s_per_machine}x{len(self.sender_ips)}"
+        log.info("=== Sender Experiment %s (total=%d) ===", tag, self.total_senders)
+
+        self._health_reason = "OK"
+        self._health_meta = {}
+
+        try:
+            sfu_host = self.cluster["sfu"][0]
+            stop_sfu(self.ssh, sfu_host, self.sfu_name, self.cluster)
+            start_sfu(self.ssh, sfu_host, self.sfu_name, self.cluster)
+
+            self._prepare_dirs()
+            self._start_viewer()
+            self._start_senders()
+            self._wait_experiment()
+            healthy = self._check_health()
+            self._collect_stats(tag)
+            return healthy
+        except Exception as e:
+            tb = traceback.format_exc()
+            log.error("Sender experiment %s failed: %s", tag, e)
+            err_str = str(e)
+            if "timed out" in err_str.lower():
+                self._health_reason = "OOM"
+                self._health_meta = {"error": "SSH timed out (machine likely OOM-thrashed)",
+                                     "traceback": tb}
+            else:
+                self._health_reason = "EXPERIMENT_ERROR"
+                self._health_meta = {"error": err_str, "traceback": tb}
+            return False
+        finally:
+            self._teardown()
+            log_experiment(
+                run_dir=self.run_dir,
+                sfu=self.sfu_name,
+                client=self.client_name,
+                r=self.s_per_machine,
+                result=self._health_reason == "OK",
+                reason=self._health_reason,
+                meta=self._health_meta,
+                topology=self._build_topology(),
+            )
+
+    def _prepare_dirs(self):
+        all_hosts = [self.viewer_ip] + self.sender_ips
+        for host in all_hosts:
+            self.ssh.run(host, f"mkdir -p {REMOTE_STATS_DIR} {REMOTE_LOG_DIR}", timeout=60)
+            self.ssh.run(host, f"rm -f {REMOTE_STATS_DIR}/*.jsonl {REMOTE_STATS_DIR}/*.csv 2>/dev/null || true", timeout=60)
+
+    def _start_viewer(self):
+        """Start a single call.zip viewer on the viewer machine."""
+        viewer_config = VIEWER_CONFIGS[self.sfu_name]
+        with open(viewer_config) as f:
+            config_content = f.read()
+
+        config_path = "/tmp/bench-viewer.yml"
+        self.ssh.write_remote_file(self.viewer_ip, config_path, config_content)
+
+        env = (
+            f"-e SERVER_IP={self.sfu_ip} "
+            f"-e VIEWERS_PER_ROOM=1 "
+            f"-e TOTAL_ROOMS=1 "
+            f"-e STATS_JSONL_PATH={REMOTE_STATS_DIR} "
+            f"-e LOG_DIR={REMOTE_LOG_DIR} "
+        )
+
+        self.ssh.run(self.viewer_ip,
+                     f"docker rm -f {CALLZIP_VIEWER_CONTAINER} 2>/dev/null || true",
+                     check=False, timeout=10)
+        self.ssh.run(self.viewer_ip,
+                     f"docker run -d --name {CALLZIP_VIEWER_CONTAINER} --network host "
+                     f"--ulimit nofile=65536:65536 "
+                     f"{env} "
+                     f"-v {config_path}:{config_path}:ro "
+                     f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
+                     f"-v {REMOTE_LOG_DIR}:{REMOTE_LOG_DIR} "
+                     f"{CALLZIP_IMAGE} {config_path}", timeout=30)
+        self.pids.setdefault(self.viewer_ip, []).append(CALLZIP_VIEWER_CONTAINER)
+        log.info("Viewer started on %s (container=%s, 1 viewer in room-1234)",
+                 self.viewer_ip, CALLZIP_VIEWER_CONTAINER)
+
+        log.info("Waiting 10s for viewer to join room...")
+        time.sleep(10)
+
+    def _start_senders(self):
+        if self.client_name == "callzip":
+            self._start_callzip_senders()
+        elif self.client_name in ("webrtcperf", "chromium"):
+            self._start_webrtcperf_senders()
+        else:
+            raise ValueError(f"Unknown sender client: {self.client_name}")
+
+    def _start_callzip_senders(self):
+        """Start call.zip sender-load containers on each sender machine."""
+        with open(SENDER_LOAD_CONFIG) as f:
+            config_content = f.read()
+
+        for host in self.sender_ips:
+            config_path = "/tmp/bench-sender-load.yml"
+            self.ssh.write_remote_file(host, config_path, config_content)
+
+            env = (
+                f"-e PLUGIN_ID={self.sfu_name} "
+                f"-e SERVER_IP={self.sfu_ip} "
+                f"-e SENDERS_PER_MACHINE={self.s_per_machine} "
+                f"-e IVF_DIR={REMOTE_IVF_DIR} "
+                f"-e LOG_DIR={REMOTE_LOG_DIR} "
+            )
+
+            self.ssh.run(host,
+                         f"docker rm -f {CALLZIP_SENDER_LOAD_CONTAINER} 2>/dev/null || true",
+                         check=False, timeout=10)
+            self.ssh.run(host,
+                         f"docker run -d --name {CALLZIP_SENDER_LOAD_CONTAINER} --network host "
+                         f"--ulimit nofile=65536:65536 "
+                         f"{env} "
+                         f"-v {REMOTE_IVF_DIR}:{REMOTE_IVF_DIR}:ro "
+                         f"-v {config_path}:{config_path}:ro "
+                         f"-v {REMOTE_LOG_DIR}:{REMOTE_LOG_DIR} "
+                         f"{CALLZIP_IMAGE} {config_path}", timeout=30)
+            self.pids.setdefault(host, []).append(CALLZIP_SENDER_LOAD_CONTAINER)
+            log.info("Sender-load started on %s (container=%s, S=%d)",
+                     host, CALLZIP_SENDER_LOAD_CONTAINER, self.s_per_machine)
+
+        log.info("Waiting 15s for %d senders to join and start publishing...",
+                 self.total_senders)
+        time.sleep(15)
+        self._start_at = int(time.time())
+
+    def _start_webrtcperf_senders(self):
+        """Start WebRTCPerf sender containers on each sender machine.
+
+        Each WRP instance runs s_per_machine browser sessions, each publishing
+        fake video into the room via the SFU's web frontend.
+        """
+        # chromium decodes incoming video; webrtcperf does not
+        max_decoders = 0 if self.client_name == "webrtcperf" else -1
+
+        for host in self.sender_ips:
+            url = self._webrtcperf_sender_url()
+
+            wrp_config = {
+                "url": url,
+                "sessions": self.s_per_machine,
+                "maxVideoDecoders": max_decoders,
+                "showPageLog": True,
+                "statsInterval": 5,
+                "statsPath": f"{REMOTE_STATS_DIR}/wrp-stats.csv",
+            }
+
+            config_json = json.dumps(wrp_config)
+            self.ssh.write_remote_file(host, "/tmp/wrp-config.json", config_json)
+            self.ssh.run(host, f"docker rm -f {WRP_CONTAINER_NAME} 2>/dev/null || true",
+                         check=False, timeout=10)
+
+            cmd = (
+                f"docker run -d --name {WRP_CONTAINER_NAME} --network host "
+                f"--shm-size=2g "
+                f"-v /tmp/wrp-config.json:/config.json:ro "
+                f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
+                f"{WRP_IMAGE} "
+                f"--run-xvfb /config.json"
+            )
+            self.ssh.run(host, cmd, timeout=60)
+            self.pids.setdefault(host, []).append(WRP_CONTAINER_NAME)
+            log.info("%s sender started on %s (container=%s, sessions=%d, decoders=%d)",
+                     self.client_name, host, WRP_CONTAINER_NAME,
+                     self.s_per_machine, max_decoders)
+
+        log.info("Waiting 15s for %d %s senders to join and start publishing...",
+                 self.total_senders, self.client_name)
+        time.sleep(15)
+        self._start_at = int(time.time())
+
+    def _webrtcperf_sender_url(self):
+        """Generate a publish-enabled URL for the SFU's web frontend."""
+        sfu_ip = self.sfu_ip
+
+        if self.sfu_name == "janus":
+            web_port = self.cluster.get("janus_web_port", 8080)
+            api_port = self.cluster.get("janus_api_port", 8088)
+            return (f"http://{sfu_ip}:{web_port}/"
+                    f"?room=1234&server=http://{sfu_ip}:{api_port}/janus"
+                    f"&publish=true")
+        elif self.sfu_name == "jitsi":
+            port = self.cluster.get("jitsi_web_port", 443)
+            return (f"https://{sfu_ip}:{port}/room-1234"
+                    f"#config.prejoinConfig.enabled=false"
+                    f"&config.p2p.enabled=false"
+                    f"&config.startWithAudioMuted=true"
+                    f"&config.startWithVideoMuted=false"
+                    f"&config.startSilent=true"
+                    f"&config.disableDeepLinking=true"
+                    f"&config.requireDisplayName=false"
+                    f"&config.testing.testMode=true"
+                    f"&config.testing.noAutoPlayVideo=true"
+                    f"&config.channelLastN=-1"
+                    f"&config.notifications=[]"
+                    f"&userInfo.displayName=%22bench-sender%22")
+        elif self.sfu_name == "livekit":
+            web_port = self.cluster.get("livekit_web_port", 8080)
+            ws_port = self.cluster.get("livekit_ws_port", 7880)
+            return (f"http://{sfu_ip}:{web_port}/"
+                    f"?ws=ws://{sfu_ip}:{ws_port}"
+                    f"&room=room-1234&key=devkey&secret=secret"
+                    f"&publish=true")
+        elif self.sfu_name == "mediasoup":
+            web_port = self.cluster.get("mediasoup_web_port", 8080)
+            return (f"https://{sfu_ip}:{web_port}/"
+                    f"?roomId=room-1234"
+                    f"&produce=true&consume=true"
+                    f"&webcam=true&mic=false"
+                    f"&forceVP9=true"
+                    f"&displayName=bench-sender")
+        else:
+            raise ValueError(f"Unknown SFU: {self.sfu_name}")
+
+    def _wait_experiment(self):
+        total_s = WARMUP_S + EXPERIMENT_DURATION_S
+        wait_until = self._start_at + total_s
+        remaining = wait_until - time.time()
+        if remaining > 0:
+            log.info("Waiting %.0fs for experiment to complete "
+                     "(warmup=%ds + steady=%ds, until %d)...",
+                     remaining, WARMUP_S, EXPERIMENT_DURATION_S, wait_until)
+            time.sleep(remaining)
+
+    def _check_health(self):
+        """Check health of the single viewer receiving S tracks.
+
+        The viewer spawns one stats entry per incoming track (SSRC-qualified).
+        Each track must meet bitrate and FPS thresholds.
+        """
+        self._health_reason = "OK"
+        self._health_meta = {}
+
+        # NIC throughput check on viewer (receiving total_senders streams)
+        try:
+            nic_script = (
+                "DEV=$(ip route get %s | head -1 | awk '{for(i=1;i<=NF;i++) if($i==\"dev\") print $(i+1)}') && "
+                "RX1=$(cat /sys/class/net/$DEV/statistics/rx_bytes) && "
+                "sleep 5 && "
+                "RX2=$(cat /sys/class/net/$DEV/statistics/rx_bytes) && "
+                "echo $DEV $RX1 $RX2"
+            ) % self.sfu_ip
+            result = self.ssh.run(self.viewer_ip, nic_script, timeout=30)
+            parts = result.stdout.strip().split()
+            dev, rx1, rx2 = parts[0], int(parts[1]), int(parts[2])
+            rx_bps = (rx2 - rx1) * 8 / 5.0
+            expected_bps = self.total_senders * MIN_BITRATE_BPS
+            ratio = rx_bps / expected_bps if expected_bps > 0 else 0
+            self._health_meta["nic_mbps"] = round(rx_bps / 1e6, 1)
+            self._health_meta["expected_mbps"] = round(expected_bps / 1e6, 1)
+            self._health_meta["nic_ratio_pct"] = round(ratio * 100, 1)
+            log.info("Viewer %s NIC %s: %.1f Mbps received (expected %.1f Mbps for S=%d, ratio=%.1f%%)",
+                     self.viewer_ip, dev, rx_bps / 1e6, expected_bps / 1e6,
+                     self.total_senders, ratio * 100)
+            if ratio < 0.8:
+                log.warning("NIC throughput too low: %.1f Mbps < 80%% of expected %.1f Mbps",
+                            rx_bps / 1e6, expected_bps / 1e6)
+                self._health_reason = "NIC_THROUGHPUT_LOW"
+                self._health_meta.update({"ratio_pct": round(ratio * 100, 1)})
+                return False
+        except Exception as e:
+            log.error("NIC throughput check failed for viewer %s: %s", self.viewer_ip, e)
+            self._health_reason = "NIC_CHECK_ERROR"
+            self._health_meta = {"error": str(e)}
+            return False
+
+        # JSONL per-track quality check on the single viewer machine
+        try:
+            script = (
+                "python3 -c '"
+                "import json,glob,sys; last={};\n"
+                "[last.update({s[\"viewer\"]:s})"
+                " for f in sorted(glob.glob(\"/dev/shm/bench-stats/*.jsonl\"))"
+                " for line in open(f) if line.strip()"
+                " for s in [json.loads(line)]];\n"
+                "json.dump({v:{\"bitrate_bps\":s[\"bitrate_bps\"],\"fps\":s[\"fps\"]}"
+                " for v,s in last.items()},sys.stdout)'"
+            )
+            result = self.ssh.run(self.viewer_ip, script, timeout=60)
+            tracks = json.loads(result.stdout.strip() or "{}")
+        except Exception as e:
+            log.error("JSONL health check failed for viewer %s: %s", self.viewer_ip, e)
+            self._health_reason = "STATS_ERROR"
+            self._health_meta = {"error": str(e)}
+            return False
+
+        total_checked = len(tracks)
+        unhealthy_count = 0
+        for track_id, stats in tracks.items():
+            bitrate = stats["bitrate_bps"]
+            fps = stats["fps"]
+            if bitrate < MIN_BITRATE_BPS or fps < MIN_FPS:
+                unhealthy_count += 1
+                log.warning("Unhealthy track on viewer: %s - bitrate=%.0f fps=%.1f",
+                            track_id, bitrate, fps)
+
+        self._health_meta.update({
+            "tracks_checked": total_checked,
+            "tracks_expected": self.total_senders,
+            "tracks_unhealthy": unhealthy_count,
+        })
+
+        log.info("Viewer: %d tracks checked (expected %d from %d senders)",
+                 total_checked, self.total_senders, self.total_senders)
+
+        if total_checked == 0:
+            log.warning("No tracks found in JSONL - treating as unhealthy")
+            self._health_reason = "NO_TRACKS"
+            return False
+
+        # Allow some tolerance: at least 80% of expected tracks must be present
+        if total_checked < self.total_senders * 0.8:
+            log.warning("Only %d/%d tracks reporting (need >=80%%)",
+                        total_checked, self.total_senders)
+            self._health_reason = "TRACKS_MISSING"
+            return False
+
+        healthy_frac = (total_checked - unhealthy_count) / total_checked
+        self._health_meta["healthy_pct"] = round(healthy_frac * 100, 1)
+        log.info("Health: %d/%d tracks healthy (%.1f%%)",
+                 total_checked - unhealthy_count, total_checked, healthy_frac * 100)
+
+        if unhealthy_count > 0:
+            self._health_reason = "QUALITY_DEGRADED"
+            return False
+
+        return True
+
+    def _collect_stats(self, tag):
+        results_dir = os.path.join(
+            self.run_dir,
+            f"sfu={self.sfu_name}",
+            f"client={self.client_name}",
+            f"S={self.s_per_machine}",
+        )
+        # Collect viewer stats
+        local_dir = os.path.join(results_dir, self.viewer_ip)
+        try:
+            self.ssh.rsync_from(self.viewer_ip, REMOTE_STATS_DIR, local_dir)
+            log.info("Collected viewer stats from %s -> %s", self.viewer_ip, local_dir)
+        except Exception as e:
+            log.error("Failed to collect viewer stats from %s: %s", self.viewer_ip, e)
+
+    @staticmethod
+    def _is_container_name(pid):
+        return not pid.isdigit()
+
+    def _teardown(self):
+        log.info("Tearing down sender experiment...")
         for host, pids in self.pids.items():
             for pid in pids:
                 try:

@@ -5,6 +5,7 @@
 const params = new URLSearchParams(window.location.search);
 const SERVER = params.get("server") || "http://172.20.0.10:8088/janus";
 const ROOM_ID = parseInt(params.get("room") || "1234", 10);
+const PUBLISH = params.get("publish") === "true";
 
 function dbg(msg) { console.log(msg); }
 
@@ -62,9 +63,10 @@ async function main() {
     }
 
     // Step 1: Join as publisher to get the active publishers list.
+    const displayName = PUBLISH ? "browser-sender" : "browser-viewer";
     const joined = await asyncMsg(hid, {
         request: "join", ptype: "publisher", room: ROOM_ID,
-        display: "browser-viewer",
+        display: displayName,
     });
     const pubData = joined.plugindata && joined.plugindata.data;
     if (!pubData || pubData.videoroom !== "joined") {
@@ -73,9 +75,29 @@ async function main() {
     const publishers = pubData.publishers || [];
     dbg("publishers=" + publishers.length + " ids=[" + publishers.map(p=>p.id).join(",") + "]");
 
+    // Step 1b: If publishing, get fake media and send it via the publisher handle.
+    if (PUBLISH) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {width: 1280, height: 720, frameRate: 25},
+            audio: false,
+        });
+        const pubPC = new RTCPeerConnection();
+        for (const track of stream.getTracks()) pubPC.addTrack(track, stream);
+        const offer = await pubPC.createOffer();
+        await pubPC.setLocalDescription(offer);
+        const configured = await asyncMsg(hid,
+            {request: "configure", video: true, audio: false, videocodec: "vp9"},
+            {type: "offer", sdp: offer.sdp});
+        if (configured.jsep) {
+            await pubPC.setRemoteDescription(new RTCSessionDescription(configured.jsep));
+        }
+        dbg("publishing video via publisher handle");
+    }
+
     // Step 2: Subscribe to all active publishers in a single multistream
     // PeerConnection via a second handle (the standard Janus pattern).
-    if (publishers.length === 0) { document.title = "ERROR: no publishers"; return; }
+    if (publishers.length === 0 && !PUBLISH) { document.title = "ERROR: no publishers"; return; }
+    if (publishers.length === 0) { document.title = "JOINED"; return; }
     const streams = publishers.map(p => ({feed: p.id}));
 
     const subAtt = await post("/" + sid, {janus: "attach", plugin: "janus.plugin.videoroom"});
