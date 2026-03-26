@@ -23,6 +23,9 @@ type viewerState struct {
 	FrameJitterUS       float64
 	FramesComplete      int64
 	FramesLost          int64
+	PLISent             int64
+	MaxRecvSID          uint8
+	MaxRecvTID          uint8
 	SampleCount         int64
 	LastSeenAt          time.Time
 }
@@ -61,6 +64,9 @@ func (s *Server) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySampl
 		vs.FrameJitterUS = sample.FrameJitterUS
 		vs.FramesComplete = sample.FramesComplete
 		vs.FramesLost = sample.FramesLost
+		vs.PLISent = sample.RTCP.PLISent
+		vs.MaxRecvSID = sample.SVC.MaxRecvSID
+		vs.MaxRecvTID = sample.SVC.MaxRecvTID
 		vs.SampleCount++
 		vs.LastSeenAt = time.Now()
 		s.errors = period.Errors
@@ -113,6 +119,9 @@ type viewerReport struct {
 	FrameJitterUS       float64 `json:"frame_jitter_us"`
 	FramesComplete      int64   `json:"frames_complete"`
 	FramesLost          int64   `json:"frames_lost"`
+	PLISent             int64   `json:"pli_sent"`
+	MaxRecvSID          uint8   `json:"max_recv_sid"`
+	MaxRecvTID          uint8   `json:"max_recv_tid"`
 	SampleCount         int64   `json:"sample_count"`
 	LastSeenAgoMs       int64   `json:"last_seen_ago_ms"`
 }
@@ -139,6 +148,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			FrameJitterUS:       vs.FrameJitterUS,
 			FramesComplete:      vs.FramesComplete,
 			FramesLost:          vs.FramesLost,
+			PLISent:             vs.PLISent,
+			MaxRecvSID:          vs.MaxRecvSID,
+			MaxRecvTID:          vs.MaxRecvTID,
 			SampleCount:         vs.SampleCount,
 			LastSeenAgoMs:       agoMs,
 		})

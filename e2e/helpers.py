@@ -38,14 +38,23 @@ PLUGIN_ENV = {
 
 # Accumulated delivery results for the terminal summary (populated by record_result).
 _delivery_results: list[tuple[str, dict]] = []
+_svc_results: list[tuple[str, dict]] = []
 
 
 def get_delivery_results() -> list[tuple[str, dict]]:
     return _delivery_results
 
 
+def get_svc_results() -> list[tuple[str, dict]]:
+    return _svc_results
+
+
 def record_result(scenario: str, data: dict) -> None:
     _delivery_results.append((scenario, data))
+
+
+def record_svc_result(scenario: str, data: dict) -> None:
+    _svc_results.append((scenario, data))
 
 
 def _free_port() -> int:
@@ -101,8 +110,65 @@ def poll_health(
     raise TimeoutError(f"health check did not pass within {timeout}s — last: {last_err}")
 
 
+def poll_health_svc(
+    url: str,
+    timeout: int,
+    min_active: int,
+    min_sid: int = 2,
+    min_tid: int = 1,
+    min_bitrate_bps: int = 500_000,
+) -> dict:
+    """
+    Poll GET url until SVC layer conditions are met:
+      - status == "ok"
+      - at least min_active active viewers
+      - every active viewer has max_recv_sid >= min_sid and max_recv_tid >= min_tid
+      - every active viewer has smooth_bitrate_bps >= min_bitrate_bps and smooth_fps > 0
+
+    Returns the last passing health payload.
+    Raises TimeoutError if the conditions are not met within timeout seconds.
+    """
+    deadline = time.time() + timeout
+    last_err = "no response yet"
+    while time.time() < deadline:
+        try:
+            r = requests.get(url, timeout=2)
+            data = r.json()
+            active = [v for v in data["viewers"] if v["last_seen_ago_ms"] <= 30_000]
+            if (
+                data["status"] == "ok"
+                and len(active) >= min_active
+                and all(v["smooth_bitrate_bps"] >= min_bitrate_bps for v in active)
+                and all(v["smooth_fps"] > 0 for v in active)
+                and all(v.get("max_recv_sid", 0) >= min_sid for v in active)
+                and all(v.get("max_recv_tid", 0) >= min_tid for v in active)
+            ):
+                return data
+            svc_info = ", ".join(
+                f"sid={v.get('max_recv_sid', '?')}/tid={v.get('max_recv_tid', '?')}"
+                for v in active
+            )
+            last_err = (
+                f"status={data['status']} "
+                f"active={len(active)}/{min_active} "
+                f"svc=[{svc_info}]"
+            )
+        except Exception as exc:
+            last_err = str(exc)
+        time.sleep(2)
+    raise TimeoutError(f"SVC health check did not pass within {timeout}s -- last: {last_err}")
+
+
 @contextlib.contextmanager
-def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = None, capture_dir: Path = None, env: dict = None):
+def callzip_run(
+    config,
+    video_dir: Path,
+    network: str,
+    recording_dir: Path = None,
+    capture_dir: Path = None,
+    env: dict = None,
+    cap_add: list = None,
+):
     """
     Start call.zip in a Docker container joined to the given Docker network.
 
@@ -113,8 +179,9 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
     recording_dir: if given, mounted as /tmp/recordings (write).
     capture_dir: if given, mounted as /tmp/captures (write) for packet capture.
     env: if given, dict of environment variables passed to the container via -e flags.
+    cap_add: if given, list of capabilities to add (e.g. ["NET_ADMIN"]).
 
-    Yields (health_url, proc) where health_url is http://localhost:<port>/health.
+    Yields (health_url, container_name, proc).
     On exit: stops the container, waits for the process, prints captured output.
     """
     host_port = _free_port()
@@ -133,12 +200,18 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
         for k, v in env.items():
             env_flags += ["-e", f"{k}={v}"]
 
+    cap_flags = []
+    if cap_add:
+        for cap in cap_add:
+            cap_flags += ["--cap-add", cap]
+
     cmd = [
         "docker", "run", "--rm", "--name", name,
         "--network", network,
         "-p", f"{host_port}:9090",
         "-v", f"{video_dir}:/test-videos:ro",
         *env_flags,
+        *cap_flags,
         *ci_mounts,
     ]
     if recording_dir is not None:
@@ -148,6 +221,7 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
     cmd += ["callzip:latest", container_config]
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc.container_name = name  # attach container name for callers that need docker exec
     try:
         yield f"http://localhost:{host_port}/health", proc
     finally:
@@ -155,6 +229,66 @@ def callzip_run(config, video_dir: Path, network: str, recording_dir: Path = Non
         out, _ = proc.communicate(timeout=15)
         if out:
             print(f"\n--- callzip output ({config.name}) ---\n{out}---")
+
+
+def apply_bandwidth_limit(container_name: str, rate_kbit: int) -> None:
+    """Apply a bandwidth limit using tc tbf (token bucket filter).
+
+    Creates a realistic bandwidth bottleneck where excess packets overflow
+    the buffer and get dropped, just like a congested router. The burst
+    parameter scales with the rate to avoid underflow at higher speeds.
+
+    Requires NET_ADMIN capability and iproute2 in the container.
+    """
+    # Remove any existing qdisc first (ignore errors if none exists)
+    subprocess.run(
+        ["docker", "exec", container_name, "tc", "qdisc", "del", "dev", "eth0", "root"],
+        check=False, capture_output=True,
+    )
+    # burst = max(15kb, rate_bytes_per_sec / 100) to scale with rate
+    burst_bytes = max(15_000, rate_kbit * 1000 // 8 // 100)
+    burst_kb = max(1, burst_bytes // 1000)
+    subprocess.run(
+        ["docker", "exec", container_name, "tc", "qdisc", "add", "dev", "eth0",
+         "root", "handle", "1:", "tbf",
+         "rate", f"{rate_kbit}kbit",
+         "burst", f"{burst_kb}kb",
+         "latency", "50ms"],
+        check=True,
+    )
+    # Add 20ms +/- 5ms delay as child to simulate real network path
+    subprocess.run(
+        ["docker", "exec", container_name, "tc", "qdisc", "add", "dev", "eth0",
+         "parent", "1:1", "handle", "10:", "netem",
+         "delay", "20ms", "5ms"],
+        check=True,
+    )
+
+
+def poll_health_snapshot(url: str, timeout: int) -> dict | None:
+    """Poll health until we get a response with at least one active viewer.
+    Returns the health payload, or None if it times out.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            r = requests.get(url, timeout=2)
+            data = r.json()
+            active = [v for v in data["viewers"] if v["last_seen_ago_ms"] <= 30_000]
+            if data["status"] == "ok" and active:
+                return data
+        except Exception:
+            pass
+        time.sleep(2)
+    return None
+
+
+def remove_bandwidth_limit(container_name: str) -> None:
+    """Remove any tc qdisc on the container."""
+    subprocess.run(
+        ["docker", "exec", container_name, "tc", "qdisc", "del", "dev", "eth0", "root"],
+        check=False, capture_output=True,
+    )
 
 
 def build_pcap_config(base_config_name: str) -> Path:

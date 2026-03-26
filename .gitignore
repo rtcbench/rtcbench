@@ -15,7 +15,9 @@ scripts/remote-e2e/config*.yml
 # Binary name from "go build"
 call.zip
 call.zip.exe
+ivf-svc
 !cmd/call.zip
+!cmd/ivf-svc
 
 # Screenshot artifacts (keep verify.html, ignore image runs)
 e2e/screenshots/*/

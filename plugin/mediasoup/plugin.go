@@ -434,7 +434,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 				l.Infof("enabled IVF recording for room=%s user=%s", roomID, userID)
 			}
 		}
-		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, seg, p.publisher); err != nil {
+		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, seg, p.publisher, nil, nil); err != nil {
 			l.Errorf("[viewer] SpawnViewer failed: %v", err)
 		}
 	})

@@ -25,6 +25,9 @@ type Sample struct {
 	FrameJitterUS       float64          `json:"frame_jitter_us"`
 	FramesComplete      int64            `json:"frames_complete"`
 	FramesLost          int64            `json:"frames_lost"`
+	PLISent             int64            `json:"pli_sent"`
+	MaxRecvSID          uint8            `json:"max_recv_sid"`
+	MaxRecvTID          uint8            `json:"max_recv_tid"`
 	Errors              map[string]int32 `json:"errors,omitempty"`
 }
 
@@ -78,6 +81,9 @@ func (w *Writer) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySampl
 			FrameJitterUS:       sample.FrameJitterUS,
 			FramesComplete:      sample.FramesComplete,
 			FramesLost:          sample.FramesLost,
+			PLISent:             sample.RTCP.PLISent,
+			MaxRecvSID:          sample.SVC.MaxRecvSID,
+			MaxRecvTID:          sample.SVC.MaxRecvTID,
 			Errors:              errMap,
 		}
 		w.mu.Lock()
