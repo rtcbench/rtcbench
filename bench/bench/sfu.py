@@ -4,7 +4,8 @@ import logging
 
 from bench.config import (
     SFUS, SFU_CONTAINER_NAME, WEB_CONTAINER_NAME, JITSI_IMAGE_TAG,
-    CALLZIP_SENDER_CONTAINER, CALLZIP_VIEWER_CONTAINER, WRP_CONTAINER_NAME,
+    CALLZIP_SENDER_CONTAINER, CALLZIP_SENDER_LOAD_CONTAINER,
+    CALLZIP_VIEWER_CONTAINER, WRP_CONTAINER_NAME,
     data_ip,
 )
 
@@ -204,11 +205,19 @@ def stop_all_sfus(ssh, sfu_host, cluster=None):
 
 def cleanup(ssh, cluster):
     """Kill all bench containers on all hosts. Called at start and end of run."""
-    containers = f"{SFU_CONTAINER_NAME} {WEB_CONTAINER_NAME} {CALLZIP_SENDER_CONTAINER} {CALLZIP_VIEWER_CONTAINER} {WRP_CONTAINER_NAME}"
+    containers = (f"{SFU_CONTAINER_NAME} {WEB_CONTAINER_NAME} "
+                  f"{CALLZIP_SENDER_CONTAINER} {CALLZIP_SENDER_LOAD_CONTAINER} "
+                  f"{CALLZIP_VIEWER_CONTAINER} {WRP_CONTAINER_NAME}")
     hosts = set()
-    hosts.add(cluster["sender"])
+    if "sender" in cluster:
+        hosts.add(cluster["sender"])
+    if "viewer" in cluster:
+        hosts.add(cluster["viewer"])
     hosts.update(cluster["sfu"])
-    hosts.update(cluster["receivers"])
+    if "receivers" in cluster:
+        hosts.update(cluster["receivers"])
+    if "senders" in cluster:
+        hosts.update(cluster["senders"])
     jitsi_cfg = cluster.get("jitsi", {})
     for key in ("jvb", "prosody_web", "jicofo"):
         if key in jitsi_cfg:

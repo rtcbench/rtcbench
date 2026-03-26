@@ -33,10 +33,15 @@ REMOTE_STATS_DIR = "/dev/shm/bench-stats"
 REMOTE_LOG_DIR = "/tmp/bench-logs"
 REMOTE_IVF_DIR = "/opt/ivf-videos"
 
+# Benchmark modes
+MODE_RECEIVER = "receiver"
+MODE_SENDER = "sender"
+
 # call.zip Docker image and container names
 CALLZIP_IMAGE = "callzip:latest"
 CALLZIP_SENDER_CONTAINER = "bench-sender"
 CALLZIP_VIEWER_CONTAINER = "bench-viewer"
+CALLZIP_SENDER_LOAD_CONTAINER = "bench-sender-load"
 
 # Binary search bounds
 DEFAULT_MIN_R = 1
@@ -46,6 +51,7 @@ DEFAULT_MAX_R = 5000
 RESULTS_BASE = "results"
 CALLZIP_CONFIGS_DIR = "callzip-configs"
 SENDER_CONFIG = os.path.join(CALLZIP_CONFIGS_DIR, "bench-sender.yml")
+SENDER_LOAD_CONFIG = os.path.join(CALLZIP_CONFIGS_DIR, "bench-sender-load.yml")
 VIEWER_CONFIGS = {
     "janus": os.path.join(CALLZIP_CONFIGS_DIR, "bench-janus.yml"),
     "jitsi": os.path.join(CALLZIP_CONFIGS_DIR, "bench-jitsi.yml"),
@@ -78,8 +84,12 @@ SFU_CONTAINER_NAME = "bench-sfu"
 log = logging.getLogger("bench")
 
 
-def load_cluster_config(path):
-    """Load cluster config YAML. Returns dict with normalized fields."""
+def load_cluster_config(path, mode=MODE_RECEIVER):
+    """Load cluster config YAML. Returns dict with normalized fields.
+
+    Receiver mode requires: ssh_key, ssh_user, sender, sfu, receivers.
+    Sender mode requires:   ssh_key, ssh_user, senders, sfu, viewer.
+    """
     import bench.config as cfg
 
     try:
@@ -90,15 +100,26 @@ def load_cluster_config(path):
     with open(path) as f:
         data = yaml.safe_load(f)
 
-    required = ["ssh_key", "ssh_user", "sender", "sfu", "receivers"]
-    for key in required:
+    common_required = ["ssh_key", "ssh_user", "sfu"]
+    for key in common_required:
         if key not in data:
             sys.exit(f"ERROR: cluster config missing required key: {key}")
 
+    if mode == MODE_RECEIVER:
+        for key in ["sender", "receivers"]:
+            if key not in data:
+                sys.exit(f"ERROR: cluster config missing required key for receiver mode: {key}")
+    elif mode == MODE_SENDER:
+        for key in ["senders", "viewer"]:
+            if key not in data:
+                sys.exit(f"ERROR: cluster config missing required key for sender mode: {key}")
+
     if isinstance(data["sfu"], str):
         data["sfu"] = [data["sfu"]]
-    if isinstance(data["receivers"], str):
+    if "receivers" in data and isinstance(data["receivers"], str):
         data["receivers"] = [data["receivers"]]
+    if "senders" in data and isinstance(data["senders"], str):
+        data["senders"] = [data["senders"]]
 
     # Apply optional overrides
     if "min_bitrate_bps" in data:

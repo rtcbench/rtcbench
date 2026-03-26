@@ -8,6 +8,7 @@ const WS_URL = params.get("ws");
 const ROOM = params.get("room") || "room-1234";
 const API_KEY = params.get("key") || "devkey";
 const API_SECRET = params.get("secret") || "secret";
+const PUBLISH = params.get("publish") === "true";
 
 if (!WS_URL) {
     document.title = "ERROR: missing ws query parameter";
@@ -20,13 +21,13 @@ function base64url(buf) {
         .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function makeToken(room, identity, key, secret) {
+async function makeToken(room, identity, key, secret, canPublish) {
     const enc = new TextEncoder();
     const header = base64url(enc.encode(JSON.stringify({alg: "HS256", typ: "JWT"})));
     const now = Math.floor(Date.now() / 1000);
     const payload = base64url(enc.encode(JSON.stringify({
         iss: key, sub: identity, iat: now, exp: now + 86400,
-        video: {room: room, roomJoin: true, canSubscribe: true, canPublish: false},
+        video: {room: room, roomJoin: true, canSubscribe: true, canPublish: canPublish},
     })));
     const data = enc.encode(header + "." + payload);
     const cryptoKey = await crypto.subtle.importKey(
@@ -36,8 +37,9 @@ async function makeToken(room, identity, key, secret) {
 }
 
 (async () => {
-    const identity = "viewer-" + Math.random().toString(36).slice(2, 10);
-    const token = await makeToken(ROOM, identity, API_KEY, API_SECRET);
+    const role = PUBLISH ? "sender" : "viewer";
+    const identity = role + "-" + Math.random().toString(36).slice(2, 10);
+    const token = await makeToken(ROOM, identity, API_KEY, API_SECRET, PUBLISH);
 
     const room = new LivekitClient.Room({adaptiveStream: false, dynacast: false});
 
@@ -48,6 +50,12 @@ async function makeToken(room, identity, key, secret) {
     });
 
     await room.connect(WS_URL, token);
+
+    if (PUBLISH) {
+        await room.localParticipant.setCameraEnabled(true);
+        console.log("publishing camera track");
+    }
+
     document.title = "JOINED";
 })().catch(e => { console.error(e); document.title = "ERROR: " + e.message; });
 </script>
