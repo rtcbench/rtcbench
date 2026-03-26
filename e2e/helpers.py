@@ -5,7 +5,6 @@ Infrastructure (janus/jitsi) runs in Docker Compose (fixtures in conftest.py).
 call.zip itself runs as a Docker container per test, joined to the infra network.
 """
 import contextlib
-import socket
 import subprocess
 import tempfile
 import time
@@ -55,12 +54,6 @@ def record_result(scenario: str, data: dict) -> None:
 
 def record_svc_result(scenario: str, data: dict) -> None:
     _svc_results.append((scenario, data))
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
 
 
 def _compose(*args, project: str, profiles: tuple = ()) -> list[str]:
@@ -184,7 +177,6 @@ def callzip_run(
     Yields (health_url, container_name, proc).
     On exit: stops the container, waits for the process, prints captured output.
     """
-    host_port = _free_port()
     name = f"callzip-e2e-{uuid.uuid4().hex[:8]}"
     config = Path(config)
 
@@ -208,7 +200,7 @@ def callzip_run(
     cmd = [
         "docker", "run", "--rm", "--name", name,
         "--network", network,
-        "-p", f"{host_port}:9090",
+        "-p", "9090",
         "-v", f"{video_dir}:/test-videos:ro",
         *env_flags,
         *cap_flags,
@@ -222,6 +214,19 @@ def callzip_run(
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     proc.container_name = name  # attach container name for callers that need docker exec
+
+    for _ in range(30):
+        r = subprocess.run(
+            ["docker", "port", name, "9090"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            host_port = r.stdout.strip().split(":")[-1]
+            break
+        time.sleep(0.5)
+    else:
+        raise RuntimeError(f"container {name} did not publish port 9090 within 15s")
+
     try:
         yield f"http://localhost:{host_port}/health", proc
     finally:
