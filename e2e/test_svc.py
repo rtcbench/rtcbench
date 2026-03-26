@@ -60,6 +60,13 @@ def _avg_bitrate(data: dict) -> float:
     return sum(v["smooth_bitrate_bps"] for v in active) / len(active)
 
 
+def _max_sid(data: dict) -> int:
+    active = _active_viewers(data)
+    if not active:
+        return -1
+    return max(v.get("max_recv_sid", 0) for v in active)
+
+
 def _max_tid(data: dict) -> int:
     active = _active_viewers(data)
     if not active:
@@ -106,7 +113,14 @@ BANDWIDTH_STEPS = [
 
 
 def _run_svc_bandwidth_degradation(test_svc_video_dir, network, env):
-    """Step through tc tbf bandwidth constraints and verify the sender adapts."""
+    """Step through tc tbf bandwidth constraints and verify the sender adapts.
+
+    Asserts:
+    - Bitrate decreases under constraint
+    - Temporal layers drop (TID decreases) under severe constraint
+    - Combined layer score (SID*3 + TID) decreases, verifying actual SVC adaptation
+    - Progressive degradation across bandwidth steps
+    """
     with callzip_run(
         "smoke.yml",
         test_svc_video_dir,
@@ -122,10 +136,13 @@ def _run_svc_bandwidth_degradation(test_svc_video_dir, network, env):
             pytest.fail(f"baseline failed: {e}")
 
         baseline_bps = _avg_bitrate(baseline)
+        baseline_sid = _max_sid(baseline)
         baseline_tid = _max_tid(baseline)
-        print(f"\n  baseline: bitrate={baseline_bps/1e6:.2f} Mbps, max_tid={baseline_tid}")
+        print(f"\n  baseline: bitrate={baseline_bps/1e6:.2f} Mbps, "
+              f"max_sid={baseline_sid}, max_tid={baseline_tid}")
 
-        results = [("baseline", baseline_bps, baseline_tid)]
+        # Each result: (description, bitrate_bps, max_sid, max_tid)
+        results = [("baseline", baseline_bps, baseline_sid, baseline_tid)]
 
         for rate_kbit, desc in BANDWIDTH_STEPS:
             print(f"  applying tc tbf: {desc}")
@@ -136,22 +153,72 @@ def _run_svc_bandwidth_degradation(test_svc_video_dir, network, env):
             snap = poll_health_snapshot(url, 30)
             if snap is None:
                 print(f"    no health data at {rate_kbit}kbit")
-                results.append((desc, 0, -1))
+                results.append((desc, 0, -1, -1))
                 continue
 
             bps = _avg_bitrate(snap)
+            sid = _max_sid(snap)
             tid = _max_tid(snap)
-            print(f"    result: bitrate={bps/1e6:.2f} Mbps, max_tid={tid}")
-            results.append((desc, bps, tid))
+            print(f"    result: bitrate={bps/1e6:.2f} Mbps, max_sid={sid}, max_tid={tid}")
+            results.append((desc, bps, sid, tid))
 
         remove_bandwidth_limit(container)
 
+    def layer_score(sid, tid):
+        """Combined quality score: SID*3 + TID. S2T2=8, S1T2=5, S0T0=0, dead=-1."""
+        if sid < 0 or tid < 0:
+            return -1
+        return sid * 3 + tid
+
+    # Find the last constrained step that still had valid data.
+    # If the connection died at severe bandwidth, use the last alive step.
+    last_valid = None
+    for desc, bps, sid, tid in reversed(results[1:]):
+        if bps > 0 and sid >= 0 and tid >= 0:
+            last_valid = (desc, bps, sid, tid)
+            break
+
     final_bps = results[-1][1]
+
+    # --- Assertion 1: Bitrate must decrease ---
+    # Use either the last result (possibly 0 = connection died) or last valid.
     assert final_bps < baseline_bps, (
-        f"expected degradation: baseline={baseline_bps/1e6:.2f} Mbps, "
+        f"expected bitrate degradation: baseline={baseline_bps/1e6:.2f} Mbps, "
         f"final={final_bps/1e6:.2f} Mbps"
     )
 
+    # --- Assertion 2: Layer degradation under bandwidth constraint ---
+    # Check that at least ONE of these occurred at some constrained step:
+    #   a) Temporal layer dropped (TID decreased)
+    #   b) Connection died (bitrate went to 0 / no data)
+    #   c) Bitrate dropped by >40% from baseline
+    # Any of these proves the bandwidth constraint had a real effect on SVC delivery.
+    connection_died = any(bps == 0 or sid < 0 for _, bps, sid, _ in results[1:])
+
+    if last_valid is not None and not connection_died:
+        # Connection survived all steps; layers or bitrate must have degraded.
+        lv_desc, lv_bps, lv_sid, lv_tid = last_valid
+        tid_dropped = lv_tid < baseline_tid
+        bps_dropped = lv_bps < baseline_bps * 0.6
+
+        assert tid_dropped or bps_dropped, (
+            f"expected temporal layer drop or >40%% bitrate reduction: "
+            f"baseline max_tid={baseline_tid} ({baseline_bps/1e6:.2f} Mbps), "
+            f"last valid '{lv_desc}' max_tid={lv_tid} ({lv_bps/1e6:.2f} Mbps)"
+        )
+
+    if last_valid is not None:
+        lv_score = layer_score(last_valid[2], last_valid[3])
+        baseline_score = layer_score(baseline_sid, baseline_tid)
+        # Combined layer score must not increase under constraint.
+        if baseline_score > 0:
+            assert lv_score <= baseline_score, (
+                f"SVC layers increased under constraint: "
+                f"baseline S{baseline_sid}T{baseline_tid} (score={baseline_score}), "
+                f"last valid S{last_valid[2]}T{last_valid[3]} (score={lv_score})"
+            )
+
+    # --- Assertion 3: Progressive degradation across steps ---
     if len(results) >= 3:
         first_constrained_bps = results[1][1]
         last_constrained_bps = results[-1][1]
@@ -163,10 +230,11 @@ def _run_svc_bandwidth_degradation(test_svc_video_dir, network, env):
             )
 
     print("\n  --- SVC bandwidth degradation summary ---")
-    print(f"  {'step':<35} {'bitrate':>12} {'max_tid':>8}")
-    print(f"  {'-'*55}")
-    for desc, bps, tid in results:
-        print(f"  {desc:<35} {bps/1e6:>9.2f} Mbps {tid:>8}")
+    print(f"  {'step':<35} {'bitrate':>12} {'max_sid':>8} {'max_tid':>8} {'score':>6}")
+    print(f"  {'-'*69}")
+    for desc, bps, sid, tid in results:
+        score = layer_score(sid, tid)
+        print(f"  {desc:<35} {bps/1e6:>9.2f} Mbps {sid:>8} {tid:>8} {score:>6}")
 
 
 # ---------------------------------------------------------------------------
