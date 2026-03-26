@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"call.zip/pkg/gcc"
 	"call.zip/pkg/log"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
@@ -12,7 +13,7 @@ import (
 // newPionAPI creates a pion API with a single shared UDP socket and VP9
 // registered at the given payload type. If forceActiveRole is true, the
 // answering DTLS role is forced to client (active).
-func newPionAPI(clientIP string, vp9PayloadType uint8, forceActiveRole bool) (*webrtc.API, error) {
+func newPionAPI(clientIP string, vp9PayloadType uint8, forceActiveRole bool, extraOpts ...func(*webrtc.API)) (*webrtc.API, error) {
 	bindAddr := clientIP
 	if bindAddr == "" {
 		bindAddr = "0.0.0.0"
@@ -42,29 +43,38 @@ func newPionAPI(clientIP string, vp9PayloadType uint8, forceActiveRole bool) (*w
 		return nil, fmt.Errorf("register VP9 codec: %w", err)
 	}
 
-	return webrtc.NewAPI(
+	opts := []func(*webrtc.API){
 		webrtc.WithSettingEngine(se),
 		webrtc.WithMediaEngine(m),
-	), nil
+	}
+	opts = append(opts, extraOpts...)
+
+	return webrtc.NewAPI(opts...), nil
 }
 
-// StartSendPC creates a PeerConnection with a VP9 send track and returns the
-// PC, the local track (for IVF streaming), and the offer SDP.
-func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8) (
-	*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error,
+// StartSendPC creates a PeerConnection with a VP9 send track and GCC
+// bandwidth estimation. Returns the PC, RTP track, bandwidth getter, and
+// the offer SDP.
+func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps int) (
+	*webrtc.PeerConnection, *webrtc.TrackLocalStaticRTP, func() int, string, error,
 ) {
-	api, err := newPionAPI(clientIP, vp9PT, false)
+	factories, getBitrate, err := gcc.SenderFactories(initialBitrateBps)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, nil, "", fmt.Errorf("build interceptors: %w", err)
+	}
+
+	api, err := newPionAPI(clientIP, vp9PT, false, webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories)))
+	if err != nil {
+		return nil, nil, nil, "", err
 	}
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
 	registerLoggingCallbacks(l, pc)
 
-	track, err := webrtc.NewTrackLocalStaticSample(
+	track, err := webrtc.NewTrackLocalStaticRTP(
 		webrtc.RTPCodecCapability{
 			MimeType:    webrtc.MimeTypeVP9,
 			ClockRate:   90000,
@@ -73,22 +83,22 @@ func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8) (
 		"video", "ivf",
 	)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("NewTrackLocalStaticSample: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("NewTrackLocalStaticRTP: %w", err)
 	}
 	if _, err := pc.AddTrack(track); err != nil {
-		return nil, nil, "", fmt.Errorf("AddTrack: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("AddTrack: %w", err)
 	}
 
 	offer, err := pc.CreateOffer(nil)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("CreateOffer: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("CreateOffer: %w", err)
 	}
 	if err := pc.SetLocalDescription(offer); err != nil {
-		return nil, nil, "", fmt.Errorf("SetLocalDescription: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("SetLocalDescription: %w", err)
 	}
 
-	l.Infof("[pion] send offer SDP ready")
-	return pc, track, pc.LocalDescription().SDP, nil
+	l.Infof("[pion] send offer SDP ready (GCC enabled)")
+	return pc, track, getBitrate, pc.LocalDescription().SDP, nil
 }
 
 // StartRecvPC creates a PeerConnection for receiving tracks. It forces the

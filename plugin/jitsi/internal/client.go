@@ -59,9 +59,9 @@ func NewClient(e call.PluginEnv) *Client {
 	}
 }
 
-func (c *Client) ConnectViewer(roomID, userID string, ivf *vp9.IvfSegmenter, src ivfpkg.FrameSource) error {
+func (c *Client) ConnectViewer(roomID, userID string, ivf *vp9.IvfSegmenter, src ivfpkg.FrameSource, cameraPaths []string) error {
 	l := c.log.With(fmt.Sprintf("[%s]", userID))
-	return c.performHandshake(l, roomID, userID, ivf, src)
+	return c.performHandshake(l, roomID, userID, ivf, src, cameraPaths)
 }
 
 func (c *Client) Shutdown() {

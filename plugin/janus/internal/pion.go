@@ -5,12 +5,13 @@ import (
 	"net"
 	"strings"
 
+	"call.zip/pkg/gcc"
 	"call.zip/pkg/log"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/webrtc/v3"
 )
 
-func newPionAPI(clientIP string) (*webrtc.API, error) {
+func newPionAPI(clientIP string, extraOpts ...func(*webrtc.API)) (*webrtc.API, error) {
 	bindAddr := clientIP
 	if bindAddr == "" {
 		bindAddr = "0.0.0.0"
@@ -35,10 +36,13 @@ func newPionAPI(clientIP string) (*webrtc.API, error) {
 		PayloadType: 98,
 	}, webrtc.RTPCodecTypeVideo)
 
-	return webrtc.NewAPI(
+	opts := []func(*webrtc.API){
 		webrtc.WithSettingEngine(se),
 		webrtc.WithMediaEngine(m),
-	), nil
+	}
+	opts = append(opts, extraOpts...)
+
+	return webrtc.NewAPI(opts...), nil
 }
 
 func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
@@ -52,25 +56,32 @@ func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
 	})
 }
 
-// StartPionPublisher creates a PeerConnection in sendonly mode and returns the
-// PC, the local video track (for IVF streaming), and the offer SDP.
+// StartPionPublisher creates a PeerConnection in sendonly mode with GCC
+// bandwidth estimation. Returns the PC, the RTP track, a function to get
+// the current bandwidth estimate, and the offer SDP.
 func StartPionPublisher(
 	l *log.Logger,
 	clientIP string,
-) (*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error) {
-	api, err := newPionAPI(clientIP)
+	initialBitrateBps int,
+) (*webrtc.PeerConnection, *webrtc.TrackLocalStaticRTP, func() int, string, error) {
+	factories, getBitrate, err := gcc.SenderFactories(initialBitrateBps)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, nil, "", fmt.Errorf("build interceptors: %w", err)
+	}
+
+	api, err := newPionAPI(clientIP, webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories)))
+	if err != nil {
+		return nil, nil, nil, "", err
 	}
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
 
 	registerLoggingCallbacks(l, pc)
 
-	track, err := webrtc.NewTrackLocalStaticSample(
+	track, err := webrtc.NewTrackLocalStaticRTP(
 		webrtc.RTPCodecCapability{
 			MimeType:    webrtc.MimeTypeVP9,
 			ClockRate:   90000,
@@ -79,22 +90,22 @@ func StartPionPublisher(
 		"video", "ivf",
 	)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("NewTrackLocalStaticSample: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("NewTrackLocalStaticRTP: %w", err)
 	}
 	if _, err := pc.AddTrack(track); err != nil {
-		return nil, nil, "", fmt.Errorf("AddTrack: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("AddTrack: %w", err)
 	}
 
 	offer, err := pc.CreateOffer(nil)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("CreateOffer: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("CreateOffer: %w", err)
 	}
 	if err := pc.SetLocalDescription(offer); err != nil {
-		return nil, nil, "", fmt.Errorf("SetLocalDescription: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("SetLocalDescription: %w", err)
 	}
 
-	l.Infof("[pion] publisher offer SDP ready")
-	return pc, track, pc.LocalDescription().SDP, nil
+	l.Infof("[pion] publisher offer SDP ready (GCC enabled)")
+	return pc, track, getBitrate, pc.LocalDescription().SDP, nil
 }
 
 // StartPionSubscriber creates a PeerConnection in recvonly mode, sets the
@@ -143,4 +154,3 @@ func StartPionSubscriber(
 	l.Infof("[pion] subscriber answer SDP ready")
 	return pc, pc.LocalDescription().SDP, nil
 }
-

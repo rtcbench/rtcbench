@@ -26,10 +26,12 @@ func (c *Client) performHandshake(
 	nickname string,
 	ivf *vp9.IvfSegmenter,
 	src ivfpkg.FrameSource,
+	cameraPaths []string,
 ) error {
 	state := &model.ConnectionState{
 		Sender:      src != nil,
 		FrameSource: src,
+		CameraPaths: cameraPaths,
 		Log:         l,
 		BOSHSender:  httpxml.NewBOSHSender(l),
 		BoshURL:     fmt.Sprintf("https://%s/http-bind", c.serverIP),

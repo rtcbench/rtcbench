@@ -19,6 +19,7 @@ import (
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	janus "call.zip/plugin/janus/internal"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -207,7 +208,8 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 	}
 	l.Infof("joined room %d as publisher", roomID)
 
-	pc, track, offerSDP, err := janus.StartPionPublisher(l, p.clientIP)
+	const initialBitrateBps = 3_500_000
+	pc, track, getTargetBitrate, offerSDP, err := janus.StartPionPublisher(l, p.clientIP, initialBitrateBps)
 	if err != nil {
 		session.Close()
 		return fmt.Errorf("%w: pion publisher: %v", call.ErrCannotJoinRoom, err)
@@ -246,7 +248,9 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		return fmt.Errorf("%w: SetRemoteDescription: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	go ivf.LoopIntoTrack(l, track, p.cameras.NewSource())
+	svcCfg := ivf.ProbeAndBuildSVCConfig(p.cameras.Paths(), initialBitrateBps)
+	l.Infof("SVC config: %d spatial x %d temporal layers", svcCfg.NumSpatialLayers, svcCfg.NumTemporalLayers)
+	go ivf.SVCLoopIntoTrack(l, track, p.cameras.NewSource(), svcCfg, getTargetBitrate)
 
 	p.mu.Lock()
 	p.sessions = append(p.sessions, session)
@@ -335,8 +339,21 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 		return fmt.Errorf("%w: pion subscriber: %v", call.ErrCannotJoinRoom, err)
 	}
 
+	const pliMinIntervalNanos = 100_000_000 // 100ms
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
+
+		rtcpTracker := &vp9_stats.RTCPTracker{}
+		ssrc := track.SSRC()
+		sendPLI := func() {
+			if writeErr := pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(ssrc)}}); writeErr != nil {
+				l.Errorf("[rtcp] WritePLI: %v", writeErr)
+			} else {
+				l.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
+			}
+		}
+		throttle := vp9_stats.NewPLIThrottle(sendPLI, rtcpTracker, pliMinIntervalNanos)
+
 		cfg := &viewer.Config{
 			PacketsPerSample:  viewerPacketsPerSample,
 			VP9RTPPayloadType: int(track.PayloadType()),
@@ -356,7 +373,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 				l.Infof("enabled IVF file writing for room=%d user=%s", roomID, userID)
 			}
 		}
-		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, seg, p.publisher, nil, nil); err != nil {
+		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, seg, p.publisher, rtcpTracker, throttle.OnFrameLost); err != nil {
 			l.Errorf("[viewer] SpawnViewer failed: %v", err)
 		}
 	})

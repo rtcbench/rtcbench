@@ -1,27 +1,30 @@
-package internal
+package gcc
 
 import (
 	"sync/atomic"
 
-	"call.zip/pkg/gcc"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	piongcc "github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/interceptor/pkg/report"
 	"github.com/pion/interceptor/pkg/twcc"
-
-	sdkinterceptor "github.com/livekit/server-sdk-go/v2/pkg/interceptor"
 )
 
-// SenderInterceptors builds the LiveKit SDK default interceptor chain plus
-// a GCC send-side bandwidth estimator. Returns the factories and a function
-// that returns the latest GCC estimate in bps.
-func SenderInterceptors(initialBitrateBps int) ([]interceptor.Factory, func() int, error) {
+// SenderFactories builds interceptor factories for a sender PeerConnection
+// with GCC bandwidth estimation. Returns the factories and a function that
+// returns the current GCC estimate in bps.
+//
+// The chain includes NACK, RTCP reports, TWCC, GCC, and transport-cc
+// header extension injection. Suitable for raw pion PeerConnections.
+func SenderFactories(initialBitrateBps int) ([]interceptor.Factory, func() int, error) {
 	var targetBitrate atomic.Int64
 	targetBitrate.Store(int64(initialBitrateBps))
 
-	nackGen := &sdkinterceptor.NackGeneratorInterceptorFactory{}
+	nackGen, err := nack.NewGeneratorInterceptor()
+	if err != nil {
+		return nil, nil, err
+	}
 	nackResp, err := nack.NewResponderInterceptor()
 	if err != nil {
 		return nil, nil, err
@@ -40,8 +43,6 @@ func SenderInterceptors(initialBitrateBps int) ([]interceptor.Factory, func() in
 	if err != nil {
 		return nil, nil, err
 	}
-
-	limitSize := sdkinterceptor.NewLimitSizeInterceptorFactory()
 
 	gccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		return piongcc.NewSendSideBWE(
@@ -68,12 +69,20 @@ func SenderInterceptors(initialBitrateBps int) ([]interceptor.Factory, func() in
 		rtcpSender,
 		gccFactory,
 		twccSender,
-		gcc.TWCCExtFactory{},
-		limitSize,
+		TWCCExtFactory{},
 	}
 
 	getBitrate := func() int {
 		return int(targetBitrate.Load())
 	}
 	return factories, getBitrate, nil
+}
+
+// BuildRegistry wraps factories into an interceptor.Registry for pion API.
+func BuildRegistry(factories []interceptor.Factory) *interceptor.Registry {
+	r := &interceptor.Registry{}
+	for _, f := range factories {
+		r.Add(f)
+	}
+	return r
 }

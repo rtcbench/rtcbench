@@ -177,34 +177,8 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	}
 	l.Infof("published VP9 track (SVC-aware payloader)")
 
-	// Auto-detect spatial layers from the first IVF frame. If the file
-	// contains VP9 superframes, each sub-frame is a spatial layer.
-	numSL := 1
-	if paths := p.cameras.Paths(); len(paths) > 0 {
-		if n, err := ivf.ProbeSVCLayers(paths[0]); err == nil && n > 0 {
-			numSL = n
-		}
-	}
-	// Use 3 temporal layers when spatial layers are present.
-	numTL := 1
-	if numSL > 1 {
-		numTL = 3
-	}
-	svcCfg := ivf.SVCConfig{
-		NumSpatialLayers:  numSL,
-		NumTemporalLayers: numTL,
-		Widths:            make([]uint16, numSL),
-		Heights:           make([]uint16, numSL),
-		TargetBitrateBps:  initialBitrateBps,
-	}
-	// Standard VP9 SVC resolutions: 360p -> 720p -> 1080p
-	resolutions := [][2]uint16{{640, 360}, {1280, 720}, {1920, 1080}}
-	for i := range numSL {
-		ri := i + (3 - numSL) // offset so highest layer = 1080p
-		svcCfg.Widths[i] = resolutions[ri][0]
-		svcCfg.Heights[i] = resolutions[ri][1]
-	}
-	l.Infof("SVC config: %d spatial x %d temporal layers", numSL, numTL)
+	svcCfg := ivf.ProbeAndBuildSVCConfig(p.cameras.Paths(), initialBitrateBps)
+	l.Infof("SVC config: %d spatial x %d temporal layers", svcCfg.NumSpatialLayers, svcCfg.NumTemporalLayers)
 
 	go ivf.SVCLoopIntoTrack(l, track, p.cameras.NewSource(), svcCfg, getTargetBitrate)
 
