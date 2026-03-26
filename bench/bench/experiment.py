@@ -8,7 +8,7 @@ import time
 import traceback
 
 from bench.config import (
-    VIEWERS_PER_ROOM, WARMUP_S, EXPERIMENT_DURATION_S, TEARDOWN_WAIT_S,
+    VIEWERS_PER_ROOM, SENDERS_PER_ROOM, WARMUP_S, EXPERIMENT_DURATION_S, TEARDOWN_WAIT_S,
     REMOTE_STATS_DIR, REMOTE_LOG_DIR, REMOTE_IVF_DIR,
     CALLZIP_IMAGE, CALLZIP_SENDER_CONTAINER, CALLZIP_SENDER_LOAD_CONTAINER,
     CALLZIP_VIEWER_CONTAINER,
@@ -669,6 +669,18 @@ class SenderExperiment:
 
         self.total_senders = s_per_machine * len(self.sender_ips)
 
+        # Multi-room: split senders across rooms to distribute load across
+        # SFU workers (each room maps to one worker in mediasoup/livekit).
+        if s_per_machine > SENDERS_PER_ROOM:
+            self.num_rooms = math.ceil(s_per_machine / SENDERS_PER_ROOM)
+            self.senders_per_room = math.ceil(s_per_machine / self.num_rooms)
+            log.info("Multi-room sender (%s): %d rooms x %d senders/room = %d per machine (requested %d)",
+                     sfu_name, self.num_rooms, self.senders_per_room,
+                     self.num_rooms * self.senders_per_room, s_per_machine)
+        else:
+            self.num_rooms = 1
+            self.senders_per_room = s_per_machine
+
     def _build_topology(self):
         """Build topology dict for JSONL logging."""
         if self.sfu_name == "jitsi":
@@ -693,8 +705,9 @@ class SenderExperiment:
             "client": self.client_name,
             "total_senders": self.total_senders,
             "s_per_machine": self.s_per_machine,
-            "total_viewers": 1,
-            "num_rooms": 1,
+            "senders_per_room": self.senders_per_room,
+            "total_viewers": self.num_rooms,
+            "num_rooms": self.num_rooms,
             "hosts": {
                 "viewer": self.viewer_ip,
                 "sfu": sfu_hosts,
@@ -762,7 +775,7 @@ class SenderExperiment:
             self.ssh.run(host, f"rm -f {REMOTE_STATS_DIR}/*.jsonl {REMOTE_STATS_DIR}/*.csv 2>/dev/null || true", timeout=60)
 
     def _start_viewer(self):
-        """Start a single call.zip viewer on the viewer machine."""
+        """Start call.zip viewer(s) on the viewer machine (1 per room)."""
         viewer_config = VIEWER_CONFIGS[self.sfu_name]
         with open(viewer_config) as f:
             config_content = f.read()
@@ -773,7 +786,7 @@ class SenderExperiment:
         env = (
             f"-e SERVER_IP={self.sfu_ip} "
             f"-e VIEWERS_PER_ROOM=1 "
-            f"-e TOTAL_ROOMS=1 "
+            f"-e TOTAL_ROOMS={self.num_rooms} "
             f"-e STATS_JSONL_PATH={REMOTE_STATS_DIR} "
             f"-e LOG_DIR={REMOTE_LOG_DIR} "
         )
@@ -816,7 +829,8 @@ class SenderExperiment:
             env = (
                 f"-e PLUGIN_ID={self.sfu_name} "
                 f"-e SERVER_IP={self.sfu_ip} "
-                f"-e SENDERS_PER_MACHINE={self.s_per_machine} "
+                f"-e SENDERS_PER_ROOM={self.senders_per_room} "
+                f"-e TOTAL_ROOMS={self.num_rooms} "
                 f"-e IVF_DIR={REMOTE_IVF_DIR} "
                 f"-e LOG_DIR={REMOTE_LOG_DIR} "
             )
@@ -833,8 +847,9 @@ class SenderExperiment:
                          f"-v {REMOTE_LOG_DIR}:{REMOTE_LOG_DIR} "
                          f"{CALLZIP_IMAGE} {config_path}", timeout=30)
             self.pids.setdefault(host, []).append(CALLZIP_SENDER_LOAD_CONTAINER)
-            log.info("Sender-load started on %s (container=%s, S=%d)",
-                     host, CALLZIP_SENDER_LOAD_CONTAINER, self.s_per_machine)
+            log.info("Sender-load started on %s (container=%s, S=%d, rooms=%d, per_room=%d)",
+                     host, CALLZIP_SENDER_LOAD_CONTAINER, self.s_per_machine,
+                     self.num_rooms, self.senders_per_room)
 
         log.info("Waiting 15s for %d senders to join and start publishing...",
                  self.total_senders)

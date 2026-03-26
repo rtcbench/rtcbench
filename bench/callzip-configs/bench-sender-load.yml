@@ -6,16 +6,16 @@ spec:
   plugin: $env:PLUGIN_ID
   conference:
     name: room-1234
-    usersPerRoom: $env:SENDERS_PER_MACHINE=1
-    totalRooms: 1
+    usersPerRoom: $env:SENDERS_PER_ROOM=1
+    totalRooms: $env:TOTAL_ROOMS=1
     cameras:
-      perRoom: $env:SENDERS_PER_MACHINE=1
+      perRoom: $env:SENDERS_PER_ROOM=1
       fileType: ivf
       videoCodec: vp9
       directory: $env:IVF_DIR=/opt/ivf-videos
       inMemory: true
     joinPolicy:
-      concurrency: $env:SENDERS_PER_MACHINE=1
+      concurrency: $env:SENDERS_PER_ROOM=1
   pluginConfig:
     janus:
       _serverRoot: 'http://{{spec.network.serverIP}}:8088/janus'
