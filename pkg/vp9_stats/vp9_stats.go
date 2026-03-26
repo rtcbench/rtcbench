@@ -37,6 +37,10 @@ type pendingFrame struct {
 }
 
 type FrameStatistics struct {
+	// onFrameLost is called when a frame is finalized as incomplete.
+	// The argument is the current time in UnixNano. May be nil.
+	onFrameLost func(nowNano int64)
+
 	// bufferSize ring buffer capacity
 	bufferSize int
 
@@ -191,6 +195,9 @@ type VideoQualitySample struct {
 	// SVC scalable video coding specific measurements
 	SVC SVCData `json:"svc"`
 
+	// RTCP feedback stats (populated when RTCPTracker is present)
+	RTCP RTCPData `json:"rtcp,omitzero"`
+
 	// Sample contains the per-sample measurements
 	Sample SampleData `json:"sample"`
 }
@@ -198,6 +205,12 @@ type VideoQualitySample struct {
 type SVCData struct {
 	// Layers histogram of SID x TID counts (counted by packet)
 	Layers [nSpatialLayers][nTemporalLayers]int `json:"layers"`
+
+	// MaxRecvSID highest spatial layer observed in the current sample window
+	MaxRecvSID uint8 `json:"max_recv_sid"`
+
+	// MaxRecvTID highest temporal layer observed in the current sample window
+	MaxRecvTID uint8 `json:"max_recv_tid"`
 }
 
 // NewFrameStatistics creates a FrameStatistics with the given ring buffer capacity.
@@ -207,6 +220,12 @@ func NewFrameStatistics(bufferSize int) *FrameStatistics {
 		packets:       make([]frameInfo, bufferSize),
 		frameComplete: make(map[uint32]bool),
 	}
+}
+
+// SetOnFrameLost registers a callback invoked when a frame is finalized as
+// incomplete. The argument is the current time in UnixNano.
+func (stats *FrameStatistics) SetOnFrameLost(fn func(nowNano int64)) {
+	stats.onFrameLost = fn
 }
 
 // AcceptPacket updates the stat tracker with information about the newly arrived VP9 RTP packet.
@@ -360,6 +379,9 @@ func (stats *FrameStatistics) finalizeFrame(f *pendingFrame) {
 		stats.framesComplete++
 	} else {
 		stats.framesLost++
+		if stats.onFrameLost != nil {
+			stats.onFrameLost(f.lastArrival * 1000) // convert µs → ns
+		}
 	}
 
 	// if buffer is initialized and this frame is in the buffer, update decoder count
@@ -452,11 +474,22 @@ func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
 	sample.SequenceNo = stats.sampleSequenceNo
 	sample.Sample = stats.sample
 
-	for sid := 0; sid < nSpatialLayers; sid++ {
-		for tid := 0; tid < nTemporalLayers; tid++ {
+	var maxSID, maxTID uint8
+	for sid := range nSpatialLayers {
+		for tid := range nTemporalLayers {
 			sample.SVC.Layers[sid][tid] = stats.layers[sid][tid]
+			if stats.layers[sid][tid] > 0 {
+				if uint8(sid) > maxSID {
+					maxSID = uint8(sid)
+				}
+				if uint8(tid) > maxTID {
+					maxTID = uint8(tid)
+				}
+			}
 		}
 	}
+	sample.SVC.MaxRecvSID = maxSID
+	sample.SVC.MaxRecvTID = maxTID
 
 	// use stats.pos-1 because stats.pos points to the next eviction (eldest member)
 	lastPos := stats.pos - 1

@@ -35,8 +35,10 @@ func (m *Manager) SpawnViewer(
 	config *Config,
 	ivf *vp9.IvfSegmenter,
 	pub *vp9_stats.Publisher,
+	rtcpTracker *vp9_stats.RTCPTracker,
+	onFrameLost func(nowNano int64),
 ) (*Viewer, error) {
-	v, err := newViewer(track, receiver, m.input, nickname, config, ivf, pub)
+	v, err := newViewer(track, receiver, m.input, nickname, config, ivf, pub, rtcpTracker, onFrameLost)
 	if err != nil {
 		return nil, err
 	}

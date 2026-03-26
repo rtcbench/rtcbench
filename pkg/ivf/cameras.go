@@ -53,6 +53,11 @@ func NewCameras(dir string, inMemory bool) (*Cameras, error) {
 	return &Cameras{paths: paths}, nil
 }
 
+// Paths returns the IVF file paths. Returns nil for in-memory cameras.
+func (c *Cameras) Paths() []string {
+	return c.paths
+}
+
 // NewSource returns a new FrameSource for a sender goroutine.
 // Each call returns an independent source with its own position,
 // so multiple senders can share the same Cameras safely.

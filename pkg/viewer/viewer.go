@@ -15,14 +15,16 @@ import (
 
 // Viewer connects to a conference and receives 1 VP9 video stream
 type Viewer struct {
-	track    *webrtc.TrackRemote
-	receiver *webrtc.RTPReceiver
-	input    chan<- vp9_stats.VideoQualitySample
-	nickname string
-	config   Config
-	ivf      *vp9.IvfSegmenter
-	pcap     *pcap.Writer
-	pub      *vp9_stats.Publisher
+	track        *webrtc.TrackRemote
+	receiver     *webrtc.RTPReceiver
+	input        chan<- vp9_stats.VideoQualitySample
+	nickname     string
+	config       Config
+	ivf          *vp9.IvfSegmenter
+	pcap         *pcap.Writer
+	pub          *vp9_stats.Publisher
+	rtcpTracker  *vp9_stats.RTCPTracker
+	onFrameLost  func(nowNano int64)
 }
 
 type Config struct {
@@ -55,18 +57,22 @@ func newViewer(
 	config *Config,
 	ivf *vp9.IvfSegmenter,
 	pub *vp9_stats.Publisher,
+	rtcpTracker *vp9_stats.RTCPTracker,
+	onFrameLost func(nowNano int64),
 ) (*Viewer, error) {
 	if err := config.verify(); err != nil {
 		return nil, err
 	}
 	v := &Viewer{
-		track:    track,
-		receiver: receiver,
-		input:    input,
-		nickname: nickname,
-		config:   *config,
-		ivf:      ivf,
-		pub:      pub,
+		track:       track,
+		receiver:    receiver,
+		input:       input,
+		nickname:    nickname,
+		config:      *config,
+		ivf:         ivf,
+		pub:         pub,
+		rtcpTracker: rtcpTracker,
+		onFrameLost: onFrameLost,
 	}
 	if config.PacketCaptureDir != "" {
 		trackNickname := fmt.Sprintf("%s[%d]", nickname, track.SSRC())
@@ -97,14 +103,18 @@ func (v *Viewer) run(done <-chan struct{}) error {
 
 		vp9RTPPayloadType = v.config.VP9RTPPayloadType
 		vp9PayloadDesc    vp9.PayloadDescriptor
-		vp9FrameStats     = vp9_stats.NewFrameStatistics(v.config.StatsBufferSize)
-		vp9QualitySample  vp9_stats.VideoQualitySample
+		vp9FrameStats    = vp9_stats.NewFrameStatistics(v.config.StatsBufferSize)
+		vp9QualitySample vp9_stats.VideoQualitySample
 
-		packetsInSample  int
+		packetsInSample int
 		packetsPerSample = v.config.PacketsPerSample
 
 		err error
 	)
+
+	if v.onFrameLost != nil {
+		vp9FrameStats.SetOnFrameLost(v.onFrameLost)
+	}
 
 loop:
 	for {
@@ -166,6 +176,9 @@ loop:
 			packetsInSample = 0
 			vp9FrameStats.TakeSample(&vp9QualitySample)
 			vp9QualitySample.Nickname = trackNickname
+			if v.rtcpTracker != nil {
+				vp9QualitySample.RTCP = v.rtcpTracker.Snapshot()
+			}
 			select {
 			case v.input <- vp9QualitySample:
 				vp9FrameStats.EndSample()

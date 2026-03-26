@@ -15,6 +15,8 @@ import (
 	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
+	lkinternal "call.zip/plugin/livekit/internal"
+	lkproto "github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 	"github.com/pion/webrtc/v3"
 )
@@ -28,6 +30,9 @@ const (
 
 	viewerPacketsPerSample = 1000
 	viewerTrackBufferSize  = 1500
+
+	// PLI rate limiting: at most one PLI per 100ms
+	pliMinIntervalNanos = 100_000_000
 )
 
 type Plugin struct {
@@ -128,22 +133,32 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
 
+	// Build interceptor chain: SDK defaults + GCC bandwidth estimation.
+	// The twccExt interceptor injects transport-cc sequence numbers into
+	// outgoing RTP packets so GCC can track them.
+	const initialBitrateBps = 3_500_000
+	interceptors, getTargetBitrate, err := lkinternal.SenderInterceptors(initialBitrateBps)
+	if err != nil {
+		return fmt.Errorf("%w: build interceptors: %v", call.ErrCannotJoinRoom, err)
+	}
+
 	room, err := lksdk.ConnectToRoom(p.wsURL, lksdk.ConnectInfo{
 		APIKey:              p.apiKey,
 		APISecret:           p.apiSecret,
 		RoomName:            roomID,
 		ParticipantIdentity: userID,
-	}, &lksdk.RoomCallback{})
+	}, &lksdk.RoomCallback{}, lksdk.WithInterceptors(interceptors))
 	if err != nil {
 		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
 	}
-	l.Infof("connected to room %s", roomID)
+	l.Infof("connected to room %s (GCC enabled, initial=%d bps)", roomID, initialBitrateBps)
 
 	p.mu.Lock()
 	p.rooms = append(p.rooms, room)
 	p.mu.Unlock()
 
-	track, err := webrtc.NewTrackLocalStaticSample(
+	// Use TrackLocalStaticRTP for SVC-aware packetization with layer indices.
+	track, err := webrtc.NewTrackLocalStaticRTP(
 		webrtc.RTPCodecCapability{
 			MimeType:  webrtc.MimeTypeVP9,
 			ClockRate: 90000,
@@ -160,9 +175,38 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	if err != nil {
 		return fmt.Errorf("%w: publish track: %v", call.ErrCannotJoinRoom, err)
 	}
-	l.Infof("published VP9 track")
+	l.Infof("published VP9 track (SVC-aware payloader)")
 
-	go ivf.LoopIntoTrack(l, track, p.cameras.NewSource())
+	// Auto-detect spatial layers from the first IVF frame. If the file
+	// contains VP9 superframes, each sub-frame is a spatial layer.
+	numSL := 1
+	if paths := p.cameras.Paths(); len(paths) > 0 {
+		if n, err := ivf.ProbeSVCLayers(paths[0]); err == nil && n > 0 {
+			numSL = n
+		}
+	}
+	// Use 3 temporal layers when spatial layers are present.
+	numTL := 1
+	if numSL > 1 {
+		numTL = 3
+	}
+	svcCfg := ivf.SVCConfig{
+		NumSpatialLayers:  numSL,
+		NumTemporalLayers: numTL,
+		Widths:            make([]uint16, numSL),
+		Heights:           make([]uint16, numSL),
+		TargetBitrateBps:  initialBitrateBps,
+	}
+	// Standard VP9 SVC resolutions: 360p -> 720p -> 1080p
+	resolutions := [][2]uint16{{640, 360}, {1280, 720}, {1920, 1080}}
+	for i := range numSL {
+		ri := i + (3 - numSL) // offset so highest layer = 1080p
+		svcCfg.Widths[i] = resolutions[ri][0]
+		svcCfg.Heights[i] = resolutions[ri][1]
+	}
+	l.Infof("SVC config: %d spatial x %d temporal layers", numSL, numTL)
+
+	go ivf.SVCLoopIntoTrack(l, track, p.cameras.NewSource(), svcCfg, getTargetBitrate)
 
 	return nil
 }
@@ -177,6 +221,10 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		ParticipantCallback: lksdk.ParticipantCallback{
 			OnTrackSubscribed: func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
 				l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
+				// Request highest quality so the SFU forwards the top spatial layer.
+				if err := pub.SetVideoQuality(lkproto.VideoQuality_HIGH); err != nil {
+					l.Errorf("[pion] SetVideoQuality: %v", err)
+				}
 				cfg := &viewer.Config{
 					PacketsPerSample:  viewerPacketsPerSample,
 					VP9RTPPayloadType: int(track.PayloadType()),
@@ -196,7 +244,17 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 						l.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
 					}
 				}
-				if _, err := p.viewerManager.SpawnViewer(track, nil, userID, cfg, seg, p.publisher); err != nil {
+
+				// Set up RTCP feedback: PLI on frame loss
+				rtcpTracker := &vp9_stats.RTCPTracker{}
+				ssrc := track.SSRC()
+				sendPLI := func() {
+					rp.WritePLI(ssrc)
+					l.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
+				}
+				throttle := vp9_stats.NewPLIThrottle(sendPLI, rtcpTracker, pliMinIntervalNanos)
+
+				if _, err := p.viewerManager.SpawnViewer(track, nil, userID, cfg, seg, p.publisher, rtcpTracker, throttle.OnFrameLost); err != nil {
 					l.Errorf("[viewer] SpawnViewer failed: %v", err)
 				}
 			},

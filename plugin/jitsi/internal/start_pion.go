@@ -226,7 +226,7 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 				PacketCaptureDir:  c.packetCaptureDir,
 			}
 
-			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg, ivf, c.publisher); err != nil {
+			if _, err := c.botManager.SpawnViewer(track, receiver, state.Nickname, cfg, ivf, c.publisher, nil, nil); err != nil {
 				panic(err) // TODO don't panic (manager refactor)
 			}
 
