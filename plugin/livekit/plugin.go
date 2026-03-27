@@ -172,10 +172,19 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		if err != nil {
 			return fmt.Errorf("%w: create track: %v", call.ErrCannotJoinRoom, err)
 		}
-		if _, err = room.LocalParticipant.PublishTrack(rtpTrack, &lksdk.TrackPublicationOptions{Name: "video"}); err != nil {
+		// Declare all SVC spatial layers to the SFU so it forwards them correctly.
+		// Without this the SFU treats the track as single-layer and strips S1/S2.
+		svcLayers := buildSVCLayers(svc.Config)
+		pubOpts := &lksdk.TrackPublicationOptions{
+			Name:        "video",
+			VideoWidth:  int(svc.Config.Widths[svc.Config.NumSpatialLayers-1]),
+			VideoHeight: int(svc.Config.Heights[svc.Config.NumSpatialLayers-1]),
+			VideoLayers: svcLayers,
+		}
+		if _, err = room.LocalParticipant.PublishTrack(rtpTrack, pubOpts); err != nil {
 			return fmt.Errorf("%w: publish track: %v", call.ErrCannotJoinRoom, err)
 		}
-		l.Infof("SVC config: %d spatial x %d temporal layers", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers)
+		l.Infof("SVC config: %d spatial x %d temporal layers (GCC target=%d bps)", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers, svc.Config.TargetBitrateBps)
 		go ivf.SVCLoopIntoTrack(l, rtpTrack, p.cameras.NewSource(), svc.Config, getTargetBitrate)
 	} else {
 		sampleTrack, err := webrtc.NewTrackLocalStaticSample(
@@ -195,6 +204,35 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	}
 
 	return nil
+}
+
+// buildSVCLayers converts an SVCConfig into the VideoLayer slice needed by the
+// LiveKit SFU to recognise this track as multi-spatial-layer VP9 SVC.
+// Without these layers the SFU treats the track as single-layer and only
+// forwards S0 packets, ignoring the SID field in the VP9 payload descriptor.
+func buildSVCLayers(cfg ivf.SVCConfig) []*lkproto.VideoLayer {
+	qualities := []lkproto.VideoQuality{
+		lkproto.VideoQuality_LOW,
+		lkproto.VideoQuality_MEDIUM,
+		lkproto.VideoQuality_HIGH,
+	}
+	// Spatial bitrate fractions (same as layerBitrateThreshold: 6%, 23%, 71%)
+	spatialFrac := []float64{0.06, 0.23, 0.71}
+	layers := make([]*lkproto.VideoLayer, cfg.NumSpatialLayers)
+	for i := range cfg.NumSpatialLayers {
+		qi := i + (3 - cfg.NumSpatialLayers) // right-align to LOW/MED/HIGH
+		var bps uint32
+		if cfg.TargetBitrateBps > 0 {
+			bps = uint32(float64(cfg.TargetBitrateBps) * spatialFrac[qi])
+		}
+		layers[i] = &lkproto.VideoLayer{
+			Quality: qualities[qi],
+			Width:   uint32(cfg.Widths[i]),
+			Height:  uint32(cfg.Heights[i]),
+			Bitrate: bps,
+		}
+	}
+	return layers
 }
 
 func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID string) error {
