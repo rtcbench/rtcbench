@@ -47,12 +47,13 @@ func SenderInterceptors(initialBitrateBps int) ([]interceptor.Factory, func() in
 	gccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		return piongcc.NewSendSideBWE(
 			piongcc.SendSideBWEInitialBitrate(initialBitrateBps),
-			// Cap at 2× the SVC layer budget so GCC doesn't climb to 50 Mbps
-			// during unlimited-bandwidth phases and then take 30+ seconds to
-			// decrease back to the actual operating range when tc constrains
-			// the path. 2 Mbps keeps the estimate close to the 1.2 Mbps
-			// total layer budget for fast layer-selection convergence.
-			piongcc.SendSideBWEMaxBitrate(2_000_000),
+			// Cap below the S2T2 selection threshold (1.08 Mbps for a 1.2 Mbps
+			// SVC target) so GCC stays in the S2T1 regime (15 fps @ 1080p)
+			// during unconstrained phases. Without this cap GCC climbs to 50 Mbps
+			// and selects S2T2 (30 fps), which diverges from Chromium's native
+			// behavior (~15 fps) and also causes slower adaptation when tc
+			// constrains the path (more AIMD steps to shed the inflated estimate).
+			piongcc.SendSideBWEMaxBitrate(1_000_000),
 			piongcc.SendSideBWEMinBitrate(100_000),
 		)
 	})
