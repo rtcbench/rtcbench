@@ -17,7 +17,6 @@ spec:
       _wsURL: 'ws://{{spec.network.serverIP}}:7880'
       apiKey: devkey
       apiSecret: secret
-      maxSubscriptions: 50
   network:
     serverIP: $env:SERVER_IP
   metrics:
