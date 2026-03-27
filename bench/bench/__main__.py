@@ -15,7 +15,7 @@ from bench.config import (
     log,
 )
 from bench.ssh import SSHRunner
-from bench.sfu import stop_sfu, cleanup
+from bench.sfu import stop_sfu, cleanup, setup_machines
 from bench.search import binary_search
 from bench.results import load_hints, hint_range, print_results, save_results
 
@@ -63,6 +63,9 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
     log.info("Results directory: %s", run_dir)
 
     ssh = SSHRunner(cluster["ssh_key"], cluster["ssh_user"], dry_run=dry_run)
+
+    if not dry_run:
+        setup_machines(ssh, cluster)
 
     sfu_host = cluster["sfu"][0]
     initial_hi = cluster.get("initial_hi", {})
