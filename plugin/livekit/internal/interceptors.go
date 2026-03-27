@@ -3,6 +3,7 @@ package internal
 import (
 	"sync/atomic"
 
+	"call.zip/pkg/arrival"
 	"call.zip/pkg/gcc"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
@@ -76,4 +77,44 @@ func SenderInterceptors(initialBitrateBps int) ([]interceptor.Factory, func() in
 		return int(targetBitrate.Load())
 	}
 	return factories, getBitrate, nil
+}
+
+// ViewerInterceptors builds the LiveKit SDK default interceptor chain for a
+// receive-only participant, plus an arrival-time interceptor that timestamps
+// incoming RTP packets before pion's internal buffer.
+func ViewerInterceptors() ([]interceptor.Factory, error) {
+	nackGen := &sdkinterceptor.NackGeneratorInterceptorFactory{}
+	nackResp, err := nack.NewResponderInterceptor()
+	if err != nil {
+		return nil, err
+	}
+
+	rtcpReceiver, err := report.NewReceiverInterceptor()
+	if err != nil {
+		return nil, err
+	}
+	rtcpSender, err := report.NewSenderInterceptor()
+	if err != nil {
+		return nil, err
+	}
+
+	twccSender, err := twcc.NewSenderInterceptor()
+	if err != nil {
+		return nil, err
+	}
+
+	limitSize := sdkinterceptor.NewLimitSizeInterceptorFactory()
+
+	// arrival.Factory must be outermost so it timestamps packets before any
+	// other interceptor processing.
+	factories := []interceptor.Factory{
+		arrival.Factory{},
+		nackGen,
+		nackResp,
+		rtcpReceiver,
+		rtcpSender,
+		twccSender,
+		limitSize,
+	}
+	return factories, nil
 }
