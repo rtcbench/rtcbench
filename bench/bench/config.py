@@ -23,6 +23,10 @@ VIDEO_BITRATE_MBPS = 3.5     # VP9 test video bitrate (used for NIC ceiling calc
 VIEWERS_PER_ROOM = 20
 SENDERS_PER_ROOM = 5000
 
+# Max tracks the viewer subscribes to in sender mode (matches maxSubscriptions in
+# bench-livekit.yml). Limits receiver-side congestion at high sender counts.
+VIEWER_MAX_SUBSCRIPTIONS = 50
+
 # Default timing (overridable via cluster config)
 RENDEZVOUS_LEAD_S = 90
 EXPERIMENT_DURATION_S = 300
