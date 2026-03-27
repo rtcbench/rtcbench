@@ -21,7 +21,10 @@ VIDEO_BITRATE_MBPS = 3.5     # VP9 test video bitrate (used for NIC ceiling calc
 # Multi-room: max participants per room before splitting into additional rooms.
 # All SFUs use the same limit for a fair comparison.
 VIEWERS_PER_ROOM = 20
-SENDERS_PER_ROOM = 5000
+# Sender bench: max senders per room. Each room gets one viewer connection whose
+# BWE (GCC) must carry all tracks in that room. Keep this below the GCC cap
+# (~255 Mbps / 3.5 Mbps per sender ≈ 72) with a margin.
+SENDERS_PER_ROOM = 65
 
 # Default timing (overridable via cluster config)
 RENDEZVOUS_LEAD_S = 90
