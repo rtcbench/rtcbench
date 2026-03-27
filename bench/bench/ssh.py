@@ -40,17 +40,19 @@ class SSHRunner:
             timeout=timeout,
         )
 
-    def run_background(self, host, cmd):
-        """Run a command in the background. Returns remote PID."""
-        bg_cmd = f"nohup {cmd} > /tmp/bench-bg.log 2>&1 & echo $!"
+    def run_background(self, host, cmd, log_file="/tmp/bench-bg.log"):
+        """Run a command in the background. Returns remote PID string."""
+        bg_cmd = f"nohup {cmd} >> {log_file} 2>&1 & echo $!"
         result = self.run(host, bg_cmd, timeout=30)
         pid = result.stdout.strip().split("\n")[-1]
         log.debug("SSH %s: background PID=%s", host, pid)
         return pid
 
     def kill(self, host, pid):
-        """Send SIGTERM to a remote PID, ignore errors."""
-        self.run(host, f"kill {pid} 2>/dev/null || true", check=False, timeout=15)
+        """Kill a remote process group by PID, ignore errors."""
+        # kill the process group so child processes also die
+        self.run(host, f"kill -- -{pid} 2>/dev/null || kill {pid} 2>/dev/null || true",
+                 check=False, timeout=15)
 
     def rsync_from(self, host, remote_path, local_path):
         """rsync files from remote to local."""
@@ -66,6 +68,25 @@ class SSHRunner:
             log.info("[dry-run] rsync %s:%s -> %s", host, remote_path, local_path)
             return
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
+
+    def rsync_to(self, host, local_path, remote_path, timeout=300):
+        """rsync a local file or directory to a remote host."""
+        # Append / to source only if it's a directory (sync contents, not dir itself)
+        src = f"{local_path}/" if os.path.isdir(local_path) else local_path
+        dst = f"{self.ssh_user}@{host}:{remote_path}"
+        cmd = [
+            "rsync", "-a",
+            # Skip metadata that may fail on minimal filesystems (Buildroot rootfs)
+            "--no-times", "--no-perms", "--no-owner", "--no-group",
+            "--timeout=60",
+            "-e", f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i {self.ssh_key}",
+            src, dst,
+        ]
+        log.debug("rsync to %s:%s <- %s", host, remote_path, local_path)
+        if self.dry_run:
+            log.info("[dry-run] rsync to %s:%s <- %s", host, remote_path, local_path)
+            return
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
 
     def write_remote_file(self, host, remote_path, content):
         """Write content to a file on a remote host."""
