@@ -28,7 +28,7 @@ const (
 	cfgAPIKey    = "apiKey"
 	cfgAPISecret = "apiSecret"
 
-	viewerPacketsPerSample = 1000
+	viewerPacketsPerSample = 200
 	viewerTrackBufferSize  = 1500
 
 	// PLI rate limiting: at most one PLI per 100ms

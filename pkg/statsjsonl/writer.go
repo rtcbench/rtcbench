@@ -23,6 +23,7 @@ type Sample struct {
 	DecoderBufferFPS    float64          `json:"dec_buf_fps"`
 	EstimatedDecoderFPS int              `json:"est_dec_fps"`
 	FrameJitterUS       float64          `json:"frame_jitter_us"`
+	PacketJitterUS      float64          `json:"packet_jitter_us"`
 	FramesComplete      int64            `json:"frames_complete"`
 	FramesLost          int64            `json:"frames_lost"`
 	PLISent             int64            `json:"pli_sent"`
@@ -79,6 +80,7 @@ func (w *Writer) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySampl
 			DecoderBufferFPS:    float64(sample.DecoderBufferFPS),
 			EstimatedDecoderFPS: sample.EstimatedDecoderFPS,
 			FrameJitterUS:       sample.FrameJitterUS,
+			PacketJitterUS:      sample.PacketJitterUS,
 			FramesComplete:      sample.FramesComplete,
 			FramesLost:          sample.FramesLost,
 			PLISent:             sample.RTCP.PLISent,
