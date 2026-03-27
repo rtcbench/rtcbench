@@ -886,9 +886,13 @@ class SenderExperiment:
             self.ssh.run(host, f"docker rm -f {WRP_CONTAINER_NAME} 2>/dev/null || true",
                          check=False, timeout=10)
 
+            # Mask libnvidia-egl-gbm.so.1 to prevent Xvfb crash on hosts
+            # with NVIDIA Container Toolkit (the lib triggers a segfault in
+            # Xvfb's DRM device enumeration).
+            nvidia_mask = "-v /dev/null:/lib/x86_64-linux-gnu/libnvidia-egl-gbm.so.1:ro"
             cmd = (
                 f"docker run -d --name {WRP_CONTAINER_NAME} --network host "
-                f"--shm-size=2g "
+                f"--shm-size=2g {nvidia_mask} "
                 f"-v /tmp/wrp-config.json:/config.json:ro "
                 f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
                 f"{WRP_IMAGE} "
@@ -1013,15 +1017,22 @@ class SenderExperiment:
             self._health_meta = {"error": str(e)}
             return False
 
+        # Browser fake camera produces ~1 Mbps; callzip IVF produces ~3.5 Mbps.
+        # Use a lower bitrate threshold for browser-based senders.
+        if self.client_name in ("webrtcperf", "chromium"):
+            min_bps = 800_000
+        else:
+            min_bps = MIN_BITRATE_BPS
+
         total_checked = len(tracks)
         unhealthy_count = 0
         for track_id, stats in tracks.items():
             bitrate = stats["bitrate_bps"]
             fps = stats["fps"]
-            if bitrate < MIN_BITRATE_BPS or fps < MIN_FPS:
+            if bitrate < min_bps or fps < MIN_FPS:
                 unhealthy_count += 1
-                log.warning("Unhealthy track on viewer: %s - bitrate=%.0f fps=%.1f",
-                            track_id, bitrate, fps)
+                log.warning("Unhealthy track on viewer: %s - bitrate=%.0f fps=%.1f (threshold=%.0f)",
+                            track_id, bitrate, fps, min_bps)
 
         self._health_meta.update({
             "tracks_checked": total_checked,
