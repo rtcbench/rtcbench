@@ -15,9 +15,10 @@ from bench.config import (
     WRP_IMAGE, WRP_CONTAINER_NAME, SFU_CONTAINER_NAME, data_ip,
     MIN_BITRATE_BPS, MIN_FPS,
     SENDER_CONFIG, SENDER_LOAD_CONFIG, VIEWER_CONFIGS,
+    VIEWER_MAX_SUBSCRIPTIONS,
     log,
 )
-from bench.sfu import start_sfu, stop_sfu
+from bench.sfu import start_sfu, stop_sfu, REMOTE_CALLZIP_BIN
 from bench.results import log_experiment
 
 
@@ -447,14 +448,21 @@ module.exports = function({{sessions, id, params}}) {{
         for host in self.receiver_ips:
             try:
                 script = (
-                    "python3 -c '"
-                    "import json,glob,sys; last={};\n"
-                    "[last.update({s[\"viewer\"]:s})"
-                    " for f in sorted(glob.glob(\"/dev/shm/bench-stats/*.jsonl\"))"
-                    " for line in open(f) if line.strip()"
-                    " for s in [json.loads(line)]];\n"
-                    "json.dump({v:{\"bitrate_bps\":s[\"bitrate_bps\"],\"fps\":s[\"fps\"]}"
-                    " for v,s in last.items()},sys.stdout)'"
+                    r"""perl -e '"""
+                    r"""my %last;"""
+                    r"""for my $f (sort glob("/dev/shm/bench-stats/*.jsonl")) {"""
+                    r"""  open my $fh,"<",$f or next;"""
+                    r"""  while(my $line=<$fh>){"""
+                    r"""    next unless $line=~/\S/;"""
+                    r"""    my($v)=$line=~/"viewer":"([^"]+)"/; next unless $v;"""
+                    r"""    my($b)=$line=~/"bitrate_bps":([0-9.eE+-]+)/; $b//=0;"""
+                    r"""    my($p)=$line=~/"fps":([0-9.eE+-]+)/; $p//=0;"""
+                    r"""    $last{$v}="{\"bitrate_bps\":$b,\"fps\":$p}";"""
+                    r"""  }"""
+                    r"""  close $fh;"""
+                    r"""}"""
+                    r"""print "{"; my @kv; for my $k(keys %last){"""
+                    r"""  push @kv,"\"$k\":$last{$k}"} print join(",",@kv); print "}\n"'"""
                 )
                 result = self.ssh.run(host, script, timeout=60)
                 viewers = json.loads(result.stdout.strip() or "{}")
@@ -784,28 +792,21 @@ class SenderExperiment:
         config_path = "/tmp/bench-viewer.yml"
         self.ssh.write_remote_file(self.viewer_ip, config_path, config_content)
 
-        env = (
-            f"-e SERVER_IP={self.sfu_ip} "
-            f"-e VIEWERS_PER_ROOM=1 "
-            f"-e TOTAL_ROOMS={self.num_rooms} "
-            f"-e STATS_JSONL_PATH={REMOTE_STATS_DIR} "
-            f"-e LOG_DIR={REMOTE_LOG_DIR} "
+        env_str = (
+            f"SERVER_IP={self.sfu_ip} "
+            f"VIEWERS_PER_ROOM=1 "
+            f"TOTAL_ROOMS={self.num_rooms} "
+            f"STATS_JSONL_PATH={REMOTE_STATS_DIR} "
+            f"LOG_DIR={REMOTE_LOG_DIR}"
         )
-
-        self.ssh.run(self.viewer_ip,
-                     f"docker rm -f {CALLZIP_VIEWER_CONTAINER} 2>/dev/null || true",
-                     check=False, timeout=10)
-        self.ssh.run(self.viewer_ip,
-                     f"docker run -d --name {CALLZIP_VIEWER_CONTAINER} --network host "
-                     f"--ulimit nofile=65536:65536 "
-                     f"{env} "
-                     f"-v {config_path}:{config_path}:ro "
-                     f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
-                     f"-v {REMOTE_LOG_DIR}:{REMOTE_LOG_DIR} "
-                     f"{CALLZIP_IMAGE} {config_path}", timeout=30)
-        self.pids.setdefault(self.viewer_ip, []).append(CALLZIP_VIEWER_CONTAINER)
-        log.info("Viewer started on %s (container=%s, 1 viewer in room-1234)",
-                 self.viewer_ip, CALLZIP_VIEWER_CONTAINER)
+        self.ssh.run(self.viewer_ip, f"mkdir -p {REMOTE_STATS_DIR} {REMOTE_LOG_DIR}",
+                     timeout=10)
+        pid = self.ssh.run_background(
+            self.viewer_ip,
+            f"bash -c 'ulimit -n 65536; {env_str} {REMOTE_CALLZIP_BIN} {config_path}'")
+        self.pids.setdefault(self.viewer_ip, []).append(pid)
+        log.info("Viewer started on %s (pid=%s, 1 viewer in room-1234)",
+                 self.viewer_ip, pid)
 
         log.info("Waiting 10s for viewer to join room...")
         time.sleep(10)
@@ -819,7 +820,7 @@ class SenderExperiment:
             raise ValueError(f"Unknown sender client: {self.client_name}")
 
     def _start_callzip_senders(self):
-        """Start call.zip sender-load containers on each sender machine."""
+        """Start call.zip sender-load processes on each sender machine."""
         with open(SENDER_LOAD_CONFIG) as f:
             config_content = f.read()
 
@@ -827,29 +828,21 @@ class SenderExperiment:
             config_path = "/tmp/bench-sender-load.yml"
             self.ssh.write_remote_file(host, config_path, config_content)
 
-            env = (
-                f"-e PLUGIN_ID={self.sfu_name} "
-                f"-e SERVER_IP={self.sfu_ip} "
-                f"-e SENDERS_PER_ROOM={self.senders_per_room} "
-                f"-e TOTAL_ROOMS={self.num_rooms} "
-                f"-e IVF_DIR={REMOTE_IVF_DIR} "
-                f"-e LOG_DIR={REMOTE_LOG_DIR} "
+            env_str = (
+                f"PLUGIN_ID={self.sfu_name} "
+                f"SERVER_IP={self.sfu_ip} "
+                f"SENDERS_PER_ROOM={self.senders_per_room} "
+                f"TOTAL_ROOMS={self.num_rooms} "
+                f"IVF_DIR={REMOTE_IVF_DIR} "
+                f"LOG_DIR={REMOTE_LOG_DIR}"
             )
-
-            self.ssh.run(host,
-                         f"docker rm -f {CALLZIP_SENDER_LOAD_CONTAINER} 2>/dev/null || true",
-                         check=False, timeout=10)
-            self.ssh.run(host,
-                         f"docker run -d --name {CALLZIP_SENDER_LOAD_CONTAINER} --network host "
-                         f"--ulimit nofile=65536:65536 "
-                         f"{env} "
-                         f"-v {REMOTE_IVF_DIR}:{REMOTE_IVF_DIR}:ro "
-                         f"-v {config_path}:{config_path}:ro "
-                         f"-v {REMOTE_LOG_DIR}:{REMOTE_LOG_DIR} "
-                         f"{CALLZIP_IMAGE} {config_path}", timeout=30)
-            self.pids.setdefault(host, []).append(CALLZIP_SENDER_LOAD_CONTAINER)
-            log.info("Sender-load started on %s (container=%s, S=%d, rooms=%d, per_room=%d)",
-                     host, CALLZIP_SENDER_LOAD_CONTAINER, self.s_per_machine,
+            self.ssh.run(host, f"mkdir -p {REMOTE_LOG_DIR}", timeout=10)
+            pid = self.ssh.run_background(
+                host,
+                f"bash -c 'ulimit -n 65536; {env_str} {REMOTE_CALLZIP_BIN} {config_path}'")
+            self.pids.setdefault(host, []).append(pid)
+            log.info("Sender-load started on %s (pid=%s, S=%d, rooms=%d, per_room=%d)",
+                     host, pid, self.s_per_machine,
                      self.num_rooms, self.senders_per_room)
 
         log.info("Waiting 15s for %d senders to join and start publishing...",
@@ -997,17 +990,25 @@ class SenderExperiment:
         except Exception as e:
             log.warning("NIC throughput check failed for viewer %s: %s (continuing)", self.viewer_ip, e)
 
-        # JSONL per-track quality check on the single viewer machine
+        # JSONL per-track quality check on the single viewer machine.
+        # Uses perl (available on Buildroot) instead of python3.
         try:
             script = (
-                "python3 -c '"
-                "import json,glob,sys; last={};\n"
-                "[last.update({s[\"viewer\"]:s})"
-                " for f in sorted(glob.glob(\"/dev/shm/bench-stats/*.jsonl\"))"
-                " for line in open(f) if line.strip()"
-                " for s in [json.loads(line)]];\n"
-                "json.dump({v:{\"bitrate_bps\":s[\"bitrate_bps\"],\"fps\":s[\"fps\"]}"
-                " for v,s in last.items()},sys.stdout)'"
+                r"""perl -e '"""
+                r"""my %last;"""
+                r"""for my $f (sort glob("/dev/shm/bench-stats/*.jsonl")) {"""
+                r"""  open my $fh,"<",$f or next;"""
+                r"""  while(my $line=<$fh>){"""
+                r"""    next unless $line=~/\S/;"""
+                r"""    my($v)=$line=~/"viewer":"([^"]+)"/; next unless $v;"""
+                r"""    my($b)=$line=~/"bitrate_bps":([0-9.eE+-]+)/; $b//=0;"""
+                r"""    my($p)=$line=~/"fps":([0-9.eE+-]+)/; $p//=0;"""
+                r"""    $last{$v}="{\"bitrate_bps\":$b,\"fps\":$p}";"""
+                r"""  }"""
+                r"""  close $fh;"""
+                r"""}"""
+                r"""print "{"; my @kv; for my $k(keys %last){"""
+                r"""  push @kv,"\"$k\":$last{$k}"} print join(",",@kv); print "}\n"'"""
             )
             result = self.ssh.run(self.viewer_ip, script, timeout=60)
             tracks = json.loads(result.stdout.strip() or "{}")
@@ -1048,10 +1049,14 @@ class SenderExperiment:
             self._health_reason = "NO_TRACKS"
             return False
 
-        # Allow some tolerance: at least 80% of expected tracks must be present
-        if total_checked < self.total_senders * 0.8:
-            log.warning("Only %d/%d tracks reporting (need >=80%%)",
-                        total_checked, self.total_senders)
+        # When the viewer limits subscriptions (maxSubscriptions in bench-livekit.yml),
+        # total_checked reflects the sample size, not all senders. Require 80% of
+        # whichever is smaller: the actual sender count or the subscription cap.
+        expected_sample = min(self.total_senders, VIEWER_MAX_SUBSCRIPTIONS)
+        if total_checked < expected_sample * 0.8:
+            log.warning("Only %d/%d tracks reporting (need >=80%% of min(%d,%d)=%d)",
+                        total_checked, self.total_senders,
+                        self.total_senders, VIEWER_MAX_SUBSCRIPTIONS, expected_sample)
             self._health_reason = "TRACKS_MISSING"
             return False
 

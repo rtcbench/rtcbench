@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"call.zip"
@@ -24,9 +25,10 @@ import (
 const (
 	PluginID = "livekit"
 
-	cfgWSURL     = "wsURL"
-	cfgAPIKey    = "apiKey"
-	cfgAPISecret = "apiSecret"
+	cfgWSURL            = "wsURL"
+	cfgAPIKey           = "apiKey"
+	cfgAPISecret        = "apiSecret"
+	cfgMaxSubscriptions = "maxSubscriptions"
 
 	viewerPacketsPerSample = 200
 	viewerTrackBufferSize  = 1500
@@ -49,9 +51,11 @@ type Plugin struct {
 	statsBufferSize    int
 	viewerManager      *viewer.Manager
 	publisher          *vp9_stats.Publisher
+	maxSubscriptions   int // 0 = unlimited
 
-	mu    sync.Mutex
-	rooms []*lksdk.Room
+	mu                sync.Mutex
+	rooms             []*lksdk.Room
+	subscriptionCount int32 // atomic
 }
 
 func NewPlugin() call.Plugin {
@@ -63,6 +67,18 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 	p.wsURL = cfg[cfgWSURL].(string)
 	p.apiKey = cfg[cfgAPIKey].(string)
 	p.apiSecret = cfg[cfgAPISecret].(string)
+	if ms, ok := cfg[cfgMaxSubscriptions]; ok {
+		switch v := ms.(type) {
+		case int:
+			p.maxSubscriptions = v
+		case int64:
+			p.maxSubscriptions = int(v)
+		case uint64:
+			p.maxSubscriptions = int(v)
+		case float64:
+			p.maxSubscriptions = int(v)
+		}
+	}
 
 	p.log = e.LogRegistry().NewLogger("livekit", "")
 	p.logRegistry = e.LogRegistry()
@@ -239,54 +255,79 @@ func buildSVCLayers(cfg ivf.SVCConfig) []*lkproto.VideoLayer {
 }
 
 func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID string) error {
+	onTrackSubscribed := func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
+		l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
+		// Request highest quality so the SFU forwards the top spatial layer.
+		if err := pub.SetVideoQuality(lkproto.VideoQuality_HIGH); err != nil {
+			l.Errorf("[pion] SetVideoQuality: %v", err)
+		}
+		cfg := &viewer.Config{
+			PacketsPerSample:  viewerPacketsPerSample,
+			VP9RTPPayloadType: int(track.PayloadType()),
+			TrackBufferSize:   viewerTrackBufferSize,
+			StatsBufferSize:   p.statsBufferSize,
+			PacketCaptureDir:  p.packetCaptureDir,
+		}
+		var seg *vp9.IvfSegmenter
+		if p.enableRecording {
+			recDir := path.Join(p.recordingDirectory, fmt.Sprintf("/room=%s/user=%s", roomID, userID))
+			var recErr error
+			seg, recErr = vp9.NewIvfSegmenter(recDir)
+			if recErr != nil {
+				l.Errorf("[viewer] IvfSegmenter failed: %v", recErr)
+			} else {
+				seg.Enable()
+				l.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
+			}
+		}
+
+		// Set up RTCP feedback: PLI on frame loss
+		rtcpTracker := &vp9_stats.RTCPTracker{}
+		ssrc := track.SSRC()
+		sendPLI := func() {
+			rp.WritePLI(ssrc)
+			l.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
+		}
+		throttle := vp9_stats.NewPLIThrottle(sendPLI, rtcpTracker, pliMinIntervalNanos)
+
+		if _, err := p.viewerManager.SpawnViewer(track, nil, userID, cfg, seg, p.publisher, rtcpTracker, throttle.OnFrameLost); err != nil {
+			l.Errorf("[viewer] SpawnViewer failed: %v", err)
+		}
+	}
+
+	cb := &lksdk.RoomCallback{
+		ParticipantCallback: lksdk.ParticipantCallback{
+			OnTrackSubscribed: onTrackSubscribed,
+		},
+	}
+
+	var opts []lksdk.ConnectOption
+	if p.maxSubscriptions > 0 {
+		// Limit subscriptions: subscribe to first maxSubscriptions video tracks only.
+		opts = append(opts, lksdk.WithAutoSubscribe(false))
+		cb.ParticipantCallback.OnTrackPublished = func(pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
+			if pub.Kind() != lksdk.TrackKindVideo {
+				return
+			}
+			n := atomic.AddInt32(&p.subscriptionCount, 1)
+			if int(n) > p.maxSubscriptions {
+				atomic.AddInt32(&p.subscriptionCount, -1)
+				return
+			}
+			if err := pub.SetSubscribed(true); err != nil {
+				l.Errorf("[viewer] SetSubscribed failed: %v", err)
+				atomic.AddInt32(&p.subscriptionCount, -1)
+			}
+		}
+		l.Infof("viewer: maxSubscriptions=%d (auto-subscribe disabled)", p.maxSubscriptions)
+	}
+
 	room, err := lksdk.ConnectToRoom(p.wsURL, lksdk.ConnectInfo{
 		APIKey:              p.apiKey,
 		APISecret:           p.apiSecret,
 		RoomName:            roomID,
 		ParticipantIdentity: userID,
-	}, &lksdk.RoomCallback{
-		ParticipantCallback: lksdk.ParticipantCallback{
-			OnTrackSubscribed: func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
-				l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
-				// Request highest quality so the SFU forwards the top spatial layer.
-				if err := pub.SetVideoQuality(lkproto.VideoQuality_HIGH); err != nil {
-					l.Errorf("[pion] SetVideoQuality: %v", err)
-				}
-				cfg := &viewer.Config{
-					PacketsPerSample:  viewerPacketsPerSample,
-					VP9RTPPayloadType: int(track.PayloadType()),
-					TrackBufferSize:   viewerTrackBufferSize,
-					StatsBufferSize:   p.statsBufferSize,
-					PacketCaptureDir:  p.packetCaptureDir,
-				}
-				var seg *vp9.IvfSegmenter
-				if p.enableRecording {
-					recDir := path.Join(p.recordingDirectory, fmt.Sprintf("/room=%s/user=%s", roomID, userID))
-					var recErr error
-					seg, recErr = vp9.NewIvfSegmenter(recDir)
-					if recErr != nil {
-						l.Errorf("[viewer] IvfSegmenter failed: %v", recErr)
-					} else {
-						seg.Enable()
-						l.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
-					}
-				}
-
-				// Set up RTCP feedback: PLI on frame loss
-				rtcpTracker := &vp9_stats.RTCPTracker{}
-				ssrc := track.SSRC()
-				sendPLI := func() {
-					rp.WritePLI(ssrc)
-					l.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
-				}
-				throttle := vp9_stats.NewPLIThrottle(sendPLI, rtcpTracker, pliMinIntervalNanos)
-
-				if _, err := p.viewerManager.SpawnViewer(track, nil, userID, cfg, seg, p.publisher, rtcpTracker, throttle.OnFrameLost); err != nil {
-					l.Errorf("[viewer] SpawnViewer failed: %v", err)
-				}
-			},
-		},
-	})
+	}, cb, opts...)
 	if err != nil {
 		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
 	}
