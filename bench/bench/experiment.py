@@ -15,7 +15,6 @@ from bench.config import (
     WRP_IMAGE, WRP_CONTAINER_NAME, SFU_CONTAINER_NAME, data_ip,
     MIN_BITRATE_BPS, MIN_FPS,
     SENDER_CONFIG, SENDER_LOAD_CONFIG, VIEWER_CONFIGS,
-    VIEWER_MAX_SUBSCRIPTIONS,
     log,
 )
 from bench.sfu import start_sfu, stop_sfu, REMOTE_CALLZIP_BIN
@@ -1049,14 +1048,9 @@ class SenderExperiment:
             self._health_reason = "NO_TRACKS"
             return False
 
-        # When the viewer limits subscriptions (maxSubscriptions in bench-livekit.yml),
-        # total_checked reflects the sample size, not all senders. Require 80% of
-        # whichever is smaller: the actual sender count or the subscription cap.
-        expected_sample = min(self.total_senders, VIEWER_MAX_SUBSCRIPTIONS)
-        if total_checked < expected_sample * 0.8:
-            log.warning("Only %d/%d tracks reporting (need >=80%% of min(%d,%d)=%d)",
-                        total_checked, self.total_senders,
-                        self.total_senders, VIEWER_MAX_SUBSCRIPTIONS, expected_sample)
+        if total_checked < self.total_senders * 0.8:
+            log.warning("Only %d/%d tracks reporting (need >=80%%)",
+                        total_checked, self.total_senders)
             self._health_reason = "TRACKS_MISSING"
             return False
 
