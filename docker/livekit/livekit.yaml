@@ -4,6 +4,9 @@ rtc:
   port_range_end: 60000
   use_external_ip: false
   node_ip: 172.22.0.10
+  congestion_control:
+    stream_allocator:
+      min_channel_capacity: 4000000
 keys:
   devkey: secret
 room:

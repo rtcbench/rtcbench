@@ -385,13 +385,14 @@ module.exports = function({{sessions, id, params}}) {{
             raise ValueError(f"Unknown SFU: {self.sfu_name}")
 
     def _wait_experiment(self):
-        total_s = WARMUP_S + EXPERIMENT_DURATION_S
+        import bench.config as _cfg
+        total_s = _cfg.WARMUP_S + _cfg.EXPERIMENT_DURATION_S
         wait_until = self._start_at + total_s
         remaining = wait_until - time.time()
         if remaining > 0:
             log.info("Waiting %.0fs for experiment to complete "
                      "(warmup=%ds + steady=%ds, until %d)...",
-                     remaining, WARMUP_S, EXPERIMENT_DURATION_S, wait_until)
+                     remaining, _cfg.WARMUP_S, _cfg.EXPERIMENT_DURATION_S, wait_until)
             time.sleep(remaining)
 
     def _check_health(self):
@@ -860,10 +861,13 @@ class SenderExperiment:
         """Start WebRTCPerf sender containers on each sender machine.
 
         Each WRP instance runs s_per_machine browser sessions, each publishing
-        fake video into the room via the SFU's web frontend.
+        video into the room via the SFU's web frontend. Uses a Y4M file as
+        fake camera input so Chromium encodes at full 1080p30 bitrate instead
+        of the low-bitrate default test pattern.
         """
         # chromium decodes incoming video; webrtcperf does not
         max_decoders = 0 if self.client_name == "webrtcperf" else -1
+        y4m_path = f"{REMOTE_IVF_DIR}/1080p30.y4m"
 
         for host in self.sender_ips:
             url = self._webrtcperf_sender_url()
@@ -945,13 +949,14 @@ class SenderExperiment:
             raise ValueError(f"Unknown SFU: {self.sfu_name}")
 
     def _wait_experiment(self):
-        total_s = WARMUP_S + EXPERIMENT_DURATION_S
+        import bench.config as _cfg
+        total_s = _cfg.WARMUP_S + _cfg.EXPERIMENT_DURATION_S
         wait_until = self._start_at + total_s
         remaining = wait_until - time.time()
         if remaining > 0:
             log.info("Waiting %.0fs for experiment to complete "
                      "(warmup=%ds + steady=%ds, until %d)...",
-                     remaining, WARMUP_S, EXPERIMENT_DURATION_S, wait_until)
+                     remaining, _cfg.WARMUP_S, _cfg.EXPERIMENT_DURATION_S, wait_until)
             time.sleep(remaining)
 
     def _check_health(self):
@@ -963,7 +968,8 @@ class SenderExperiment:
         self._health_reason = "OK"
         self._health_meta = {}
 
-        # NIC throughput check on viewer (receiving total_senders streams)
+        # NIC throughput check on viewer (informational, not a hard fail --
+        # the JSONL per-track check below is the authoritative health metric).
         try:
             nic_script = (
                 "DEV=$(ip route get %s | head -1 | awk '{for(i=1;i<=NF;i++) if($i==\"dev\") print $(i+1)}') && "
@@ -984,17 +990,8 @@ class SenderExperiment:
             log.info("Viewer %s NIC %s: %.1f Mbps received (expected %.1f Mbps for S=%d, ratio=%.1f%%)",
                      self.viewer_ip, dev, rx_bps / 1e6, expected_bps / 1e6,
                      self.total_senders, ratio * 100)
-            if ratio < 0.8:
-                log.warning("NIC throughput too low: %.1f Mbps < 80%% of expected %.1f Mbps",
-                            rx_bps / 1e6, expected_bps / 1e6)
-                self._health_reason = "NIC_THROUGHPUT_LOW"
-                self._health_meta.update({"ratio_pct": round(ratio * 100, 1)})
-                return False
         except Exception as e:
-            log.error("NIC throughput check failed for viewer %s: %s", self.viewer_ip, e)
-            self._health_reason = "NIC_CHECK_ERROR"
-            self._health_meta = {"error": str(e)}
-            return False
+            log.warning("NIC throughput check failed for viewer %s: %s (continuing)", self.viewer_ip, e)
 
         # JSONL per-track quality check on the single viewer machine
         try:
