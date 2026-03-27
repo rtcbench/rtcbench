@@ -569,8 +569,8 @@ func TestFrameStatistics_FrameJitter_PerfectStream(t *testing.T) {
 	stats.TakeSample(&sample)
 
 	// With perfectly even spacing, frame jitter should converge near zero.
-	// Allow small tolerance for integer microsecond rounding.
-	if sample.FrameJitterUS > 100.0 {
+	// Allow tolerance for integer rounding of both µs arrival times and RTP ticks.
+	if sample.FrameJitterUS > 200.0 {
 		t.Fatalf("expected FrameJitterUS ≈ 0 for perfect stream, got %f", sample.FrameJitterUS)
 	}
 }

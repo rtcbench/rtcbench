@@ -91,6 +91,9 @@ type FrameStatistics struct {
 	// prevFrameFirstArrival first packet arrival time of the previously finalized frame
 	prevFrameFirstArrival int64
 
+	// prevFrameRTPTimestamp RTP timestamp of the previously finalized frame
+	prevFrameRTPTimestamp uint32
+
 	// hasPrevFrame indicates that prevFrameFirstArrival is valid
 	hasPrevFrame bool
 
@@ -106,11 +109,13 @@ type FrameStatistics struct {
 	// latestSmoothDecoderFPS EWMA-smoothed decoder FPS
 	latestSmoothDecoderFPS float32
 
-	// lastInterarrivalUS previous frame interarrival delta (microseconds)
-	lastInterarrivalUS int64
-
-	// frameJitterUS EWMA of |interarrival(i) - interarrival(i-1)| in microseconds
+	// frameJitterUS RFC 3550 style EWMA frame interarrival jitter in microseconds
 	frameJitterUS float64
+
+	// packet-level RFC 3550 interarrival jitter (EWMA, microseconds)
+	prevPktArrival       int64
+	prevPktRTPTimestamp  uint32
+	packetJitterUS       float64
 
 	// framesComplete monotonic count of finalized complete frames
 	framesComplete int64
@@ -186,6 +191,9 @@ type VideoQualitySample struct {
 	// FrameJitterUS EWMA frame interarrival jitter in microseconds
 	FrameJitterUS float64 `json:"frame_jitter_us"`
 
+	// PacketJitterUS RFC 3550 packet-level interarrival jitter in microseconds
+	PacketJitterUS float64 `json:"packet_jitter_us"`
+
 	// FramesComplete monotonic count of complete frames
 	FramesComplete int64 `json:"frames_complete"`
 
@@ -239,6 +247,19 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, seqNo uint16, r
 		stats.skipInvalidPackets++
 		return
 	}
+
+	// RFC 3550 packet-level interarrival jitter
+	if stats.prevPktArrival != 0 {
+		dR := float64(clientReadTime - stats.prevPktArrival)                                    // µs
+		dS := float64(int32(rtpTimestamp-stats.prevPktRTPTimestamp)) * 1_000_000.0 / 90_000.0   // RTP ticks -> µs
+		d := dR - dS
+		if d < 0 {
+			d = -d
+		}
+		stats.packetJitterUS += (d - stats.packetJitterUS) / 16.0
+	}
+	stats.prevPktArrival = clientReadTime
+	stats.prevPktRTPTimestamp = rtpTimestamp
 
 	// --- frame boundary tracking (before ring buffer logic) ---
 	stats.trackFrame(clientReadTime, seqNo, rtpTimestamp, nBytes)
@@ -391,22 +412,20 @@ func (stats *FrameStatistics) finalizeFrame(f *pendingFrame) {
 		}
 	}
 
-	// frame jitter — computed for all frames regardless of completeness
+	// frame jitter — RFC 3550 style: D = (Rj-Ri) - (Sj-Si)
+	// Uses RTP timestamps to compensate for expected timing changes (e.g. layer switches).
 	if stats.hasPrevFrame {
-		interarrivalUS := f.firstArrival - stats.prevFrameFirstArrival
-
-		if stats.lastInterarrivalUS != 0 {
-			d := interarrivalUS - stats.lastInterarrivalUS
-			if d < 0 {
-				d = -d
-			}
-			stats.frameJitterUS += (float64(d) - stats.frameJitterUS) * frameJitterGain
+		dR := float64(f.firstArrival - stats.prevFrameFirstArrival)                                     // µs
+		dS := float64(int32(f.rtpTimestamp-stats.prevFrameRTPTimestamp)) * 1_000_000.0 / 90_000.0        // RTP ticks -> µs
+		d := dR - dS
+		if d < 0 {
+			d = -d
 		}
-
-		stats.lastInterarrivalUS = interarrivalUS
+		stats.frameJitterUS += (d - stats.frameJitterUS) * frameJitterGain
 	}
 
 	stats.prevFrameFirstArrival = f.firstArrival
+	stats.prevFrameRTPTimestamp = f.rtpTimestamp
 	stats.hasPrevFrame = true
 }
 
@@ -508,8 +527,9 @@ func (stats *FrameStatistics) TakeSample(sample *VideoQualitySample) {
 	sample.DecoderBufferFPS = stats.latestDecoderBufferFPS
 	sample.EstimatedDecoderFPS = int(math.Ceil(float64(sample.DecoderSmoothFPS))) - 2
 
-	// frame jitter
+	// jitter
 	sample.FrameJitterUS = stats.frameJitterUS
+	sample.PacketJitterUS = stats.packetJitterUS
 
 	// frame counts
 	sample.FramesComplete = stats.framesComplete
