@@ -248,18 +248,29 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, seqNo uint16, r
 		return
 	}
 
-	// RFC 3550 packet-level interarrival jitter
-	if stats.prevPktArrival != 0 {
-		dR := float64(clientReadTime - stats.prevPktArrival)                                    // µs
-		dS := float64(int32(rtpTimestamp-stats.prevPktRTPTimestamp)) * 1_000_000.0 / 90_000.0   // RTP ticks -> µs
+	// RFC 3550 packet-level interarrival jitter.
+	// Only update for in-order packets (non-decreasing RTP timestamp).
+	// Out-of-order packets — including NACK retransmissions that arrive with
+	// stale RTP timestamps — would produce large negative dS values and inflate
+	// the jitter EWMA by hundreds of ms.  Skipping them entirely (both the
+	// EWMA update and the prevPkt state) keeps the measurement anchored to the
+	// last in-order packet so the next in-order packet sees a correct baseline.
+	if stats.prevPktArrival == 0 {
+		// First packet: initialise state, skip jitter calculation.
+		stats.prevPktArrival = clientReadTime
+		stats.prevPktRTPTimestamp = rtpTimestamp
+	} else if int32(rtpTimestamp-stats.prevPktRTPTimestamp) >= 0 {
+		dR := float64(clientReadTime - stats.prevPktArrival)                                   // µs
+		dS := float64(int32(rtpTimestamp-stats.prevPktRTPTimestamp)) * 1_000_000.0 / 90_000.0 // RTP ticks -> µs
 		d := dR - dS
 		if d < 0 {
 			d = -d
 		}
 		stats.packetJitterUS += (d - stats.packetJitterUS) / 16.0
+		stats.prevPktArrival = clientReadTime
+		stats.prevPktRTPTimestamp = rtpTimestamp
 	}
-	stats.prevPktArrival = clientReadTime
-	stats.prevPktRTPTimestamp = rtpTimestamp
+	// else: out-of-order packet — leave prevPkt unchanged.
 
 	// --- frame boundary tracking (before ring buffer logic) ---
 	stats.trackFrame(clientReadTime, seqNo, rtpTimestamp, nBytes)

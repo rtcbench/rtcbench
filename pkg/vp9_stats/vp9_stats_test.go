@@ -828,6 +828,65 @@ func TestFrameStatistics_SeqNoWrapAround(t *testing.T) {
 	}
 }
 
+// TestPacketJitter_SkipsOutOfOrder verifies that out-of-order packets (e.g. NACK
+// retransmissions with stale RTP timestamps) do not inflate packet_jitter_us.
+// The in-order stream has near-zero jitter; an OOO retransmission with an old
+// timestamp must leave the EWMA unchanged.
+func TestPacketJitter_SkipsOutOfOrder(t *testing.T) {
+	stats := NewFrameStatistics(128)
+	pd := vp9.PayloadDescriptor{SID: 2, TID: 1}
+
+	baseTime := time.Now().UnixMicro()
+	const (
+		frameTimeUS = int64(66_667) // 15fps
+		tpf         = uint32(6000)  // 90kHz, 15fps
+		ppf         = 7             // packets per frame
+		pktTimeUS   = frameTimeUS / ppf
+	)
+
+	var seqNo uint16
+	var rtpTS uint32 = 90000
+
+	// Feed 60 in-order frames so the EWMA converges.
+	for f := 0; f < 60; f++ {
+		for p := 0; p < ppf; p++ {
+			t_ := baseTime + int64(f)*frameTimeUS + int64(p)*pktTimeUS
+			stats.AcceptPacket(t_, seqNo, rtpTS, 1200, &pd)
+			seqNo++
+		}
+		rtpTS += tpf
+	}
+
+	var beforeSample VideoQualitySample
+	stats.TakeSample(&beforeSample)
+
+	// Inject a NACK retransmission: same RTP timestamp as a frame from 2 seconds ago.
+	retransRTPTS := rtpTS - tpf*30 // 30 frames ago
+	retransArrival := baseTime + 61*frameTimeUS
+	stats.AcceptPacket(retransArrival, seqNo, retransRTPTS, 1200, &pd)
+	seqNo++
+
+	// Feed two more in-order frames so TakeSample has fresh data.
+	for f := 60; f < 62; f++ {
+		for p := 0; p < ppf; p++ {
+			t_ := baseTime + int64(f)*frameTimeUS + int64(p)*pktTimeUS
+			stats.AcceptPacket(t_, seqNo, rtpTS, 1200, &pd)
+			seqNo++
+		}
+		rtpTS += tpf
+	}
+
+	var afterSample VideoQualitySample
+	stats.TakeSample(&afterSample)
+
+	// The retransmission must not have spiked packet jitter.
+	// Before: converged to ~10ms baseline. After: must still be < 50ms.
+	if afterSample.PacketJitterUS > 50_000 {
+		t.Fatalf("OOO retransmission inflated PacketJitterUS: before=%.1f after=%.1f (want < 50000)",
+			beforeSample.PacketJitterUS, afterSample.PacketJitterUS)
+	}
+}
+
 func BenchmarkAcceptPacket(b *testing.B) {
 	benchmarks := []struct {
 		name       string
