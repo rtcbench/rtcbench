@@ -138,7 +138,9 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 	// Build interceptor chain: SDK defaults + GCC bandwidth estimation.
 	// The twccExt interceptor injects transport-cc sequence numbers into
 	// outgoing RTP packets so GCC can track them.
-	const initialBitrateBps = 3_500_000
+	// 1.4 Mbps matches the target total for 3-layer SVC (S0=84K+S1=322K+S2=994K).
+	// This is also the GCC starting estimate, giving a conservative ramp-up.
+	const initialBitrateBps = 1_400_000
 	interceptors, getTargetBitrate, err := lkinternal.SenderInterceptors(initialBitrateBps)
 	if err != nil {
 		return fmt.Errorf("%w: build interceptors: %v", call.ErrCannotJoinRoom, err)

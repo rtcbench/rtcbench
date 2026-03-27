@@ -55,6 +55,86 @@ func BuildSuperframe(subFrames [][]byte) []byte {
 	return out
 }
 
+// RepackageSVCIVFMulti reads one IVF per spatial layer (S0, S1, ..., S_N) and
+// writes an output IVF where each frame is a VP9 superframe combining one
+// frame from each layer. srcPaths[0] is the lowest spatial layer (S0) and
+// srcPaths[len-1] is the highest. All source IVFs must have the same number
+// of frames; the output header uses the dimensions of the highest layer.
+//
+// Unlike RepackageSVCIVF (which duplicates a single frame), this function
+// produces genuinely different-sized sub-frames per layer, matching what a
+// real VP9 SVC encoder produces. The total output bitrate is the sum of all
+// per-layer IVF bitrates.
+func RepackageSVCIVFMulti(srcPaths []string, dstPath string) error {
+	n := len(srcPaths)
+	if n < 1 || n > 3 {
+		return fmt.Errorf("srcPaths must have 1-3 entries, got %d", n)
+	}
+
+	files := make([]*os.File, n)
+	readers := make([]*ivfreader.IVFReader, n)
+	headers := make([]*ivfreader.IVFFileHeader, n)
+	for i, path := range srcPaths {
+		f, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("open layer %d (%s): %w", i, path, err)
+		}
+		defer f.Close()
+		r, h, err := ivfreader.NewWith(f)
+		if err != nil {
+			return fmt.Errorf("read IVF header layer %d: %w", i, err)
+		}
+		files[i], readers[i], headers[i] = f, r, h
+	}
+
+	// Output header uses dimensions of the highest (last) spatial layer.
+	topHdr := headers[n-1]
+
+	df, err := os.Create(dstPath)
+	if err != nil {
+		return fmt.Errorf("create dest: %w", err)
+	}
+	defer df.Close()
+
+	var hdr [32]byte
+	copy(hdr[0:4], "DKIF")
+	binary.LittleEndian.PutUint16(hdr[4:6], 0)
+	binary.LittleEndian.PutUint16(hdr[6:8], 32)
+	copy(hdr[8:12], "VP90")
+	binary.LittleEndian.PutUint16(hdr[12:14], topHdr.Width)
+	binary.LittleEndian.PutUint16(hdr[14:16], topHdr.Height)
+	binary.LittleEndian.PutUint32(hdr[16:20], topHdr.TimebaseDenominator)
+	binary.LittleEndian.PutUint32(hdr[20:24], topHdr.TimebaseNumerator)
+	if _, err := df.Write(hdr[:]); err != nil {
+		return err
+	}
+
+	for {
+		subFrames := make([][]byte, n)
+		var ts uint64
+		for i, r := range readers {
+			frame, fh, err := r.ParseNextFrame()
+			if err != nil || (frame == nil && fh == nil) {
+				return nil // EOF on any layer — stop
+			}
+			subFrames[i] = frame
+			if i == 0 {
+				ts = fh.Timestamp
+			}
+		}
+		superframe := BuildSuperframe(subFrames)
+		var frameHdr [12]byte
+		binary.LittleEndian.PutUint32(frameHdr[0:4], uint32(len(superframe)))
+		binary.LittleEndian.PutUint64(frameHdr[4:12], ts)
+		if _, err := df.Write(frameHdr[:]); err != nil {
+			return err
+		}
+		if _, err := df.Write(superframe); err != nil {
+			return err
+		}
+	}
+}
+
 // RepackageSVCIVF reads a single-layer IVF file and writes a new IVF where
 // each frame is a VP9 superframe containing numSpatialLayers copies of the
 // source frame. This produces valid superframe structure that the send loop
