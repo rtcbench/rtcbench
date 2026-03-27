@@ -47,7 +47,12 @@ func SenderInterceptors(initialBitrateBps int) ([]interceptor.Factory, func() in
 	gccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		return piongcc.NewSendSideBWE(
 			piongcc.SendSideBWEInitialBitrate(initialBitrateBps),
-			piongcc.SendSideBWEMaxBitrate(50_000_000),
+			// Cap at 2× the SVC layer budget so GCC doesn't climb to 50 Mbps
+			// during unlimited-bandwidth phases and then take 30+ seconds to
+			// decrease back to the actual operating range when tc constrains
+			// the path. 2 Mbps keeps the estimate close to the 1.2 Mbps
+			// total layer budget for fast layer-selection convergence.
+			piongcc.SendSideBWEMaxBitrate(2_000_000),
 			piongcc.SendSideBWEMinBitrate(100_000),
 		)
 	})
