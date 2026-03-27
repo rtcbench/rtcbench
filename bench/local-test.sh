@@ -126,9 +126,10 @@ spec:
         level: error
 EOF
 
-echo "Starting LiveKit SFU..."
+echo "Starting LiveKit SFU (cores 4-7)..."
 docker rm -f bench-livekit-local 2>/dev/null || true
 docker run -d --name bench-livekit-local --network host \
+    --cpuset-cpus 6-9 \
     -v "$LK_CFG:$LK_CFG:ro" \
     callzip-livekit:latest --config "$LK_CFG"
 for i in $(seq 20); do
@@ -136,14 +137,14 @@ for i in $(seq 20); do
 done
 echo "LiveKit up."
 
-echo "Starting viewer..."
+echo "Starting viewer (cores 8-11)..."
 ulimit -n 65536
-"$BIN" "$VIEWER_CFG" &
+taskset -c 10-13 "$BIN" "$VIEWER_CFG" &
 VIEWER_PID=$!
 sleep 8
 
-echo "Starting $S senders..."
-"$BIN" "$SENDER_CFG" &
+echo "Starting $S senders (cores 0-3)..."
+taskset -c 0-5 "$BIN" "$SENDER_CFG" &
 SENDER_PID=$!
 
 echo "Waiting 40s (10s join + 10s warmup + 20s steady)..."
