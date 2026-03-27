@@ -109,6 +109,11 @@ func SVCLoopIntoTrack(
 			continue
 		}
 
+		// Collect all RTP packets for the selected layers first, then send
+		// them paced evenly over the frame interval. This avoids bursting
+		// all packets at once — which causes tc to spike queuing delay and
+		// inflates interarrival jitter (same role as Chrome's PacedSender).
+		var allPkts []*rtp.Packet
 		for _, sf := range subFrames {
 			sid := uint8(sf.Index)
 			if sid > maxSID {
@@ -134,11 +139,25 @@ func SVCLoopIntoTrack(
 					},
 					Payload: payload,
 				}
-				if err := track.WriteRTP(pkt); err != nil {
-					l.Errorf("[ivf-svc] WriteRTP: %v", err)
-					return
-				}
+				allPkts = append(allPkts, pkt)
 				seqNo++
+			}
+		}
+
+		n := len(allPkts)
+		for i, pkt := range allPkts {
+			if n > 1 {
+				// Space packet i at nextTime + i*(dur/n), distributing
+				// sends evenly over [nextTime, nextTime+dur). The tail
+				// of the interval is consumed by sleepUntil below.
+				deadline := nextTime.Add(time.Duration(i) * dur / time.Duration(n))
+				if wait := time.Until(deadline); wait > 0 {
+					time.Sleep(wait)
+				}
+			}
+			if err := track.WriteRTP(pkt); err != nil {
+				l.Errorf("[ivf-svc] WriteRTP: %v", err)
+				return
 			}
 		}
 
