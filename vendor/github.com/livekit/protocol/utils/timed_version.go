@@ -125,6 +125,17 @@ func (t TimedVersion) Load() TimedVersion {
 	return t
 }
 
+func (t TimedVersion) Next() TimedVersion {
+	return t + 1
+}
+
+func (t TimedVersion) Prev() TimedVersion {
+	if t == 0 {
+		return t
+	}
+	return t - 1
+}
+
 func (t TimedVersion) After(other TimedVersion) bool {
 	return t > other
 }
@@ -166,11 +177,7 @@ func (t TimedVersion) Value() (driver.Value, error) {
 		return nil, nil
 	}
 
-	ts, ticks := timedVersionComponents(t)
-	b := make([]byte, 0, 12)
-	b = binary.BigEndian.AppendUint64(b, uint64(ts))
-	b = binary.BigEndian.AppendUint32(b, uint32(ticks))
-	return b, nil
+	return t.MarshalBinary()
 }
 
 func (t *TimedVersion) Scan(src interface{}) (err error) {
@@ -180,9 +187,7 @@ func (t *TimedVersion) Scan(src interface{}) (err error) {
 		case 0:
 			*t = 0
 		case 12:
-			ts := int64(binary.BigEndian.Uint64(b))
-			ticks := int32(binary.BigEndian.Uint32(b[8:]))
-			*t = timedVersionFromComponents(ts, ticks)
+			t.UnmarshalBinary(b)
 		default:
 			return errors.New("(*TimedVersion).Scan: unsupported format")
 		}
@@ -191,6 +196,21 @@ func (t *TimedVersion) Scan(src interface{}) (err error) {
 	default:
 		return errors.New("(*TimedVersion).Scan: unsupported data type")
 	}
+	return nil
+}
+
+func (t TimedVersion) MarshalBinary() ([]byte, error) {
+	ts, ticks := timedVersionComponents(t)
+	b := make([]byte, 0, 12)
+	b = binary.BigEndian.AppendUint64(b, uint64(ts))
+	b = binary.BigEndian.AppendUint32(b, uint32(ticks))
+	return b, nil
+}
+
+func (t *TimedVersion) UnmarshalBinary(b []byte) error {
+	ts := int64(binary.BigEndian.Uint64(b))
+	ticks := int32(binary.BigEndian.Uint32(b[8:]))
+	*t = timedVersionFromComponents(ts, ticks)
 	return nil
 }
 

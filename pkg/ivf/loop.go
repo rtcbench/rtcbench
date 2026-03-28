@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"call.zip/pkg/log"
-	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media"
+	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 // LoopIntoTrack continuously reads frames from src and writes them into

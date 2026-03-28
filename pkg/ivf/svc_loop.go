@@ -7,7 +7,7 @@ import (
 	"call.zip/pkg/vp9"
 	vp9hdr "github.com/pion/rtp/codecs/vp9"
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 // SVCConfig describes the SVC layer structure for the send loop.

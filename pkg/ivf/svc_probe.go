@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"call.zip/pkg/vp9"
-	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
+	"github.com/pion/webrtc/v4/pkg/media/ivfreader"
 )
 
 // ProbeSVCLayers reads the first frame of an IVF file and returns the number

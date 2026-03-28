@@ -42,7 +42,7 @@ func getJoinToken(apiKey, apiSecret, room, identity string) (string, error) {
 		RoomJoin: true,
 		Room:     room,
 	}
-	at.AddGrant(grant).
+	at.SetVideoGrant(grant).
 		SetIdentity(identity).
 		SetValidFor(time.Hour)
 
@@ -80,7 +80,7 @@ func main() {
 
     // terminate a room and cause participants to leave
     roomClient.DeleteRoom(context.Background(), &livekit.DeleteRoomRequest{
-		Room: roomId,
+		Room: roomName,
 	})
 
     // list participants in a room
@@ -215,6 +215,45 @@ if _, err = room.LocalParticipant.PublishTrack(track, &lksdk.TrackPublicationOpt
 For a full working example, refer to [filesender](https://github.com/livekit/server-sdk-go/blob/main/examples/filesender/main.go). This
 example sends all audio/video files in the current directory.
 
+### Publishing audio from PCM16 Samples
+
+In order to publish audio from PCM16 Samples, you can use the NewPCMLocalTrack API as follows:
+
+```go
+import (
+	...
+	lkmedia "github.com/livekit/server-sdk-go/v2/pkg/media"
+)
+
+...
+
+publishTrack, err := lkmedia.NewPCMLocalTrack(sourceSampleRate, sourceChannels, logger.GetLogger())
+if err != nil {
+	return err
+}
+
+if _, err = room.LocalParticipant.PublishTrack(publishTrack, &lksdk.TrackPublicationOptions{
+	Name: "test",
+}); err != nil {
+	return err
+}
+```
+
+You can then write PCM16 samples to the `publishTrack` like:
+
+```go
+err = publishTrack.WriteSample(sample)
+if err != nil {
+	logger.Errorw("error writing sample", err)
+}
+```
+
+The SDK will encode the sample to Opus and write it to the track. If the sourceSampleRate is not 48000, resampling is also handled internally.
+
+To close the track, you can call `Close()` on the `publishTrack`, this will stop accepting samples, write the existing buffer and then close the track. If you wish to clear the buffer manually, use the `ClearQeuue()` on the track. There's also a `WaitForPlayout()` API if you want to wait for existing buffer to be written before writing something to the track.
+
+**Note**: Stereo audio is currently not supported, it may result in unpleasant audio.
+
 ### Publish from other sources
 
 In order to publish from non-file sources, you will have to implement your own `SampleProvider`, that could provide frames of data with a `NextSample` method.
@@ -257,6 +296,54 @@ With the Go SDK, you can accept media from the room.
 For a full working example, refer to [filesaver](https://github.com/livekit/server-sdk-go/blob/main/examples/filesaver/main.go). This
 example saves the audio/video in the LiveKit room to the local disk.
 
+### Decoding an Opus track to PCM16
+
+To get PCM audio out of a remote Opus audio track, you can use the following API:
+
+```go
+import (
+	...
+	media "github.com/livekit/media-sdk"
+	lkmedia "github.com/livekit/server-sdk-go/v2/pkg/media"
+)
+
+type PCM16Writer struct {
+	closed atomic.Bool
+}
+
+func (w *PCM16Writer) WriteSample(sample media.PCM16Sample) error {
+	if !w.closed.Load() {
+		// Use the sample however you want
+	}
+}
+
+func (w *PCM16Writer) Close() error {
+	w.closed.Store(true)
+	// close the writer
+}
+
+...
+
+writer := &PCM16Writer{}
+pcmTrack, err := lkmedia.NewPCMRemoteTrack(remoteTrack, writer)
+if err != nil {
+	return err
+}
+```
+
+The SDK will then read the provided remote track, decode the audio and write the PCM16 samples to the provided writer. By defeault, it pushes out 48kHz mono audio. The output sample rate and channels can also be configured by passsing as an option:
+
+```go
+pcmTrack, err := lkmedia.NewPCMRemoteTrack(remoteTrack, writer, lkmedia.WithTargetSampleRate(24000), lkmedia.WithTargetChannels(2))
+```
+
+Resampling to the target sample rate is handled internally, and so is upmixing/downmixing to the target channel count.
+
+The API also provides an option to handle jitter, this is enabled by default but you can disable it using:
+
+```go
+pcmTrack, err := lkmedia.NewPCMRemoteTrack(remoteTrack, writer, lkmedia.WithHandleJitter(false))
+```
 
 ## Receiving webhooks
 
@@ -290,9 +377,10 @@ func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 <br/><table>
 <thead><tr><th colspan="2">LiveKit Ecosystem</th></tr></thead>
 <tbody>
-<tr><td>Realtime SDKs</td><td><a href="https://github.com/livekit/components-js">React Components</a> · <a href="https://github.com/livekit/client-sdk-js">Browser</a> · <a href="https://github.com/livekit/components-swift">Swift Components</a> · <a href="https://github.com/livekit/client-sdk-swift">iOS/macOS/visionOS</a> · <a href="https://github.com/livekit/client-sdk-android">Android</a> · <a href="https://github.com/livekit/client-sdk-flutter">Flutter</a> · <a href="https://github.com/livekit/client-sdk-react-native">React Native</a> · <a href="https://github.com/livekit/rust-sdks">Rust</a> · <a href="https://github.com/livekit/node-sdks">Node.js</a> · <a href="https://github.com/livekit/python-sdks">Python</a> · <a href="https://github.com/livekit/client-sdk-unity-web">Unity (web)</a> · <a href="https://github.com/livekit/client-sdk-unity">Unity (beta)</a></td></tr><tr></tr>
-<tr><td>Server APIs</td><td><a href="https://github.com/livekit/node-sdks">Node.js</a> · <b>Golang</b> · <a href="https://github.com/livekit/server-sdk-ruby">Ruby</a> · <a href="https://github.com/livekit/server-sdk-kotlin">Java/Kotlin</a> · <a href="https://github.com/livekit/python-sdks">Python</a> · <a href="https://github.com/livekit/rust-sdks">Rust</a> · <a href="https://github.com/agence104/livekit-server-sdk-php">PHP (community)</a></td></tr><tr></tr>
-<tr><td>Agents Frameworks</td><td><a href="https://github.com/livekit/agents">Python</a> · <a href="https://github.com/livekit/agent-playground">Playground</a></td></tr><tr></tr>
+<tr><td>LiveKit SDKs</td><td><a href="https://github.com/livekit/client-sdk-js">Browser</a> · <a href="https://github.com/livekit/client-sdk-swift">iOS/macOS/visionOS</a> · <a href="https://github.com/livekit/client-sdk-android">Android</a> · <a href="https://github.com/livekit/client-sdk-flutter">Flutter</a> · <a href="https://github.com/livekit/client-sdk-react-native">React Native</a> · <a href="https://github.com/livekit/rust-sdks">Rust</a> · <a href="https://github.com/livekit/node-sdks">Node.js</a> · <a href="https://github.com/livekit/python-sdks">Python</a> · <a href="https://github.com/livekit/client-sdk-unity">Unity</a> · <a href="https://github.com/livekit/client-sdk-unity-web">Unity (WebGL)</a> · <a href="https://github.com/livekit/client-sdk-esp32">ESP32</a></td></tr><tr></tr>
+<tr><td>Server APIs</td><td><a href="https://github.com/livekit/node-sdks">Node.js</a> · <b>Golang</b> · <a href="https://github.com/livekit/server-sdk-ruby">Ruby</a> · <a href="https://github.com/livekit/server-sdk-kotlin">Java/Kotlin</a> · <a href="https://github.com/livekit/python-sdks">Python</a> · <a href="https://github.com/livekit/rust-sdks">Rust</a> · <a href="https://github.com/agence104/livekit-server-sdk-php">PHP (community)</a> · <a href="https://github.com/pabloFuente/livekit-server-sdk-dotnet">.NET (community)</a></td></tr><tr></tr>
+<tr><td>UI Components</td><td><a href="https://github.com/livekit/components-js">React</a> · <a href="https://github.com/livekit/components-android">Android Compose</a> · <a href="https://github.com/livekit/components-swift">SwiftUI</a> · <a href="https://github.com/livekit/components-flutter">Flutter</a></td></tr><tr></tr>
+<tr><td>Agents Frameworks</td><td><a href="https://github.com/livekit/agents">Python</a> · <a href="https://github.com/livekit/agents-js">Node.js</a> · <a href="https://github.com/livekit/agent-playground">Playground</a></td></tr><tr></tr>
 <tr><td>Services</td><td><a href="https://github.com/livekit/livekit">LiveKit server</a> · <a href="https://github.com/livekit/egress">Egress</a> · <a href="https://github.com/livekit/ingress">Ingress</a> · <a href="https://github.com/livekit/sip">SIP</a></td></tr><tr></tr>
 <tr><td>Resources</td><td><a href="https://docs.livekit.io">Docs</a> · <a href="https://github.com/livekit-examples">Example apps</a> · <a href="https://livekit.io/cloud">Cloud</a> · <a href="https://docs.livekit.io/home/self-hosting/deployment">Self-hosting</a> · <a href="https://github.com/livekit/livekit-cli">CLI</a></td></tr>
 </tbody>

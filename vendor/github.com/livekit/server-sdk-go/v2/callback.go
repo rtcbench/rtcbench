@@ -15,7 +15,7 @@
 package lksdk
 
 import (
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 
 	"github.com/livekit/protocol/livekit"
 )
@@ -46,8 +46,10 @@ type ParticipantCallback struct {
 	OnTrackUnpublished        func(publication *RemoteTrackPublication, rp *RemoteParticipant)
 	OnDataReceived            func(data []byte, params DataReceiveParams) // Deprecated: Use OnDataPacket instead
 	OnDataPacket              func(data DataPacket, params DataReceiveParams)
+	OnTranscriptionReceived   func(transcriptionSegments []*TranscriptionSegment, p Participant, publication TrackPublication)
 }
 
+// NewParticipantCallback creates a new ParticipantCallback with default no-op handlers.
 func NewParticipantCallback() *ParticipantCallback {
 	return &ParticipantCallback{
 		OnLocalTrackPublished:   func(publication *LocalTrackPublication, lp *LocalParticipant) {},
@@ -66,9 +68,11 @@ func NewParticipantCallback() *ParticipantCallback {
 		OnTrackUnpublished:         func(publication *RemoteTrackPublication, rp *RemoteParticipant) {},
 		OnDataReceived:             func(data []byte, params DataReceiveParams) {},
 		OnDataPacket:               func(data DataPacket, params DataReceiveParams) {},
+		OnTranscriptionReceived:    func(transcriptionSegments []*TranscriptionSegment, p Participant, publication TrackPublication) {},
 	}
 }
 
+// Merge copies non-nil callback functions from other to this callback.
 func (cb *ParticipantCallback) Merge(other *ParticipantCallback) {
 	if other.OnLocalTrackPublished != nil {
 		cb.OnLocalTrackPublished = other.OnLocalTrackPublished
@@ -115,25 +119,43 @@ func (cb *ParticipantCallback) Merge(other *ParticipantCallback) {
 	if other.OnDataPacket != nil {
 		cb.OnDataPacket = other.OnDataPacket
 	}
+	if other.OnTranscriptionReceived != nil {
+		cb.OnTranscriptionReceived = other.OnTranscriptionReceived
+	}
 }
 
 type DisconnectionReason string
 
 const (
-	LeaveRequested  DisconnectionReason = "leave requested by room"
-	UserUnavailable DisconnectionReason = "remote user unavailable"
-	RejectedByUser  DisconnectionReason = "rejected by remote user"
-	Failed          DisconnectionReason = "connection to room failed"
+	LeaveRequested     DisconnectionReason = "leave requested by user"
+	UserUnavailable    DisconnectionReason = "remote user unavailable"
+	RejectedByUser     DisconnectionReason = "rejected by remote user"
+	Failed             DisconnectionReason = "connection to room failed"
+	RoomClosed         DisconnectionReason = "room closed"
+	ParticipantRemoved DisconnectionReason = "removed by server"
+	DuplicateIdentity  DisconnectionReason = "duplicate identity"
+	OtherReason        DisconnectionReason = "other reasons"
 )
 
+// GetDisconnectionReason converts a protocol disconnect reason to a DisconnectionReason.
 func GetDisconnectionReason(reason livekit.DisconnectReason) DisconnectionReason {
 	// TODO: SDK should forward the original reason and provide helpers like IsRequestedLeave.
-	r := LeaveRequested
+	r := OtherReason
 	switch reason {
+	case livekit.DisconnectReason_CLIENT_INITIATED:
+		r = LeaveRequested
 	case livekit.DisconnectReason_USER_UNAVAILABLE:
 		r = UserUnavailable
 	case livekit.DisconnectReason_USER_REJECTED:
 		r = RejectedByUser
+	case livekit.DisconnectReason_ROOM_CLOSED:
+		r = RoomClosed
+	case livekit.DisconnectReason_PARTICIPANT_REMOVED:
+		r = ParticipantRemoved
+	case livekit.DisconnectReason_DUPLICATE_IDENTITY:
+		r = DuplicateIdentity
+	case livekit.DisconnectReason_JOIN_FAILURE, livekit.DisconnectReason_SIGNAL_CLOSE, livekit.DisconnectReason_STATE_MISMATCH:
+		r = Failed
 	}
 	return r
 }
@@ -145,13 +167,17 @@ type RoomCallback struct {
 	OnParticipantDisconnected func(*RemoteParticipant)
 	OnActiveSpeakersChanged   func([]Participant)
 	OnRoomMetadataChanged     func(metadata string)
+	OnRecordingStatusChanged  func(isRecording bool)
+	OnRoomMoved               func(roomName string, token string)
 	OnReconnecting            func()
 	OnReconnected             func()
+	OnLocalTrackSubscribed    func(publication *LocalTrackPublication, lp *LocalParticipant)
 
 	// participant events are sent to the room as well
 	ParticipantCallback
 }
 
+// NewRoomCallback creates a new RoomCallback with default no-op handlers.
 func NewRoomCallback() *RoomCallback {
 	pc := NewParticipantCallback()
 	return &RoomCallback{
@@ -163,11 +189,15 @@ func NewRoomCallback() *RoomCallback {
 		OnParticipantDisconnected: func(participant *RemoteParticipant) {},
 		OnActiveSpeakersChanged:   func(participants []Participant) {},
 		OnRoomMetadataChanged:     func(metadata string) {},
+		OnRecordingStatusChanged:  func(isRecording bool) {},
+		OnRoomMoved:               func(roomName string, token string) {},
 		OnReconnecting:            func() {},
 		OnReconnected:             func() {},
+		OnLocalTrackSubscribed:    func(publication *LocalTrackPublication, lp *LocalParticipant) {},
 	}
 }
 
+// Merge copies non-nil callback functions from other to this callback.
 func (cb *RoomCallback) Merge(other *RoomCallback) {
 	if other == nil {
 		return
@@ -191,11 +221,17 @@ func (cb *RoomCallback) Merge(other *RoomCallback) {
 	if other.OnRoomMetadataChanged != nil {
 		cb.OnRoomMetadataChanged = other.OnRoomMetadataChanged
 	}
+	if other.OnRecordingStatusChanged != nil {
+		cb.OnRecordingStatusChanged = other.OnRecordingStatusChanged
+	}
 	if other.OnReconnecting != nil {
 		cb.OnReconnecting = other.OnReconnecting
 	}
 	if other.OnReconnected != nil {
 		cb.OnReconnected = other.OnReconnected
+	}
+	if other.OnLocalTrackSubscribed != nil {
+		cb.OnLocalTrackSubscribed = other.OnLocalTrackSubscribed
 	}
 
 	cb.ParticipantCallback.Merge(&other.ParticipantCallback)

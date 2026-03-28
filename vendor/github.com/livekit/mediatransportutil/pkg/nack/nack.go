@@ -29,6 +29,8 @@ const (
 	maxInterval   = 400 * time.Millisecond // maximum interval between NACK tries for the same sequence number
 	backoffFactor = float64(1.25)
 	maxLifetime   = 2 * time.Minute
+
+	rttSmoothingFactor = float64(0.75) // use 75% of new value
 )
 
 type NackQueueParams struct {
@@ -78,7 +80,11 @@ func (n *NackQueue) SetRTT(rtt uint32) {
 	if rtt == 0 {
 		n.rtt = n.params.DefaultRtt
 	} else {
-		n.rtt = rtt
+		if n.rtt == 0 {
+			n.rtt = rtt
+		} else {
+			n.rtt = uint32(rttSmoothingFactor*float64(rtt) + (1.0-rttSmoothingFactor)*float64(n.rtt))
+		}
 	}
 }
 

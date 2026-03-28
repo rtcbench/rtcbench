@@ -55,6 +55,7 @@ func SenderInterceptors(initialBitrateBps int) ([]interceptor.Factory, func() in
 			// constrains the path (more AIMD steps to shed the inflated estimate).
 			piongcc.SendSideBWEMaxBitrate(1_000_000),
 			piongcc.SendSideBWEMinBitrate(100_000),
+			piongcc.SendSideBWEPacer(piongcc.NewNoOpPacer()),
 		)
 	})
 	if err != nil {

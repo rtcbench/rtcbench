@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
+	"github.com/pion/webrtc/v4/pkg/media/ivfreader"
 )
 
 // FrameSource provides frames for the send loop. Each call to NextFrame
@@ -67,14 +67,16 @@ func (s *diskSource) NextFrame() ([]byte, time.Duration, error) {
 		}
 
 		dur := defaultDur
-		if s.prevTS != nil && fh.Timestamp > *s.prevTS && s.num != 0 && s.den != 0 {
-			ticks := fh.Timestamp - *s.prevTS
-			dur = time.Duration(int64(time.Second) * int64(ticks) * int64(s.num) / int64(s.den))
+		// pion/webrtc v4 pre-converts timestamps: Timestamp = raw_pts * den / num.
+		// Duration between v4 timestamps: delta * num^2 / den^2 seconds.
+		ts := fh.Timestamp
+		if s.prevTS != nil && ts > *s.prevTS && s.den != 0 {
+			delta := ts - *s.prevTS
+			dur = time.Duration(int64(time.Second) * int64(delta) * int64(s.num) * int64(s.num) / (int64(s.den) * int64(s.den)))
 			if dur <= 0 {
 				dur = defaultDur
 			}
 		}
-		ts := fh.Timestamp
 		s.prevTS = &ts
 
 		return frame, dur, nil

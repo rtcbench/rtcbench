@@ -20,7 +20,7 @@ import (
 	"call.zip/pkg/vp9_stats"
 	janus "call.zip/plugin/janus/internal"
 	"github.com/pion/rtcp"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 const (

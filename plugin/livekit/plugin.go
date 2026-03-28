@@ -19,7 +19,7 @@ import (
 	lkinternal "call.zip/plugin/livekit/internal"
 	lkproto "github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 const (

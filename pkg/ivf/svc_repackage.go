@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
+	"github.com/pion/webrtc/v4/pkg/media/ivfreader"
 )
 
 // BuildSuperframe constructs a VP9 superframe from the given sub-frame data.
@@ -123,9 +123,14 @@ func RepackageSVCIVFMulti(srcPaths []string, dstPath string) error {
 			}
 		}
 		superframe := BuildSuperframe(subFrames)
+		// Undo v4's pre-conversion to write raw PTS.
+		rawTS := ts
+		if topHdr.TimebaseDenominator != 0 {
+			rawTS = ts * uint64(topHdr.TimebaseNumerator) / uint64(topHdr.TimebaseDenominator)
+		}
 		var frameHdr [12]byte
 		binary.LittleEndian.PutUint32(frameHdr[0:4], uint32(len(superframe)))
-		binary.LittleEndian.PutUint64(frameHdr[4:12], ts)
+		binary.LittleEndian.PutUint64(frameHdr[4:12], rawTS)
 		if _, err := df.Write(frameHdr[:]); err != nil {
 			return err
 		}
@@ -195,10 +200,16 @@ func RepackageSVCIVF(srcPath, dstPath string, numSpatialLayers int) error {
 		}
 		superframe := BuildSuperframe(subFrames)
 
-		// Write IVF frame header (12 bytes) + superframe data
+		// Write IVF frame header (12 bytes) + superframe data.
+		// pion v4 pre-converts timestamps (raw * den / num), so undo it
+		// to write raw PTS back to the file.
+		rawTS := fh.Timestamp
+		if header.TimebaseDenominator != 0 {
+			rawTS = fh.Timestamp * uint64(header.TimebaseNumerator) / uint64(header.TimebaseDenominator)
+		}
 		var frameHdr [12]byte
 		binary.LittleEndian.PutUint32(frameHdr[0:4], uint32(len(superframe)))
-		binary.LittleEndian.PutUint64(frameHdr[4:12], fh.Timestamp)
+		binary.LittleEndian.PutUint64(frameHdr[4:12], rawTS)
 		if _, err := df.Write(frameHdr[:]); err != nil {
 			return err
 		}

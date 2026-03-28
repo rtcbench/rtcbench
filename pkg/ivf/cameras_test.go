@@ -8,7 +8,9 @@ import (
 )
 
 // writeTestIVF writes a minimal valid IVF file with the given frame payloads.
-// Timestamps increment by 1 tick per frame; timebase is 1/30 (30 fps).
+// Timestamps increment by 1 tick per frame.
+// Pion ivfreader layout: offset 16-19 = TimebaseDenominator, 20-23 = TimebaseNumerator.
+// We write den=30, num=1 (30fps), matching real ffmpeg VP9 IVF output.
 func writeTestIVF(t *testing.T, path string, frames [][]byte) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -24,8 +26,8 @@ func writeTestIVF(t *testing.T, path string, frames [][]byte) {
 	copy(hdr[8:12], "VP90")          // codec FourCC
 	binary.LittleEndian.PutUint16(hdr[12:14], 640) // width
 	binary.LittleEndian.PutUint16(hdr[14:16], 480) // height
-	binary.LittleEndian.PutUint32(hdr[16:20], 1)   // timebase numerator
-	binary.LittleEndian.PutUint32(hdr[20:24], 30)  // timebase denominator
+	binary.LittleEndian.PutUint32(hdr[16:20], 30)  // timebase denominator (frame rate)
+	binary.LittleEndian.PutUint32(hdr[20:24], 1)   // timebase numerator
 	binary.LittleEndian.PutUint32(hdr[24:28], uint32(len(frames))) // frame count
 	f.Write(hdr[:])
 
