@@ -3,3 +3,5 @@ __pycache__/
 cluster.yml
 !cluster.example.yml
 hints.json
+binaries/
+ivf/
