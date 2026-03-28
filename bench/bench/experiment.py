@@ -828,13 +828,23 @@ class SenderExperiment:
             config_path = "/tmp/bench-sender-load.yml"
             self.ssh.write_remote_file(host, config_path, config_content)
 
+            # Jitsi's jicofo needs throttled joins: low concurrency + spacing
+            # to avoid overwhelming the XMPP signaling path.
+            if self.sfu_name == "jitsi":
+                join_concurrency = 3
+                join_spacing = "2s"
+            else:
+                join_concurrency = self.senders_per_room
+                join_spacing = "0s"
             env_str = (
                 f"PLUGIN_ID={self.sfu_name} "
                 f"SERVER_IP={self.sfu_ip} "
                 f"SENDERS_PER_ROOM={self.senders_per_room} "
                 f"TOTAL_ROOMS={self.num_rooms} "
                 f"IVF_DIR={REMOTE_IVF_DIR} "
-                f"LOG_DIR={REMOTE_LOG_DIR}"
+                f"LOG_DIR={REMOTE_LOG_DIR} "
+                f"JOIN_CONCURRENCY={join_concurrency} "
+                f"JOIN_SPACING={join_spacing}"
             )
             self.ssh.run(host, f"mkdir -p {REMOTE_LOG_DIR}", timeout=10)
             pid = self.ssh.run_background(
@@ -845,9 +855,11 @@ class SenderExperiment:
                      host, pid, self.s_per_machine,
                      self.num_rooms, self.senders_per_room)
 
-        log.info("Waiting 15s for %d senders to join and start publishing...",
-                 self.total_senders)
-        time.sleep(15)
+        # Jitsi needs longer join time: 2s spacing × senders + BOSH handshake time.
+        join_wait = max(15, self.senders_per_room * 2 + 30) if self.sfu_name == "jitsi" else 15
+        log.info("Waiting %ds for %d senders to join and start publishing...",
+                 join_wait, self.total_senders)
+        time.sleep(join_wait)
         self._start_at = int(time.time())
 
     def _start_webrtcperf_senders(self):

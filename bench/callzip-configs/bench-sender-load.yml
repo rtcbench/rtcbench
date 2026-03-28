@@ -15,7 +15,8 @@ spec:
       directory: $env:IVF_DIR=/opt/ivf-videos
       inMemory: true
     joinPolicy:
-      concurrency: $env:SENDERS_PER_ROOM=1
+      concurrency: $env:JOIN_CONCURRENCY=1
+      joinStartSpacing: $env:JOIN_SPACING=0s
   pluginConfig:
     janus:
       _serverRoot: 'http://{{spec.network.serverIP}}:8088/janus'
