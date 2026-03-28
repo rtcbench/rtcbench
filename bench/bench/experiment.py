@@ -679,8 +679,9 @@ class SenderExperiment:
 
         # Multi-room: split senders across rooms to distribute load across
         # SFU workers (each room maps to one worker in mediasoup/livekit).
-        if s_per_machine > SENDERS_PER_ROOM:
-            self.num_rooms = math.ceil(s_per_machine / SENDERS_PER_ROOM)
+        max_per_room = SENDERS_PER_ROOM.get(sfu_name, 65) if isinstance(SENDERS_PER_ROOM, dict) else SENDERS_PER_ROOM
+        if s_per_machine > max_per_room:
+            self.num_rooms = math.ceil(s_per_machine / max_per_room)
             self.senders_per_room = math.ceil(s_per_machine / self.num_rooms)
             log.info("Multi-room sender (%s): %d rooms x %d senders/room = %d per machine (requested %d)",
                      sfu_name, self.num_rooms, self.senders_per_room,
@@ -932,12 +933,12 @@ class SenderExperiment:
             return (f"http://{sfu_ip}:{web_port}/"
                     f"?ws=ws://{sfu_ip}:{ws_port}"
                     f"&room=room-1234&key=devkey&secret=secret"
-                    f"&publish=true")
+                    f"&publish=true&receive=false")
         elif self.sfu_name == "mediasoup":
             web_port = self.cluster.get("mediasoup_web_port", 8080)
             return (f"https://{sfu_ip}:{web_port}/"
                     f"?roomId=room-1234"
-                    f"&produce=true&consume=true"
+                    f"&produce=true&consume=false"
                     f"&webcam=true&mic=false"
                     f"&forceVP9=true"
                     f"&displayName=bench-sender")

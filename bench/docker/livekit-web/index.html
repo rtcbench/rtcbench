@@ -9,6 +9,7 @@ const ROOM = params.get("room") || "room-1234";
 const API_KEY = params.get("key") || "devkey";
 const API_SECRET = params.get("secret") || "secret";
 const PUBLISH = params.get("publish") === "true";
+const RECEIVE = params.get("receive") !== "false";
 
 if (!WS_URL) {
     document.title = "ERROR: missing ws query parameter";
@@ -27,7 +28,7 @@ async function makeToken(room, identity, key, secret, canPublish) {
     const now = Math.floor(Date.now() / 1000);
     const payload = base64url(enc.encode(JSON.stringify({
         iss: key, sub: identity, iat: now, exp: now + 86400,
-        video: {room: room, roomJoin: true, canSubscribe: true, canPublish: canPublish},
+        video: {room: room, roomJoin: true, canSubscribe: RECEIVE, canPublish: canPublish},
     })));
     const data = enc.encode(header + "." + payload);
     const cryptoKey = await crypto.subtle.importKey(
@@ -43,11 +44,13 @@ async function makeToken(room, identity, key, secret, canPublish) {
 
     const room = new LivekitClient.Room({adaptiveStream: false, dynacast: false});
 
-    room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
-        const el = track.attach();
-        el.style.display = "none";
-        document.body.appendChild(el);
-    });
+    if (RECEIVE) {
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+            const el = track.attach();
+            el.style.display = "none";
+            document.body.appendChild(el);
+        });
+    }
 
     await room.connect(WS_URL, token);
 
