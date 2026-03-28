@@ -1,10 +1,12 @@
+FROM livekit/livekit-server:v1.8 AS livekit
+
 FROM debian:bookworm-slim
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
  && rm -rf /var/lib/apt/lists/*
 
-COPY livekit-server /usr/local/bin/livekit-server
+COPY --from=livekit /livekit-server /usr/local/bin/livekit-server
 COPY livekit.yaml /etc/livekit.yaml
 
 EXPOSE 7880
