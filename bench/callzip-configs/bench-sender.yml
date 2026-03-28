@@ -14,6 +14,8 @@ spec:
       videoCodec: vp9
       directory: $env:IVF_DIR=/opt/ivf-videos
       inMemory: true
+      svc:
+        mode: "off"
     joinPolicy:
       concurrency: 1
   pluginConfig:
