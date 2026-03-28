@@ -145,6 +145,12 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
         ssh.run(sfu_host,
                 "for i in $(seq 20); do wget -qO- http://localhost:7880/ >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1",
                 timeout=40)
+        # Start LiveKit web frontend (used by webrtcperf/chromium sender bench).
+        ssh.run(sfu_host,
+                f"docker rm -f {WEB_CONTAINER_NAME} 2>/dev/null || true; "
+                f"docker run -d --name {WEB_CONTAINER_NAME} --network host "
+                f"callzip-livekit-web:latest",
+                check=False, timeout=30)
         # Force all ICE/media onto the data plane. Without this, Pion
         # gathers candidates from all interfaces and may route media
         # through the 1G management interface instead of 10G data.
@@ -372,6 +378,9 @@ def stop_sfu(ssh, sfu_host, sfu_name, cluster=None):
                 "pkill -f livekit-server 2>/dev/null || true; "
                 "rm -f /tmp/livekit.pid",
                 check=False, timeout=15)
+        ssh.run(sfu_host,
+                f"docker rm -f {WEB_CONTAINER_NAME} 2>/dev/null || true",
+                check=False, timeout=10)
         if cluster:
             clear_data_plane(ssh, cluster)
     else:
