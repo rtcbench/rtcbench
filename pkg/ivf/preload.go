@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
+	"github.com/pion/webrtc/v4/pkg/media/ivfreader"
 )
 
 // Frame holds a single pre-parsed IVF frame ready for sending.
@@ -74,14 +74,16 @@ func loadOneFile(path string) ([]Frame, error) {
 		}
 
 		dur := defaultDur
-		if prevTS != nil && fh.Timestamp > *prevTS && num != 0 && den != 0 {
-			ticks := fh.Timestamp - *prevTS
-			dur = time.Duration(int64(time.Second) * int64(ticks) * int64(num) / int64(den))
+		// pion v4 pre-converts: Timestamp = raw_pts * den / num.
+		// Duration = delta * num^2 / den^2 seconds.
+		ts := fh.Timestamp
+		if prevTS != nil && ts > *prevTS && den != 0 {
+			delta := ts - *prevTS
+			dur = time.Duration(int64(time.Second) * int64(delta) * int64(num) * int64(num) / (int64(den) * int64(den)))
 			if dur <= 0 {
 				dur = defaultDur
 			}
 		}
-		ts := fh.Timestamp
 		prevTS = &ts
 
 		// Copy frame data so it doesn't alias the reader's internal buffer.

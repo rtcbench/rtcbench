@@ -19,7 +19,7 @@ import (
 	"call.zip/pkg/vp9_stats"
 	ms "call.zip/plugin/mediasoup/internal"
 	"github.com/pion/rtcp"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 const (

@@ -18,8 +18,11 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/livekit/protocol/livekit"
 	"github.com/twitchtv/twirp"
+
+	"github.com/livekit/protocol/livekit"
+	"github.com/livekit/protocol/utils/xtwirp"
+	"github.com/livekit/server-sdk-go/v2/signalling"
 )
 
 type EgressClient struct {
@@ -28,7 +31,8 @@ type EgressClient struct {
 }
 
 func NewEgressClient(url string, apiKey string, secretKey string, opts ...twirp.ClientOption) *EgressClient {
-	url = ToHttpURL(url)
+	opts = append(opts, xtwirp.DefaultClientOptions()...)
+	url = signalling.ToHttpURL(url)
 	client := livekit.NewEgressProtobufClient(url, &http.Client{}, opts...)
 	return &EgressClient{
 		egressClient: client,

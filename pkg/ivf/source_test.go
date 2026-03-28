@@ -143,11 +143,10 @@ func TestDiskSource_FrameDuration(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cam.ivf")
 
-	// writeTestIVF writes timebase bytes as: offset 16-19 = 1, offset 20-23 = 30.
-	// Pion's ivfreader reads offset 16-19 as TimebaseDenominator and 20-23 as
-	// TimebaseNumerator, so the effective timebase is num=30, den=1.
-	// Duration per tick = 1 tick * 30/1 seconds = 30s.
-	// Timestamps increment by 1 per frame, so inter-frame duration = 30s.
+	// writeTestIVF writes den=30, num=1 (30fps). Raw timestamps 0, 1, 2.
+	// pion v4 converts: Timestamp = raw * den / num = raw * 30.
+	// So v4 timestamps are 0, 30, 60. Delta = 30.
+	// Duration = delta * num^2 / den^2 seconds = 30 * 1 / 900 = 1/30 s.
 	writeTestIVF(t, path, [][]byte{{0xAA}, {0xBB}, {0xCC}})
 
 	src := NewDiskSource([]string{path})
@@ -161,12 +160,12 @@ func TestDiskSource_FrameDuration(t *testing.T) {
 		t.Fatalf("frame 0: expected 33ms default, got %v", dur0)
 	}
 
-	// Second frame: computed from timestamps (1-0) * 30 / 1 = 30s.
+	// Second frame: 1/30 second = 33333333ns.
 	_, dur1, err := src.NextFrame()
 	if err != nil {
 		t.Fatalf("frame 1: %v", err)
 	}
-	expectedDur := 30 * time.Second
+	expectedDur := time.Second / 30
 	if dur1 != expectedDur {
 		t.Fatalf("frame 1: got duration %v, want %v", dur1, expectedDur)
 	}

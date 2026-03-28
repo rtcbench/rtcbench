@@ -18,8 +18,11 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/livekit/protocol/auth"
 	"github.com/twitchtv/twirp"
+
+	"github.com/livekit/protocol/auth"
+
+	"github.com/livekit/server-sdk-go/v2/signalling"
 )
 
 type authBase struct {
@@ -43,6 +46,12 @@ func (g withSIPGrant) Apply(t *auth.AccessToken) {
 	t.SetSIPGrant((*auth.SIPGrant)(&g))
 }
 
+type withAgentGrant auth.AgentGrant
+
+func (g withAgentGrant) Apply(t *auth.AccessToken) {
+	t.SetAgentGrant((*auth.AgentGrant)(&g))
+}
+
 func (b authBase) withAuth(ctx context.Context, opt authOption, options ...authOption) (context.Context, error) {
 	at := auth.NewAccessToken(b.apiKey, b.apiSecret)
 	opt.Apply(at)
@@ -54,11 +63,20 @@ func (b authBase) withAuth(ctx context.Context, opt authOption, options ...authO
 		return nil, err
 	}
 
-	return twirp.WithHTTPRequestHeaders(ctx, newHeaderWithToken(token))
-}
+	h := signalling.NewHTTPHeaderWithToken(token)
+	ctxH, _ := twirp.HTTPRequestHeaders(ctx)
+	if ctxH != nil {
+		ctxH = ctxH.Clone()
+	} else {
+		ctxH = make(http.Header)
+	}
 
-func newHeaderWithToken(token string) http.Header {
-	header := make(http.Header)
-	header.Set("Authorization", "Bearer "+token)
-	return header
+	// merge new header with the ones already present in the context
+	for k, vv := range h {
+		for _, v := range vv {
+			ctxH.Add(k, v)
+		}
+	}
+
+	return twirp.WithHTTPRequestHeaders(ctx, ctxH)
 }

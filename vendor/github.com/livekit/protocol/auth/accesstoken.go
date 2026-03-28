@@ -29,10 +29,11 @@ const (
 
 // AccessToken produces token signed with API key and secret
 type AccessToken struct {
-	apiKey   string
-	secret   string
-	grant    ClaimGrants
-	validFor time.Duration
+	apiKey                    string
+	secret                    string
+	grant                     ClaimGrants
+	validFor                  time.Duration
+	allowSensitiveCredentials bool
 }
 
 func NewAccessToken(key string, secret string) *AccessToken {
@@ -62,6 +63,11 @@ func (t *AccessToken) SetKind(kind livekit.ParticipantInfo_Kind) *AccessToken {
 	return t
 }
 
+func (t *AccessToken) SetKindDetail(details ...livekit.ParticipantInfo_KindDetail) *AccessToken {
+	t.grant.SetKindDetail(details...)
+	return t
+}
+
 // Deprecated: use SetVideoGrant instead
 func (t *AccessToken) AddGrant(grant *VideoGrant) *AccessToken {
 	return t.SetVideoGrant(grant)
@@ -79,6 +85,21 @@ func (t *AccessToken) AddSIPGrant(grant *SIPGrant) *AccessToken {
 
 func (t *AccessToken) SetSIPGrant(grant *SIPGrant) *AccessToken {
 	t.grant.SIP = grant
+	return t
+}
+
+func (t *AccessToken) SetAgentGrant(grant *AgentGrant) *AccessToken {
+	t.grant.Agent = grant
+	return t
+}
+
+func (t *AccessToken) SetInferenceGrant(grant *InferenceGrant) *AccessToken {
+	t.grant.Inference = grant
+	return t
+}
+
+func (t *AccessToken) SetObservabilityGrant(grant *ObservabilityGrant) *AccessToken {
+	t.grant.Observability = grant
 	return t
 }
 
@@ -128,6 +149,16 @@ func (t *AccessToken) SetAgents(agents ...*livekit.RoomAgentDispatch) *AccessTok
 	return t
 }
 
+// SetAllowSensitiveCredentials enables the token to contain sensitive credentials, by default it is disabled.
+// When tokens are issued to end-users, it's not a good idea to issue sensitive data such as API keys/secrets in them
+// JWT tokens are not encrypted, so anything that is issued in them can be read by anyone.
+// When the tokens are used in a server environment (i.e. connecting from SIP or Agents), you can bypass the
+// credentials check by enabling this option.
+func (t *AccessToken) SetAllowSensitiveCredentials(allow bool) *AccessToken {
+	t.allowSensitiveCredentials = allow
+	return t
+}
+
 func (t *AccessToken) GetGrants() *ClaimGrants {
 	return &t.grant
 }
@@ -135,6 +166,12 @@ func (t *AccessToken) GetGrants() *ClaimGrants {
 func (t *AccessToken) ToJWT() (string, error) {
 	if t.apiKey == "" || t.secret == "" {
 		return "", ErrKeysMissing
+	}
+
+	if t.grant.RoomConfig != nil && !t.allowSensitiveCredentials {
+		if err := t.grant.RoomConfig.CheckCredentials(); err != nil {
+			return "", err
+		}
 	}
 
 	sig, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.HS256, Key: []byte(t.secret)},

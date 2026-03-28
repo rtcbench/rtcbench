@@ -49,7 +49,7 @@ func NewPacerLeakyBucket(interval time.Duration, bitrate int, maxLatency time.Du
 		maxLatency: maxLatency,
 		logger:     logger,
 	}
-	p.packets.SetMinCapacity(9)
+	p.packets.SetBaseCap(512)
 	return p
 }
 

@@ -38,7 +38,7 @@ func NewNoQueue(logger logger.Logger) *NoQueue {
 		logger: logger,
 		wake:   make(chan struct{}, 1),
 	}
-	n.packets.SetMinCapacity(9)
+	n.packets.SetBaseCap(512)
 
 	return n
 }

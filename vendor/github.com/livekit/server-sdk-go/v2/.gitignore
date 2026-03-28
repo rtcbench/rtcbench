@@ -15,7 +15,20 @@
 *.h264
 *.ivf
 *.ogg
+*.mka
+*.opus
+*.pcm
+*.wav
 
 .idea/
+.vscode/
 docs/
 bin/
+
+*.DS_Store
+
+# data stream test files
+*.mp4
+
+#env
+.env

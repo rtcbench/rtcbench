@@ -49,6 +49,10 @@ func SenderFactories(initialBitrateBps int) ([]interceptor.Factory, func() int, 
 			piongcc.SendSideBWEInitialBitrate(initialBitrateBps),
 			piongcc.SendSideBWEMaxBitrate(50_000_000),
 			piongcc.SendSideBWEMinBitrate(100_000),
+			// Disable the leaky bucket pacer added in pion/interceptor v0.1.44.
+			// Our SVC send loop already paces packets; double-pacing throttles
+			// throughput to a fraction of the GCC estimate.
+			piongcc.SendSideBWEPacer(piongcc.NewNoOpPacer()),
 		)
 	})
 	if err != nil {

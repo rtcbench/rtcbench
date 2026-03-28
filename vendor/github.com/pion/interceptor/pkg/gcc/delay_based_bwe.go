@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package gcc
@@ -47,7 +47,7 @@ type delayControllerConfig struct {
 	maxBitrate     int
 }
 
-func newDelayController(delayConfig delayControllerConfig) *delayController {
+func newDelayController(delayConfig delayControllerConfig, loggerFactory logging.LoggerFactory) *delayController {
 	ackPipe := make(chan []cc.Acknowledgment)
 	ackRatePipe := make(chan []cc.Acknowledgment)
 
@@ -58,7 +58,7 @@ func newDelayController(delayConfig delayControllerConfig) *delayController {
 		rateController:          nil,
 		onUpdateCallback:        nil,
 		wg:                      sync.WaitGroup{},
-		log:                     logging.NewDefaultLoggerFactory().NewLogger("gcc_delay_controller"),
+		log:                     loggerFactory.NewLogger("gcc_delay_controller"),
 	}
 
 	rateController := newRateController(

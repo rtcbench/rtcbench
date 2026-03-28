@@ -15,24 +15,24 @@
 package lksdk
 
 import (
-	"sync"
 	"time"
 
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 
 	"github.com/livekit/protocol/livekit"
+	protoLogger "github.com/livekit/protocol/logger"
 )
 
 type RemoteParticipant struct {
 	baseParticipant
 	pliWriter PLIWriter
-	client    *SignalClient
+	engine    *RTCEngine
 }
 
-func newRemoteParticipant(pi *livekit.ParticipantInfo, roomCallback *RoomCallback, client *SignalClient, pliWriter PLIWriter) *RemoteParticipant {
+func newRemoteParticipant(pi *livekit.ParticipantInfo, roomCallback *RoomCallback, engine *RTCEngine, pliWriter PLIWriter, log protoLogger.Logger) *RemoteParticipant {
 	p := &RemoteParticipant{
-		baseParticipant: *newBaseParticipant(roomCallback),
-		client:          client,
+		baseParticipant: *newBaseParticipant(roomCallback, log.WithValues("isLocal", false)),
+		engine:          engine,
 		pliWriter:       pliWriter,
 	}
 	p.updateInfo(pi)
@@ -54,7 +54,7 @@ func (p *RemoteParticipant) updateInfo(pi *livekit.ParticipantInfo) {
 			// new track
 			remotePub := &RemoteTrackPublication{}
 			remotePub.updateInfo(ti)
-			remotePub.client = p.client
+			remotePub.engine = p.engine
 			remotePub.participantID = p.sid
 			p.addPublication(remotePub)
 			newPubs[ti.Sid] = remotePub
@@ -94,8 +94,11 @@ func (p *RemoteParticipant) updateInfo(pi *livekit.ParticipantInfo) {
 	}
 }
 
-func (p *RemoteParticipant) addSubscribedMediaTrack(track *webrtc.TrackRemote, trackSID string,
-	receiver *webrtc.RTPReceiver) {
+func (p *RemoteParticipant) addSubscribedMediaTrack(
+	track *webrtc.TrackRemote,
+	trackSID string,
+	receiver *webrtc.RTPReceiver,
+) {
 	pub := p.getPublication(trackSID)
 	if pub == nil {
 		// wait for metadata to arrive
@@ -116,9 +119,12 @@ func (p *RemoteParticipant) addSubscribedMediaTrack(track *webrtc.TrackRemote, t
 	}
 	pub.setReceiverAndTrack(receiver, track)
 
-	p.client.log.Infow("track subscribed",
-		"participant", p.Identity(), "track", pub.sid.Load(),
-		"kind", pub.kind.Load())
+	p.engine.log.Infow(
+		"track subscribed",
+		"participant", p.Identity(),
+		"trackID", pub.sid.Load(),
+		"kind", pub.kind.Load(),
+	)
 	p.Callback.OnTrackSubscribed(track, pub, p)
 	p.roomCallback.OnTrackSubscribed(track, pub, p)
 }
@@ -133,7 +139,7 @@ func (p *RemoteParticipant) getPublication(trackSID string) *RemoteTrackPublicat
 func (p *RemoteParticipant) unpublishTrack(sid string, sendUnpublish bool) {
 	pub := p.getPublication(sid)
 	if pub == nil {
-		p.client.log.Warnw("could not find track to unpublish", nil, "sid", sid)
+		p.engine.log.Warnw("could not find track to unpublish", nil, "sid", sid)
 		return
 	}
 
@@ -171,14 +177,11 @@ func (p *RemoteParticipant) unpublishAllTracks() {
 		}
 		return true
 	})
-	eraseSyncMap(p.tracks)
-	eraseSyncMap(p.audioTracks)
-	eraseSyncMap(p.videoTracks)
+	p.tracks.Clear()
+	p.audioTracks.Clear()
+	p.videoTracks.Clear()
 }
 
-func eraseSyncMap(m *sync.Map) {
-	m.Range(func(key interface{}, value interface{}) bool {
-		m.Delete(key)
-		return true
-	})
+func (p *RemoteParticipant) SetLogger(logger protoLogger.Logger) {
+	p.baseParticipant.SetLogger(logger.WithValues("isLocal", false))
 }

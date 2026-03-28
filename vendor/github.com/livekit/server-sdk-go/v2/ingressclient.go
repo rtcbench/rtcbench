@@ -18,8 +18,11 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/livekit/protocol/livekit"
 	"github.com/twitchtv/twirp"
+
+	"github.com/livekit/protocol/livekit"
+	"github.com/livekit/protocol/utils/xtwirp"
+	"github.com/livekit/server-sdk-go/v2/signalling"
 )
 
 type IngressClient struct {
@@ -28,7 +31,8 @@ type IngressClient struct {
 }
 
 func NewIngressClient(url string, apiKey string, secretKey string, opts ...twirp.ClientOption) *IngressClient {
-	url = ToHttpURL(url)
+	opts = append(opts, xtwirp.DefaultClientOptions()...)
+	url = signalling.ToHttpURL(url)
 	client := livekit.NewIngressProtobufClient(url, &http.Client{}, opts...)
 	return &IngressClient{
 		ingressClient: client,

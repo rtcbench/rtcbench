@@ -14,10 +14,13 @@
 
 package lksdk
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/livekit/server-sdk-go/v2/signalling"
+)
 
 var (
-	ErrURLNotProvided           = errors.New("URL was not provided")
 	ErrConnectionTimeout        = errors.New("could not connect after timeout")
 	ErrTrackPublishTimeout      = errors.New("timed out publishing track")
 	ErrCannotDetermineMime      = errors.New("cannot determine mimetype from file extension")
@@ -25,9 +28,10 @@ var (
 	ErrUnsupportedSimulcastKind = errors.New("simulcast is only supported for video")
 	ErrInvalidSimulcastTrack    = errors.New("simulcast track was not initiated correctly")
 	ErrCannotFindTrack          = errors.New("could not find the track")
-	ErrInvalidParameter         = errors.New("invalid parameter")
+	ErrInvalidMessageType       = signalling.ErrInvalidMessageType
+	ErrInvalidParameter         = signalling.ErrInvalidParameter
 	ErrCannotConnectSignal      = errors.New("could not establish signal connection")
-	ErrCannotDialSignal         = errors.New("could not dial signal connection")
 	ErrNoPeerConnection         = errors.New("peer connection not established")
 	ErrAborted                  = errors.New("operation was aborted")
+	ErrMissingPrimaryCodec      = errors.New("primary track must be TrackLocalWithCodec when backup codec is present")
 )

@@ -24,7 +24,7 @@ import (
 )
 ```
 
-*Note for v1 and v2 users*: v1 and v2 support is discontinued, so please upgrade to v3. While the API has some breaking changes, the migration should be trivial.
+*Note for pre-v3 users*: v1 and v2 support is discontinued, so please upgrade to v3. While the API has some breaking changes, the migration should be trivial.
 
 ### Counter
 
@@ -66,7 +66,9 @@ m.Store("foo", "bar")
 v, ok := m.Load("foo")
 ```
 
-One important difference with `Map` is that `MapOf` supports arbitrary `comparable` key types:
+Apart from CLHT, `MapOf` borrows ideas from Java's `j.u.c.ConcurrentHashMap` (immutable K/V pair structs instead of atomic snapshots) and C++'s `absl::flat_hash_map` (meta memory and SWAR-based lookups). It also has more dense memory layout when compared with `Map`. Long story short, `MapOf` should be preferred over `Map` when possible.
+
+An important difference with `Map` is that `MapOf` supports arbitrary `comparable` key types:
 
 ```go
 type Point struct {
@@ -78,28 +80,70 @@ m.Store(Point{42, 42}, 42)
 v, ok := m.Load(point{42, 42})
 ```
 
+Apart from `Range` method available for map iteration, there are also `ToPlainMap`/`ToPlainMapOf` utility functions to convert a `Map`/`MapOf` to a built-in Go's `map`:
+```go
+m := xsync.NewMapOf[int, int]()
+m.Store(42, 42)
+pm := xsync.ToPlainMapOf(m)
+```
+
+Both `Map` and `MapOf` use the built-in Golang's hash function which has DDOS protection. This means that each map instance gets its own seed number and the hash function uses that seed for hash code calculation. However, for smaller keys this hash function has some overhead. So, if you don't need DDOS protection, you may provide a custom hash function when creating a `MapOf`. For instance, Murmur3 finalizer does a decent job when it comes to integers:
+
+```go
+m := NewMapOfWithHasher[int, int](func(i int, _ uint64) uint64 {
+	h := uint64(i)
+	h = (h ^ (h >> 33)) * 0xff51afd7ed558ccd
+	h = (h ^ (h >> 33)) * 0xc4ceb9fe1a85ec53
+	return h ^ (h >> 33)
+})
+```
+
+When benchmarking concurrent maps, make sure to configure all of the competitors with the same hash function or, at least, take hash function performance into the consideration.
+
+### SPSCQueue
+
+A `SPSCQueue` is a bounded single-producer single-consumer concurrent queue. This means that not more than a single goroutine must be publishing items to the queue while not more than a single goroutine must be consuming those items.
+
+```go
+q := xsync.NewSPSCQueue(1024)
+// producer inserts an item into the queue
+// optimistic insertion attempt; doesn't block
+inserted := q.TryEnqueue("bar")
+// consumer obtains an item from the queue
+// optimistic obtain attempt; doesn't block
+item, ok := q.TryDequeue() // interface{} pointing to a string
+```
+
+`SPSCQueueOf[I]` is an implementation with parametrized item type. It is available for Go 1.19 or later.
+
+```go
+q := xsync.NewSPSCQueueOf[string](1024)
+inserted := q.TryEnqueue("foo")
+item, ok := q.TryDequeue() // string
+```
+
+The queue is based on the data structure from this [article](https://rigtorp.se/ringbuffer). The idea is to reduce the CPU cache coherency traffic by keeping cached copies of read and write indexes used by producer and consumer respectively.
+
 ### MPMCQueue
 
 A `MPMCQueue` is a bounded multi-producer multi-consumer concurrent queue.
 
 ```go
 q := xsync.NewMPMCQueue(1024)
-// producer inserts an item into the queue
-q.Enqueue("foo")
+// producer optimistically inserts an item into the queue
 // optimistic insertion attempt; doesn't block
 inserted := q.TryEnqueue("bar")
 // consumer obtains an item from the queue
-item := q.Dequeue() // interface{} pointing to a string
 // optimistic obtain attempt; doesn't block
-item, ok := q.TryDequeue()
+item, ok := q.TryDequeue() // interface{} pointing to a string
 ```
 
 `MPMCQueueOf[I]` is an implementation with parametrized item type. It is available for Go 1.19 or later.
 
 ```go
 q := xsync.NewMPMCQueueOf[string](1024)
-q.Enqueue("foo")
-item := q.Dequeue() // string
+inserted := q.TryEnqueue("foo")
+item, ok := q.TryDequeue() // string
 ```
 
 The queue is based on the algorithm from the [MPMCQueue](https://github.com/rigtorp/MPMCQueue) C++ library which in its turn references D.Vyukov's [MPMC queue](https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue). According to the following [classification](https://www.1024cores.net/home/lock-free-algorithms/queues), the queue is array-based, fails on overflow, provides causal FIFO, has blocking producers and consumers.
@@ -132,6 +176,19 @@ The idea of the algorithm is to build on top of an existing reader-writer mutex 
 Hence, by the design `RBMutex` is a specialized mutex for scenarios, such as caches, where the vast majority of locks are acquired by readers and write lock acquire attempts are infrequent. In such scenarios, `RBMutex` should perform better than the `sync.RWMutex` on large multicore machines.
 
 `RBMutex` extends `sync.RWMutex` internally and uses it as the "reader bias disabled" fallback, so the same semantics apply. The only noticeable difference is in the reader tokens returned from the `RLock`/`RUnlock` methods.
+
+Apart from blocking methods, `RBMutex` also has methods for optimistic locking:
+```go
+mu := xsync.NewRBMutex()
+if locked, t := mu.TryRLock(); locked {
+	// critical reader section...
+	mu.RUnlock(t)
+}
+if mu.TryLock() {
+	// critical writer section...
+	mu.Unlock()
+}
+```
 
 ## License
 

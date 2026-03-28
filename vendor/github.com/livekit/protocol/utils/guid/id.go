@@ -17,9 +17,11 @@ package guid
 import (
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"fmt"
 	mrand "math/rand/v2"
 	"os"
+	"regexp"
 	"sync"
 	"unsafe"
 
@@ -33,23 +35,40 @@ import (
 const Size = 12
 
 const (
-	RoomPrefix            = "RM_"
-	NodePrefix            = "ND_"
-	ParticipantPrefix     = "PA_"
-	TrackPrefix           = "TR_"
-	APIKeyPrefix          = "API"
-	EgressPrefix          = "EG_"
-	IngressPrefix         = "IN_"
-	SIPTrunkPrefix        = "ST_"
-	SIPDispatchRulePrefix = "SDR_"
-	SIPCallPrefix         = "SCL_"
-	RPCPrefix             = "RPC_"
-	WHIPResourcePrefix    = "WH_"
-	RTMPResourcePrefix    = "RT_"
-	URLResourcePrefix     = "UR_"
-	AgentWorkerPrefix     = "AW_"
-	AgentJobPrefix        = "AJ_"
-	AgentDispatchPrefix   = "AD_"
+	RoomPrefix                         = "RM_"
+	NodePrefix                         = "ND_"
+	ParticipantPrefix                  = "PA_"
+	TrackPrefix                        = "TR_"
+	DataTrackPrefix                    = "DTR_"
+	APIKeyPrefix                       = "API"
+	EgressPrefix                       = "EG_"
+	IngressPrefix                      = "IN_"
+	SIPTrunkPrefix                     = "ST_"
+	SIPDispatchRulePrefix              = "SDR_"
+	SIPCallPrefix                      = "SCL_"
+	SIPTransferPrefix                  = "STR_"
+	RPCPrefix                          = "RPC_"
+	WHIPResourcePrefix                 = "WH_"
+	RTMPResourcePrefix                 = "RT_"
+	URLResourcePrefix                  = "UR_"
+	SIPHostnamePrefix                  = "SH"
+	AgentPrefix                        = "A_"
+	AgentWorkerPrefix                  = "AW_"
+	AgentJobPrefix                     = "AJ_"
+	AgentDispatchPrefix                = "AD_"
+	AgentBuilderPrefix                 = "AB_"
+	AgentBuilderVersionPrefix          = "ABV_"
+	CloudAgentPrefix                   = "CA_"
+	CloudAgentRegionPrefix             = "CAR_"
+	CloudAgentVersionPrefix            = "CAV_"
+	CloudAgentSecretPrefix             = "CAS_"
+	CloudAgentWorkerPrefix             = "CAW_"
+	CloudAgentPrivateLinkPrefix        = "CAPL_"
+	CloudAgentPrivateLinkGatewayPrefix = "CAPLG_"
+	CloudAgentPrivateLinkSecretPrefix  = "CAPLS_"
+	AgentGatewayPrefix                 = "GW_"
+	CarrierPrefix                      = "CR_"
+	PhoneNumberPrefix                  = "PN_"
 )
 
 var guidGeneratorPool = sync.Pool{
@@ -61,6 +80,11 @@ var guidGeneratorPool = sync.Pool{
 func New(prefix string) string {
 	g := guidGeneratorPool.Get().(*guidGenerator)
 	defer guidGeneratorPool.Put(g)
+	return g.New(prefix)
+}
+
+func Hash(prefix string, data []byte) string {
+	g := newGeneratorFromSeed(sha256.Sum256(data))
 	return g.New(prefix)
 }
 
@@ -81,8 +105,10 @@ func LocalNodeID() (string, error) {
 	return fmt.Sprintf("%s%s", NodePrefix, HashedID(hostname)[:8]), nil
 }
 
-var b57Index = newB57Index()
-var b57Chars = []byte(shortuuid.DefaultAlphabet)
+var (
+	b57Index = newB57Index()
+	b57Chars = []byte(shortuuid.DefaultAlphabet)
+)
 
 func newB57Index() [256]byte {
 	var index [256]byte
@@ -102,9 +128,13 @@ func newGenerator() (*guidGenerator, error) {
 		return nil, err
 	}
 
+	return newGeneratorFromSeed(seed), nil
+}
+
+func newGeneratorFromSeed(seed [32]byte) *guidGenerator {
 	return &guidGenerator{
 		rng: mrand.NewChaCha8(seed),
-	}, nil
+	}
 }
 
 func (g *guidGenerator) readIDChars(b []byte) {
@@ -177,4 +207,10 @@ func Unmarshal[T livekit.Guid](b livekit.GuidBlock) T {
 		idb[k+3] = b57Chars[b[j+2]&63]
 	}
 	return T(unsafe.String(unsafe.SliceData(id), len(id)))
+}
+
+var validIDPattern = regexp.MustCompile(`^([a-zA-Z0-9]{1,16}_){1,2}[a-zA-Z0-9]{0,12}$`)
+
+func IsValidID[T ~string](id T) bool {
+	return validIDPattern.MatchString(string(id))
 }

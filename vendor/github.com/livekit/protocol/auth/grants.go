@@ -15,13 +15,17 @@
 package auth
 
 import (
+	"errors"
 	"maps"
 	"strings"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/livekit/protocol/livekit"
+	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/utils"
 )
 
@@ -30,6 +34,8 @@ type RoomConfiguration livekit.RoomConfiguration
 var tokenMarshaler = protojson.MarshalOptions{
 	EmitDefaultValues: false,
 }
+
+var ErrSensitiveCredentials = errors.New("room configuration should not contain sensitive credentials")
 
 func (c *RoomConfiguration) Clone() *RoomConfiguration {
 	if c == nil {
@@ -46,12 +52,126 @@ func (c *RoomConfiguration) UnmarshalJSON(data []byte) error {
 	return protojson.Unmarshal(data, (*livekit.RoomConfiguration)(c))
 }
 
+// CheckCredentials checks if the room configuration contains sensitive credentials
+// and returns an error if it does.
+//
+// This is used to prevent sensitive credentials from being leaked to the client.
+// It is not used to validate the credentials themselves, as that is done by the
+// egress service.
+func (c *RoomConfiguration) CheckCredentials() error {
+	if c.Egress == nil {
+		return nil
+	}
+
+	if c.Egress.Participant != nil {
+		for _, output := range c.Egress.Participant.FileOutputs {
+			if err := checkOutputForCredentials(output.Output); err != nil {
+				return err
+			}
+		}
+		for _, output := range c.Egress.Participant.SegmentOutputs {
+			if err := checkOutputForCredentials(output.Output); err != nil {
+				return err
+			}
+		}
+	}
+	if c.Egress.Room != nil {
+		for _, output := range c.Egress.Room.FileOutputs {
+			if err := checkOutputForCredentials(output.Output); err != nil {
+				return err
+			}
+		}
+		for _, output := range c.Egress.Room.SegmentOutputs {
+			if err := checkOutputForCredentials(output.Output); err != nil {
+				return err
+			}
+		}
+		for _, output := range c.Egress.Room.ImageOutputs {
+			if err := checkOutputForCredentials(output.Output); err != nil {
+				return err
+			}
+		}
+		if len(c.Egress.Room.StreamOutputs) > 0 {
+			// do not leak stream key
+			return ErrSensitiveCredentials
+		}
+	}
+	if c.Egress.Tracks != nil {
+		if err := checkOutputForCredentials(c.Egress.Tracks.Output); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkOutputForCredentials(output any) error {
+	if output == nil {
+		return nil
+	}
+
+	switch msg := output.(type) {
+	case *livekit.EncodedFileOutput_S3:
+		if msg.S3.Secret != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.SegmentedFileOutput_S3:
+		if msg.S3.Secret != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.AutoTrackEgress_S3:
+		if msg.S3.Secret != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.EncodedFileOutput_Gcp:
+		if msg.Gcp.Credentials != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.SegmentedFileOutput_Gcp:
+		if msg.Gcp.Credentials != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.AutoTrackEgress_Gcp:
+		if msg.Gcp.Credentials != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.EncodedFileOutput_Azure:
+		if msg.Azure.AccountKey != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.SegmentedFileOutput_Azure:
+		if msg.Azure.AccountKey != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.AutoTrackEgress_Azure:
+		if msg.Azure.AccountKey != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.EncodedFileOutput_AliOSS:
+		if msg.AliOSS.Secret != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.SegmentedFileOutput_AliOSS:
+		if msg.AliOSS.Secret != "" {
+			return ErrSensitiveCredentials
+		}
+	case *livekit.AutoTrackEgress_AliOSS:
+		if msg.AliOSS.Secret != "" {
+			return ErrSensitiveCredentials
+		}
+	}
+	return nil
+}
+
 type ClaimGrants struct {
-	Identity string      `json:"-"`
-	Name     string      `json:"name,omitempty"`
-	Kind     string      `json:"kind,omitempty"`
-	Video    *VideoGrant `json:"video,omitempty"`
-	SIP      *SIPGrant   `json:"sip,omitempty"`
+	Identity      string              `json:"identity,omitempty"`
+	Name          string              `json:"name,omitempty"`
+	Kind          string              `json:"kind,omitempty"`
+	KindDetails   []string            `json:"kindDetails,omitempty"`
+	Video         *VideoGrant         `json:"video,omitempty"`
+	SIP           *SIPGrant           `json:"sip,omitempty"`
+	Agent         *AgentGrant         `json:"agent,omitempty"`
+	Inference     *InferenceGrant     `json:"inference,omitempty"`
+	Observability *ObservabilityGrant `json:"observability,omitempty"`
 	// Room configuration to use if this participant initiates the room
 	RoomConfig *RoomConfiguration `json:"roomConfig,omitempty"`
 	// Cloud-only, config preset to use
@@ -72,6 +192,14 @@ func (c *ClaimGrants) GetParticipantKind() livekit.ParticipantInfo_Kind {
 	return kindToProto(c.Kind)
 }
 
+func (c *ClaimGrants) SetKindDetail(details ...livekit.ParticipantInfo_KindDetail) {
+	c.KindDetails = kindDetailsFromProto(details)
+}
+
+func (c *ClaimGrants) GetKindDetails() []livekit.ParticipantInfo_KindDetail {
+	return kindDetailsToProto(c.KindDetails)
+}
+
 func (c *ClaimGrants) GetRoomConfiguration() *livekit.RoomConfiguration {
 	if c.RoomConfig == nil {
 		return nil
@@ -87,10 +215,34 @@ func (c *ClaimGrants) Clone() *ClaimGrants {
 	clone := *c
 	clone.Video = c.Video.Clone()
 	clone.SIP = c.SIP.Clone()
+	clone.Agent = c.Agent.Clone()
+	clone.Inference = c.Inference.Clone()
+	clone.Observability = c.Observability.Clone()
 	clone.Attributes = maps.Clone(c.Attributes)
 	clone.RoomConfig = c.RoomConfig.Clone()
+	if len(c.KindDetails) > 0 {
+		clone.KindDetails = append([]string{}, c.KindDetails...)
+	}
 
 	return &clone
+}
+
+func (c *ClaimGrants) MarshalLogObject(e zapcore.ObjectEncoder) error {
+	if c == nil {
+		return nil
+	}
+
+	e.AddString("Identity", c.Identity)
+	e.AddString("Kind", c.Kind)
+	zap.Strings("KindDetails", c.KindDetails).AddTo(e)
+	e.AddObject("Video", c.Video)
+	e.AddObject("SIP", c.SIP)
+	e.AddObject("Agent", c.Agent)
+	e.AddObject("Inference", c.Inference)
+	e.AddObject("Observability", c.Observability)
+	e.AddObject("RoomConfig", logger.Proto((*livekit.RoomConfiguration)(c.RoomConfig)))
+	e.AddString("RoomPreset", c.RoomPreset)
+	return nil
 }
 
 // -------------------------------------------------------------
@@ -129,6 +281,9 @@ type VideoGrant struct {
 
 	// if a participant can subscribe to metrics
 	CanSubscribeMetrics *bool `json:"canSubscribeMetrics,omitempty"`
+
+	// destination room which this participant can forward to
+	DestinationRoom string `json:"destinationRoom,omitempty"`
 }
 
 func (v *VideoGrant) SetCanPublish(val bool) {
@@ -323,6 +478,44 @@ func (v *VideoGrant) Clone() *VideoGrant {
 	return &clone
 }
 
+func (v *VideoGrant) MarshalLogObject(e zapcore.ObjectEncoder) error {
+	if v == nil {
+		return nil
+	}
+
+	logBoolPtr := func(prop string, val *bool) {
+		if val == nil {
+			e.AddString(prop, "not-set")
+		} else {
+			e.AddBool(prop, *val)
+		}
+	}
+
+	logBoolPtr("RoomCreate", &v.RoomCreate)
+	logBoolPtr("RoomList", &v.RoomList)
+	logBoolPtr("RoomRecord", &v.RoomRecord)
+
+	logBoolPtr("RoomAdmin", &v.RoomAdmin)
+	logBoolPtr("RoomJoin", &v.RoomJoin)
+	e.AddString("Room", v.Room)
+
+	logBoolPtr("CanPublish", v.CanPublish)
+	logBoolPtr("CanSubscribe", v.CanSubscribe)
+	logBoolPtr("CanPublishData", v.CanPublishData)
+	e.AddArray("CanPublishSources", logger.StringSlice(v.CanPublishSources))
+	logBoolPtr("CanUpdateOwnMetadata", v.CanUpdateOwnMetadata)
+
+	logBoolPtr("IngressAdmin", &v.IngressAdmin)
+
+	logBoolPtr("Hidden", &v.Hidden)
+	logBoolPtr("Recorder", &v.Recorder)
+	logBoolPtr("Agent", &v.Agent)
+
+	logBoolPtr("CanSubscribeMetrics", v.CanSubscribeMetrics)
+	e.AddString("DestinationRoom", v.DestinationRoom)
+	return nil
+}
+
 // ----------------------------------------------------------------
 
 type SIPGrant struct {
@@ -343,6 +536,99 @@ func (s *SIPGrant) Clone() *SIPGrant {
 	return &clone
 }
 
+func (s *SIPGrant) MarshalLogObject(e zapcore.ObjectEncoder) error {
+	if s == nil {
+		return nil
+	}
+
+	e.AddBool("Admin", s.Admin)
+	e.AddBool("Call", s.Call)
+	return nil
+}
+
+// ------------------------------------------------------------------
+
+// ------------------------------------------------------------------
+
+type AgentGrant struct {
+	// Admin grants to create/update/delete Cloud Agents.
+	Admin bool `json:"admin,omitempty"`
+	// CreateSimulation grants access to create simulations to evaluate an agent.
+	CreateSimulation bool `json:"createSimulation,omitempty"`
+}
+
+func (s *AgentGrant) Clone() *AgentGrant {
+	if s == nil {
+		return nil
+	}
+
+	clone := *s
+
+	return &clone
+}
+
+func (s *AgentGrant) MarshalLogObject(e zapcore.ObjectEncoder) error {
+	if s == nil {
+		return nil
+	}
+
+	e.AddBool("Admin", s.Admin)
+	e.AddBool("CreateSimulation", s.CreateSimulation)
+	return nil
+}
+
+// ------------------------------------------------------------------
+
+type InferenceGrant struct {
+	// Perform grants to all inference features (LLM, STT, TTS)
+	Perform bool `json:"perform,omitempty"`
+}
+
+func (s *InferenceGrant) Clone() *InferenceGrant {
+	if s == nil {
+		return nil
+	}
+
+	clone := *s
+
+	return &clone
+}
+
+func (s *InferenceGrant) MarshalLogObject(e zapcore.ObjectEncoder) error {
+	if s == nil {
+		return nil
+	}
+
+	e.AddBool("Perform", s.Perform)
+	return nil
+}
+
+// ------------------------------------------------------------------
+
+type ObservabilityGrant struct {
+	// Write grants to publish observability data
+	Write bool `json:"write,omitempty"`
+}
+
+func (s *ObservabilityGrant) Clone() *ObservabilityGrant {
+	if s == nil {
+		return nil
+	}
+
+	clone := *s
+
+	return &clone
+}
+
+func (s *ObservabilityGrant) MarshalLogObject(e zapcore.ObjectEncoder) error {
+	if s == nil {
+		return nil
+	}
+
+	e.AddBool("Write", s.Write)
+	return nil
+}
+
 // ------------------------------------------------------------------
 
 func sourceToString(source livekit.TrackSource) string {
@@ -350,18 +636,10 @@ func sourceToString(source livekit.TrackSource) string {
 }
 
 func sourceToProto(sourceStr string) livekit.TrackSource {
-	switch strings.ToLower(sourceStr) {
-	case "camera":
-		return livekit.TrackSource_CAMERA
-	case "microphone":
-		return livekit.TrackSource_MICROPHONE
-	case "screen_share":
-		return livekit.TrackSource_SCREEN_SHARE
-	case "screen_share_audio":
-		return livekit.TrackSource_SCREEN_SHARE_AUDIO
-	default:
-		return livekit.TrackSource_UNKNOWN
+	if val, ok := livekit.TrackSource_value[strings.ToUpper(sourceStr)]; ok {
+		return livekit.TrackSource(val)
 	}
+	return livekit.TrackSource_UNKNOWN
 }
 
 func kindFromProto(source livekit.ParticipantInfo_Kind) string {
@@ -369,18 +647,26 @@ func kindFromProto(source livekit.ParticipantInfo_Kind) string {
 }
 
 func kindToProto(sourceStr string) livekit.ParticipantInfo_Kind {
-	switch strings.ToLower(sourceStr) {
-	case "", "standard":
-		return livekit.ParticipantInfo_STANDARD
-	case "ingress":
-		return livekit.ParticipantInfo_INGRESS
-	case "egress":
-		return livekit.ParticipantInfo_EGRESS
-	case "sip":
-		return livekit.ParticipantInfo_SIP
-	case "agent":
-		return livekit.ParticipantInfo_AGENT
-	default:
-		return livekit.ParticipantInfo_STANDARD
+	if val, ok := livekit.ParticipantInfo_Kind_value[strings.ToUpper(sourceStr)]; ok {
+		return livekit.ParticipantInfo_Kind(val)
 	}
+	return livekit.ParticipantInfo_STANDARD
+}
+
+func kindDetailsFromProto(details []livekit.ParticipantInfo_KindDetail) []string {
+	result := make([]string, 0, len(details))
+	for _, d := range details {
+		result = append(result, strings.ToLower(d.String()))
+	}
+	return result
+}
+
+func kindDetailsToProto(details []string) []livekit.ParticipantInfo_KindDetail {
+	result := make([]livekit.ParticipantInfo_KindDetail, 0, len(details))
+	for _, d := range details {
+		if val, ok := livekit.ParticipantInfo_KindDetail_value[strings.ToUpper(d)]; ok {
+			result = append(result, livekit.ParticipantInfo_KindDetail(val))
+		}
+	}
+	return result
 }

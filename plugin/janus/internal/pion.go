@@ -7,8 +7,8 @@ import (
 
 	"call.zip/pkg/gcc"
 	"call.zip/pkg/log"
-	"github.com/pion/dtls/v2"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/dtls/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 func newPionAPI(clientIP string, extraOpts ...func(*webrtc.API)) (*webrtc.API, error) {
@@ -35,6 +35,9 @@ func newPionAPI(clientIP string, extraOpts ...func(*webrtc.API)) (*webrtc.API, e
 		},
 		PayloadType: 98,
 	}, webrtc.RTPCodecTypeVideo)
+	// pion v4 needs explicit transport-cc registration for GCC bandwidth estimation.
+	m.RegisterFeedback(webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBTransportCC}, webrtc.RTPCodecTypeVideo)
+	m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"}, webrtc.RTPCodecTypeVideo)
 
 	opts := []func(*webrtc.API){
 		webrtc.WithSettingEngine(se),

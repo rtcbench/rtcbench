@@ -13,9 +13,9 @@ import (
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	"call.zip/plugin/jitsi/internal/model"
-	"github.com/pion/dtls/v2"
+	"github.com/pion/dtls/v3"
 	"github.com/pion/rtcp"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 func parseIceCredentials(sdp string) (ufrag, pwd, fingerprint string) {
@@ -85,6 +85,8 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 		},
 		PayloadType: 101,
 	}, webrtc.RTPCodecTypeVideo)
+	m.RegisterFeedback(webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBTransportCC}, webrtc.RTPCodecTypeVideo)
+	m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"}, webrtc.RTPCodecTypeVideo)
 
 	apiOpts := []func(*webrtc.API){
 		webrtc.WithSettingEngine(se),
@@ -119,8 +121,8 @@ func (c *Client) startPion(state *model.ConnectionState, ivf *vp9.IvfSegmenter) 
 	pc.OnICEConnectionStateChange(func(iceConnState webrtc.ICEConnectionState) {
 		state.Log.Infof("[pion] ICEConnectionState: %s", iceConnState.String())
 	})
-	pc.OnICEGatheringStateChange(func(iceGathererState webrtc.ICEGathererState) {
-		state.Log.Infof("[pion] ICEGatheringState: %s", iceGathererState.String())
+	pc.OnICEGatheringStateChange(func(iceGatheringState webrtc.ICEGatheringState) {
+		state.Log.Infof("[pion] ICEGatheringState: %s", iceGatheringState.String())
 	})
 	pc.OnConnectionStateChange(func(peerConnState webrtc.PeerConnectionState) {
 		state.Log.Infof("[pion] PeerConnectionState: %s", peerConnState.String())

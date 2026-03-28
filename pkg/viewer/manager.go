@@ -6,7 +6,7 @@ import (
 	"call.zip/pkg/log"
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 type Manager struct {

@@ -20,9 +20,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"github.com/puzpuzpuz/xsync/v3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -31,9 +33,10 @@ import (
 )
 
 var (
-	discardLogger        = logr.Discard()
-	defaultLogger Logger = LogRLogger(discardLogger)
-	pkgLogger     Logger = LogRLogger(discardLogger)
+	discardLogger      = logr.Discard()
+	discardLoggerIface = LogRLogger(discardLogger)
+	defaultLogger      = Logger(discardLoggerIface)
+	pkgLogger          = Logger(discardLoggerIface)
 )
 
 // InitFromConfig initializes a Zap-based logger
@@ -48,6 +51,10 @@ func InitFromConfig(conf *Config, name string) {
 // GetLogger returns the logger that was set with SetLogger with an extra depth of 1
 func GetLogger() Logger {
 	return defaultLogger
+}
+
+func GetDiscardLogger() Logger {
+	return discardLoggerIface
 }
 
 // SetLogger lets you use a custom logger. Pass in a logr.Logger with default depth
@@ -103,6 +110,10 @@ type Logger interface {
 type UnlikelyLogger struct {
 	logger        Logger
 	keysAndValues []any
+}
+
+func NewUnlikelyLogger(logger Logger, keysAndValues ...any) UnlikelyLogger {
+	return UnlikelyLogger{logger, keysAndValues}
 }
 
 func (l UnlikelyLogger) makeLogger() Logger {
@@ -417,10 +428,10 @@ func (l *zapLogger[T]) WithoutSampler() Logger {
 
 func (l *zapLogger[T]) WithDeferredValues() (Logger, DeferredFieldResolver) {
 	dup := *l
-	def, resolve := zaputil.NewDeferrer()
-	dup.deferred = append(dup.deferred, def)
+	def := &zaputil.Deferrer{}
+	dup.deferred = append(dup.deferred[0:len(dup.deferred):len(dup.deferred)], def)
 	dup.zap = dup.makeZap()
-	return &dup, resolve
+	return &dup, def
 }
 
 type LogRLogger logr.Logger
@@ -481,5 +492,32 @@ func (l LogRLogger) WithoutSampler() Logger {
 }
 
 func (l LogRLogger) WithDeferredValues() (Logger, DeferredFieldResolver) {
-	return l, func(args ...any) {}
+	return l, zaputil.NoOpDeferrer{}
+}
+
+type TestLogger interface {
+	Logf(format string, args ...any)
+	Log(args ...any)
+	Cleanup(f func())
+}
+
+func NewTestLogger(t TestLogger) Logger {
+	return NewTestLoggerLevel(t, 0)
+}
+
+func NewTestLoggerLevel(t TestLogger, lvl int) Logger {
+	var closed atomic.Bool
+	t.Cleanup(func() {
+		closed.Store(true)
+	})
+	return LogRLogger(funcr.New(func(prefix, args string) {
+		if closed.Load() {
+			return
+		}
+		if prefix != "" {
+			t.Logf("%s: %s\n", prefix, args)
+		} else {
+			t.Log(args)
+		}
+	}, funcr.Options{Verbosity: lvl}))
 }

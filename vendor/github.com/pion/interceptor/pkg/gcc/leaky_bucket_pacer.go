@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-FileCopyrightText: 2026 The Pion community <https://pion.ly>
 // SPDX-License-Identifier: MIT
 
 package gcc
@@ -45,8 +45,12 @@ type LeakyBucketPacer struct {
 
 // NewLeakyBucketPacer initializes a new LeakyBucketPacer.
 func NewLeakyBucketPacer(initialBitrate int) *LeakyBucketPacer {
+	return newLeakyBucketPacer(initialBitrate, logging.NewDefaultLoggerFactory())
+}
+
+func newLeakyBucketPacer(initialBitrate int, loggerFactory logging.LoggerFactory) *LeakyBucketPacer {
 	pacer := &LeakyBucketPacer{
-		log:            logging.NewDefaultLoggerFactory().NewLogger("pacer"),
+		log:            loggerFactory.NewLogger("pacer"),
 		f:              1.5,
 		targetBitrate:  initialBitrate,
 		pacingInterval: 5 * time.Millisecond,

@@ -10,7 +10,7 @@ import (
 	"call.zip/pkg/vp9"
 	"call.zip/pkg/vp9_stats"
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 // Viewer connects to a conference and receives 1 VP9 video stream

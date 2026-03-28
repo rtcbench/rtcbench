@@ -17,23 +17,24 @@ package lksdk
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/bep/debounce"
-	protoLogger "github.com/livekit/protocol/logger"
-	"github.com/pion/dtls/v2"
+	"github.com/pion/dtls/v3"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/interceptor/pkg/twcc"
 	"github.com/pion/sdp/v3"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 
 	lkinterceptor "github.com/livekit/mediatransportutil/pkg/interceptor"
 	"github.com/livekit/mediatransportutil/pkg/pacer"
+	protoLogger "github.com/livekit/protocol/logger"
+	"github.com/livekit/protocol/logger/pionlogger"
 	lksdp "github.com/livekit/protocol/sdp"
-
 	sdkinterceptor "github.com/livekit/server-sdk-go/v2/pkg/interceptor"
 )
 
@@ -70,12 +71,14 @@ type PCTransport struct {
 
 type PCTransportParams struct {
 	Configuration webrtc.Configuration
+	Codecs        []webrtc.RTPCodecParameters
 
-	RetransmitBufferSize uint16
-	Pacer                pacer.Factory
-	Interceptors         []interceptor.Factory
-	OnRTTUpdate          func(rtt uint32)
-	IsSender             bool
+	RetransmitBufferSize       uint16
+	Pacer                      pacer.Factory
+	Interceptors               []interceptor.Factory
+	IncludeDefaultInterceptors bool
+	OnRTTUpdate                func(rtt uint32)
+	IsSender                   bool
 }
 
 func (t *PCTransport) registerDefaultInterceptors(params PCTransportParams, i *interceptor.Registry) error {
@@ -133,7 +136,17 @@ func (t *PCTransport) registerDefaultInterceptors(params PCTransportParams, i *i
 
 func NewPCTransport(params PCTransportParams) (*PCTransport, error) {
 	m := &webrtc.MediaEngine{}
-	if err := m.RegisterDefaultCodecs(); err != nil {
+	if len(params.Codecs) > 0 {
+		for _, codec := range params.Codecs {
+			codecType := webrtc.RTPCodecTypeAudio
+			if strings.HasPrefix(codec.MimeType, "video/") {
+				codecType = webrtc.RTPCodecTypeVideo
+			}
+			if err := m.RegisterCodec(codec, codecType); err != nil {
+				return nil, err
+			}
+		}
+	} else if err := m.RegisterDefaultCodecs(); err != nil {
 		return nil, err
 	}
 	audioLevelExtension := webrtc.RTPHeaderExtensionCapability{URI: sdp.AudioLevelURI}
@@ -148,6 +161,13 @@ func NewPCTransport(params PCTransportParams) (*PCTransport, error) {
 	if err := m.RegisterHeaderExtension(sdesRtpStreamIdExtension, webrtc.RTPCodecTypeVideo); err != nil {
 		return nil, err
 	}
+	absCaptureTimeExtension := webrtc.RTPHeaderExtensionCapability{URI: absCaptureTimeURI}
+	if err := m.RegisterHeaderExtension(absCaptureTimeExtension, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, err
+	}
+	if err := m.RegisterHeaderExtension(absCaptureTimeExtension, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, err
+	}
 
 	i := &interceptor.Registry{}
 
@@ -159,6 +179,12 @@ func NewPCTransport(params PCTransportParams) (*PCTransport, error) {
 	if params.Interceptors != nil {
 		for _, c := range params.Interceptors {
 			i.Add(c)
+		}
+		if params.IncludeDefaultInterceptors {
+			err := t.registerDefaultInterceptors(params, i)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		err := t.registerDefaultInterceptors(params, i)
@@ -184,6 +210,10 @@ func NewPCTransport(params PCTransportParams) (*PCTransport, error) {
 	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM, dtls.SRTP_AES128_CM_HMAC_SHA1_80)
 	se.SetDTLSRetransmissionInterval(dtlsRetransmissionInterval)
 	se.SetICETimeouts(iceDisconnectedTimeout, iceFailedTimeout, iceKeepaliveInterval)
+	lf := pionlogger.NewLoggerFactory(logger)
+	if lf != nil {
+		se.LoggerFactory = lf
+	}
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(se), webrtc.WithInterceptorRegistry(i))
 	pc, err := api.NewPeerConnection(params.Configuration)
@@ -211,8 +241,8 @@ func (t *PCTransport) handleRTTUpdate(rtt uint32) {
 	}
 }
 
-func (t *PCTransport) onICEGatheringStateChange(state webrtc.ICEGathererState) {
-	if state != webrtc.ICEGathererStateComplete {
+func (t *PCTransport) onICEGatheringStateChange(state webrtc.ICEGatheringState) {
+	if state != webrtc.ICEGatheringStateComplete {
 		return
 	}
 
@@ -378,6 +408,23 @@ func (t *PCTransport) Negotiate() {
 	t.debouncedNegotiate(func() {
 		t.createAndSendOffer(nil)
 	})
+}
+
+func (t *PCTransport) GetLocalOffer() (webrtc.SessionDescription, error) {
+	offer, err := t.pc.CreateOffer(nil)
+	t.log.Debugw("get offer", "offer", offer.SDP)
+	if err != nil {
+		t.log.Errorw("could not get offer", err)
+		return webrtc.SessionDescription{}, err
+	}
+
+	return offer, nil
+}
+
+func (t *PCTransport) SetLocalOffer(offer webrtc.SessionDescription) {
+	if err := t.pc.SetLocalDescription(offer); err != nil {
+		t.log.Errorw("could not set local description offer", err)
+	}
 }
 
 func (t *PCTransport) createAndSendOffer(options *webrtc.OfferOptions) error {

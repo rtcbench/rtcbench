@@ -21,14 +21,18 @@ import (
 	"net/http"
 
 	"github.com/twitchtv/twirp"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 var (
 	ErrRequestCanceled = NewErrorf(Canceled, "request canceled")
 	ErrRequestTimedOut = NewErrorf(DeadlineExceeded, "request timed out")
 	ErrNoResponse      = NewErrorf(Unavailable, "no response from servers")
+	ErrUnimplemented   = NewErrorf(Unimplemented, "method is not implemented")
 	ErrStreamEOF       = NewError(Unavailable, io.EOF)
 	ErrClientClosed    = NewErrorf(Canceled, "client is closed")
 	ErrServerClosed    = NewErrorf(Canceled, "server is closed")
@@ -39,6 +43,8 @@ var (
 type Error interface {
 	error
 	Code() ErrorCode
+	Details() []any
+	DetailsProto() []*anypb.Any
 
 	// convenience methods
 	ToHttp() int
@@ -51,10 +57,203 @@ func (e ErrorCode) Error() string {
 	return string(e)
 }
 
-func NewError(code ErrorCode, err error) Error {
+func (e ErrorCode) ToHTTP() int {
+	switch e {
+	case OK:
+		return http.StatusOK
+	case Unknown, MalformedResponse, Internal, DataLoss:
+		return http.StatusInternalServerError
+	case InvalidArgument, MalformedRequest:
+		return http.StatusBadRequest
+	case NotFound:
+		return http.StatusNotFound
+	case NotAcceptable:
+		return http.StatusNotAcceptable
+	case AlreadyExists, Aborted:
+		return http.StatusConflict
+	case PermissionDenied:
+		return http.StatusForbidden
+	case ResourceExhausted:
+		return http.StatusTooManyRequests
+	case FailedPrecondition:
+		return http.StatusPreconditionFailed
+	case OutOfRange:
+		return http.StatusRequestedRangeNotSatisfiable
+	case Unimplemented:
+		return http.StatusNotImplemented
+	case Canceled, DeadlineExceeded, Unavailable:
+		return http.StatusServiceUnavailable
+	case Unauthenticated:
+		return http.StatusUnauthorized
+	case UnprocessableEntity:
+		return http.StatusUnprocessableEntity
+	case UpstreamServerError:
+		return http.StatusBadGateway
+	case UpstreamClientError:
+		return http.StatusFailedDependency
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func GetErrorCode(err error) (ErrorCode, bool) {
+	var e Error
+	if errors.As(err, &e) {
+		return e.Code(), true
+	}
+	if st, ok := status.FromError(err); ok && st != nil {
+		return ErrorCodeFromGRPC(st.Code()), true
+	}
+	return Unknown, false
+}
+
+func ErrorCodeFromGRPC(code codes.Code) ErrorCode {
+	switch code {
+	case codes.OK:
+		return OK
+	case codes.Canceled:
+		return Canceled
+	case codes.Unknown:
+		return Unknown
+	case codes.InvalidArgument:
+		return InvalidArgument
+	case codes.DeadlineExceeded:
+		return DeadlineExceeded
+	case codes.NotFound:
+		return NotFound
+	case codes.AlreadyExists:
+		return AlreadyExists
+	case codes.PermissionDenied:
+		return PermissionDenied
+	case codes.ResourceExhausted:
+		return ResourceExhausted
+	case codes.FailedPrecondition:
+		return FailedPrecondition
+	case codes.Aborted:
+		return Aborted
+	case codes.OutOfRange:
+		return OutOfRange
+	case codes.Unimplemented:
+		return Unimplemented
+	case codes.Internal:
+		return Internal
+	case codes.Unavailable:
+		return Unavailable
+	case codes.DataLoss:
+		return DataLoss
+	case codes.Unauthenticated:
+		return Unauthenticated
+	default:
+		return Unknown
+	}
+}
+
+func (e ErrorCode) ToGRPC() codes.Code {
+	switch e {
+	case OK:
+		return codes.OK
+	case Canceled:
+		return codes.Canceled
+	case Unknown:
+		return codes.Unknown
+	case InvalidArgument, MalformedRequest:
+		return codes.InvalidArgument
+	case DeadlineExceeded:
+		return codes.DeadlineExceeded
+	case NotFound:
+		return codes.NotFound
+	case AlreadyExists:
+		return codes.AlreadyExists
+	case PermissionDenied:
+		return codes.PermissionDenied
+	case ResourceExhausted:
+		return codes.ResourceExhausted
+	case FailedPrecondition:
+		return codes.FailedPrecondition
+	case Aborted:
+		return codes.Aborted
+	case OutOfRange:
+		return codes.OutOfRange
+	case Unimplemented:
+		return codes.Unimplemented
+	case MalformedResponse, Internal:
+		return codes.Internal
+	case Unavailable:
+		return codes.Unavailable
+	case DataLoss:
+		return codes.DataLoss
+	case Unauthenticated:
+		return codes.Unauthenticated
+	case UpstreamServerError:
+		return codes.Internal
+	case UpstreamClientError:
+		return codes.InvalidArgument
+	default:
+		return codes.Unknown
+	}
+}
+
+func (e ErrorCode) ToTwirp() twirp.ErrorCode {
+	switch e {
+	case OK:
+		return twirp.NoError
+	case Canceled:
+		return twirp.Canceled
+	case Unknown:
+		return twirp.Unknown
+	case InvalidArgument:
+		return twirp.InvalidArgument
+	case MalformedRequest, MalformedResponse:
+		return twirp.Malformed
+	case DeadlineExceeded:
+		return twirp.DeadlineExceeded
+	case NotFound:
+		return twirp.NotFound
+	case AlreadyExists:
+		return twirp.AlreadyExists
+	case PermissionDenied:
+		return twirp.PermissionDenied
+	case ResourceExhausted:
+		return twirp.ResourceExhausted
+	case FailedPrecondition:
+		return twirp.FailedPrecondition
+	case Aborted:
+		return twirp.Aborted
+	case OutOfRange:
+		return twirp.OutOfRange
+	case Unimplemented:
+		return twirp.Unimplemented
+	case Internal:
+		return twirp.Internal
+	case Unavailable:
+		return twirp.Unavailable
+	case DataLoss:
+		return twirp.DataLoss
+	case Unauthenticated:
+		return twirp.Unauthenticated
+	case UpstreamServerError:
+		return twirp.Internal
+	case UpstreamClientError:
+		return twirp.InvalidArgument
+	default:
+		return twirp.Unknown
+	}
+}
+
+func NewError(code ErrorCode, err error, details ...proto.Message) Error {
+	if err == nil {
+		panic("error is nil")
+	}
+	var protoDetails []*anypb.Any
+	for _, e := range details {
+		if p, err := anypb.New(e); err == nil {
+			protoDetails = append(protoDetails, p)
+		}
+	}
 	return &psrpcError{
-		error: err,
-		code:  code,
+		error:   err,
+		code:    code,
+		details: protoDetails,
 	}
 }
 
@@ -65,14 +264,15 @@ func NewErrorf(code ErrorCode, msg string, args ...interface{}) Error {
 	}
 }
 
-func NewErrorFromResponse(code, err string) Error {
+func NewErrorFromResponse(code, err string, details ...*anypb.Any) Error {
 	if code == "" {
 		code = string(Unknown)
 	}
 
 	return &psrpcError{
-		error: errors.New(err),
-		code:  ErrorCode(code),
+		error:   errors.New(err),
+		code:    ErrorCode(code),
+		details: details,
 	}
 }
 
@@ -118,11 +318,18 @@ const (
 	DataLoss ErrorCode = "data_loss"
 	// Similar to PermissionDenied, used when the caller is unidentified
 	Unauthenticated ErrorCode = "unauthenticated"
+	// Cannot consume the entity in the given format
+	UnprocessableEntity ErrorCode = "unprocessable_entity"
+	// Upstream server error
+	UpstreamServerError ErrorCode = "upstream_server_error"
+	// Upstread client error
+	UpstreamClientError ErrorCode = "upstream_client_error"
 )
 
 type psrpcError struct {
 	error
-	code ErrorCode
+	code    ErrorCode
+	details []*anypb.Any
 }
 
 func (e psrpcError) Code() ErrorCode {
@@ -130,126 +337,27 @@ func (e psrpcError) Code() ErrorCode {
 }
 
 func (e psrpcError) ToHttp() int {
-	switch e.code {
-	case OK:
-		return http.StatusOK
-	case Unknown, MalformedResponse, Internal, DataLoss:
-		return http.StatusInternalServerError
-	case InvalidArgument, MalformedRequest:
-		return http.StatusBadRequest
-	case NotFound:
-		return http.StatusNotFound
-	case NotAcceptable:
-		return http.StatusNotAcceptable
-	case AlreadyExists, Aborted:
-		return http.StatusConflict
-	case PermissionDenied:
-		return http.StatusForbidden
-	case ResourceExhausted:
-		return http.StatusTooManyRequests
-	case FailedPrecondition:
-		return http.StatusPreconditionFailed
-	case OutOfRange:
-		return http.StatusRequestedRangeNotSatisfiable
-	case Unimplemented:
-		return http.StatusNotImplemented
-	case Canceled, DeadlineExceeded, Unavailable:
-		return http.StatusServiceUnavailable
-	case Unauthenticated:
-		return http.StatusUnauthorized
-	default:
-		return http.StatusInternalServerError
-	}
+	return e.code.ToHTTP()
+}
+
+func (e psrpcError) DetailsProto() []*anypb.Any {
+	return e.details
+}
+
+func (e psrpcError) Details() []any {
+	return e.GRPCStatus().Details()
 }
 
 func (e psrpcError) GRPCStatus() *status.Status {
-	var c codes.Code
-	switch e.code {
-	case OK:
-		c = codes.OK
-	case Canceled:
-		c = codes.Canceled
-	case Unknown:
-		c = codes.Unknown
-	case InvalidArgument, MalformedRequest:
-		c = codes.InvalidArgument
-	case DeadlineExceeded:
-		c = codes.DeadlineExceeded
-	case NotFound:
-		c = codes.NotFound
-	case AlreadyExists:
-		c = codes.AlreadyExists
-	case PermissionDenied:
-		c = codes.PermissionDenied
-	case ResourceExhausted:
-		c = codes.ResourceExhausted
-	case FailedPrecondition:
-		c = codes.FailedPrecondition
-	case Aborted:
-		c = codes.Aborted
-	case OutOfRange:
-		c = codes.OutOfRange
-	case Unimplemented:
-		c = codes.Unimplemented
-	case MalformedResponse, Internal:
-		c = codes.Internal
-	case Unavailable:
-		c = codes.Unavailable
-	case DataLoss:
-		c = codes.DataLoss
-	case Unauthenticated:
-		c = codes.Unauthenticated
-	default:
-		c = codes.Unknown
-	}
-
-	return status.New(c, e.Error())
+	return status.FromProto(&spb.Status{
+		Code:    int32(e.code.ToGRPC()),
+		Message: e.Error(),
+		Details: e.details,
+	})
 }
 
 func (e psrpcError) toTwirp() twirp.Error {
-	var c twirp.ErrorCode
-	switch e.code {
-	case OK:
-		c = twirp.NoError
-	case Canceled:
-		c = twirp.Canceled
-	case Unknown:
-		c = twirp.Unknown
-	case InvalidArgument:
-		c = twirp.InvalidArgument
-	case MalformedRequest, MalformedResponse:
-		c = twirp.Malformed
-	case DeadlineExceeded:
-		c = twirp.DeadlineExceeded
-	case NotFound:
-		c = twirp.NotFound
-	case AlreadyExists:
-		c = twirp.AlreadyExists
-	case PermissionDenied:
-		c = twirp.PermissionDenied
-	case ResourceExhausted:
-		c = twirp.ResourceExhausted
-	case FailedPrecondition:
-		c = twirp.FailedPrecondition
-	case Aborted:
-		c = twirp.Aborted
-	case OutOfRange:
-		c = twirp.OutOfRange
-	case Unimplemented:
-		c = twirp.Unimplemented
-	case Internal:
-		c = twirp.Internal
-	case Unavailable:
-		c = twirp.Unavailable
-	case DataLoss:
-		c = twirp.DataLoss
-	case Unauthenticated:
-		c = twirp.Unauthenticated
-	default:
-		c = twirp.Unknown
-	}
-
-	return twirp.NewError(c, e.Error())
+	return twirp.NewError(e.code.ToTwirp(), e.Error())
 }
 
 func (e psrpcError) As(target any) bool {
