@@ -30,8 +30,10 @@ from helpers import (
 # (config, min_active, timeout, min_sid, min_tid)
 # min_sid=0: spatial layer depends on SFU forwarding decision.
 # min_tid=2: all 3 temporal layers (0, 1, 2) should be observed.
+# LiveKit uses a 1 Mbps GCC cap that keeps the sender at S2T1 (~15 fps),
+# matching Chrome's native SVC behavior. So min_tid=1 for livekit.
 LIVEKIT_SVC_SCENARIOS = [
-    ("smoke.yml", 1, 180, 0, 2),
+    ("smoke.yml", 1, 180, 0, 1),
 ]
 JITSI_SVC_SCENARIOS = [
     ("smoke.yml", 1, 180, 0, 2),
