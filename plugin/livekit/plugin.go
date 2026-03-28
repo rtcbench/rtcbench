@@ -151,16 +151,24 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
 	}
 
-	// Build interceptor chain: SDK defaults + GCC bandwidth estimation.
-	// The twccExt interceptor injects transport-cc sequence numbers into
-	// outgoing RTP packets so GCC can track them.
-	// 1.2 Mbps matches the target total for 3-layer SVC (S0=150K+S1=350K+S2=700K).
-	// S2 threshold = 71% × 1.2M = 852 Kbps, so call.zip stays at 1080p through
-	// the 0.8 Mbps BW cap phase, only dropping to lower layers at 0.5/0.3 Mbps.
+	// Resolve SVC before connecting so we know whether to add GCC interceptors.
+	// When SVC is off (e.g. during benchmarks) we skip GCC entirely — no TWCC
+	// header injection, no bandwidth estimation, no adaptive bitrate overhead.
 	const initialBitrateBps = 1_200_000
-	interceptors, getTargetBitrate, err := lkinternal.SenderInterceptors(initialBitrateBps)
-	if err != nil {
-		return fmt.Errorf("%w: build interceptors: %v", call.ErrCannotJoinRoom, err)
+	svc := ivf.ResolveSVC(p.cameras.Paths(), p.svcConfig.Mode, p.svcConfig.SpatialLayers, p.svcConfig.TemporalLayers, initialBitrateBps)
+
+	connectOpts := []lksdk.ConnectOption{lksdk.WithAutoSubscribe(false)}
+	var getTargetBitrate func() int
+
+	if svc.Enabled {
+		// Build interceptor chain: SDK defaults + GCC bandwidth estimation.
+		// 1.2 Mbps matches the target total for 3-layer SVC (S0=150K+S1=350K+S2=700K).
+		interceptors, getBitrate, err := lkinternal.SenderInterceptors(initialBitrateBps)
+		if err != nil {
+			return fmt.Errorf("%w: build interceptors: %v", call.ErrCannotJoinRoom, err)
+		}
+		getTargetBitrate = getBitrate
+		connectOpts = append(connectOpts, lksdk.WithInterceptors(interceptors))
 	}
 
 	room, err := lksdk.ConnectToRoom(p.wsURL, lksdk.ConnectInfo{
@@ -168,17 +176,15 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		APISecret:           p.apiSecret,
 		RoomName:            roomID,
 		ParticipantIdentity: userID,
-	}, &lksdk.RoomCallback{}, lksdk.WithInterceptors(interceptors), lksdk.WithAutoSubscribe(false))
+	}, &lksdk.RoomCallback{}, connectOpts...)
 	if err != nil {
 		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
 	}
-	l.Infof("connected to room %s (GCC enabled, initial=%d bps, autoSubscribe=false)", roomID, initialBitrateBps)
+	l.Infof("connected to room %s (SVC=%v, autoSubscribe=false)", roomID, svc.Enabled)
 
 	p.mu.Lock()
 	p.rooms = append(p.rooms, room)
 	p.mu.Unlock()
-
-	svc := ivf.ResolveSVC(p.cameras.Paths(), p.svcConfig.Mode, p.svcConfig.SpatialLayers, p.svcConfig.TemporalLayers, initialBitrateBps)
 
 	if svc.Enabled {
 		rtpTrack, err := webrtc.NewTrackLocalStaticRTP(
