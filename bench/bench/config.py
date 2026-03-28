@@ -21,10 +21,15 @@ VIDEO_BITRATE_MBPS = 3.5     # VP9 test video bitrate (used for NIC ceiling calc
 # Multi-room: max participants per room before splitting into additional rooms.
 # All SFUs use the same limit for a fair comparison.
 VIEWERS_PER_ROOM = 20
-# Sender bench: max senders per room. Each room gets one viewer connection whose
-# BWE (GCC) must carry all tracks in that room. Keep this below the GCC cap
-# (~255 Mbps / 3.5 Mbps per sender ≈ 72) with a margin.
-SENDERS_PER_ROOM = 65
+# Sender bench: max senders per room, per SFU. Each room gets one viewer whose
+# BWE must carry all tracks. Limits differ because each SFU's congestion control
+# (GCC, REMB, etc.) and per-worker capacity are different.
+SENDERS_PER_ROOM = {
+    "livekit": 65,      # GCC caps at ~255 Mbps → 72 max; 65 gives margin
+    "mediasoup": 50,    # REMB caps at ~220 Mbps + per-worker cliff at ~63
+    "janus": 65,        # same as livekit until measured
+    "jitsi": 65,        # same as livekit until measured
+}
 
 # Default timing (overridable via cluster config)
 RENDEZVOUS_LEAD_S = 90
