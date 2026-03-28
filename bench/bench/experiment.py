@@ -37,7 +37,9 @@ class Experiment:
         if sfu_name == "jitsi":
             jitsi_cfg = cluster["jitsi"]
             self.sfu_ip = data_ip(cluster, jitsi_cfg["prosody_web"])
-            jitsi_hosts = {jitsi_cfg["jvb"], jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]}
+            jvb_raw = jitsi_cfg["jvb"]
+            jvb_ips = set(jvb_raw) if isinstance(jvb_raw, list) else {jvb_raw}
+            jitsi_hosts = jvb_ips | {jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]}
             self.receiver_ips = [r for r in cluster["receivers"] if r not in jitsi_hosts]
             if not self.receiver_ips:
                 raise ValueError("No receiver machines left after reserving Jitsi hosts")
@@ -666,7 +668,9 @@ class SenderExperiment:
         if sfu_name == "jitsi":
             jitsi_cfg = cluster["jitsi"]
             self.sfu_ip = data_ip(cluster, jitsi_cfg["prosody_web"])
-            jitsi_hosts = {jitsi_cfg["jvb"], jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]}
+            jvb_raw = jitsi_cfg["jvb"]
+            jvb_ips = set(jvb_raw) if isinstance(jvb_raw, list) else {jvb_raw}
+            jitsi_hosts = jvb_ips | {jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]}
             self.sender_ips = [s for s in self.sender_ips if s not in jitsi_hosts]
             if not self.sender_ips:
                 raise ValueError("No sender machines left after reserving Jitsi hosts")
