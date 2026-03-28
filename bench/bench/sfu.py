@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 
 from bench.config import (
     SFUS, SFU_CONTAINER_NAME, WEB_CONTAINER_NAME, JITSI_IMAGE_TAG,
@@ -187,18 +188,23 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
 
 
 def _start_jitsi(ssh, cluster):
-    """Start Jitsi's 4 components across 3 machines with host networking."""
+    """Start Jitsi components: prosody+web+jicofo on one host, JVBs on jvb hosts.
+
+    cluster.jitsi.jvb can be a single IP string or a list of IPs.
+    Each JVB host gets one JVB container; jicofo distributes rooms across them.
+    """
     jitsi_cfg = cluster.get("jitsi", {})
-    jvb_ip = jitsi_cfg["jvb"]
+    jvb_raw = jitsi_cfg["jvb"]
+    jvb_ips = jvb_raw if isinstance(jvb_raw, list) else [jvb_raw]
     prosody_ip = jitsi_cfg["prosody_web"]
     jicofo_ip = jitsi_cfg["jicofo"]
     xmpp_domain = prosody_ip
 
     log.info("Starting Jitsi: prosody+web=%s, jicofo=%s, jvb=%s",
-             prosody_ip, jicofo_ip, jvb_ip)
+             prosody_ip, jicofo_ip, jvb_ips)
 
     # Maximize UDP socket buffers on all hosts (same as LiveKit/mediasoup).
-    all_hosts = {prosody_ip, jicofo_ip, jvb_ip}
+    all_hosts = {prosody_ip, jicofo_ip} | set(jvb_ips)
     if cluster:
         all_hosts |= set(cluster.get("senders", [])) | {cluster.get("viewer", "")}
     for h in all_hosts:
@@ -210,14 +216,14 @@ def _start_jitsi(ssh, cluster):
                     "net.core.wmem_default=134217728",
                     check=False, timeout=10)
 
-    # Use unique container names so all 4 components can live on one machine.
     C_PROSODY = "bench-prosody"
     C_WEB = "bench-jitsi-web"
     C_JICOFO = "bench-jicofo"
     C_JVB = "bench-jvb"
-    for host in {prosody_ip, jicofo_ip, jvb_ip}:
+    for host in {prosody_ip, jicofo_ip} | set(jvb_ips):
         ssh.run(host,
-                f"docker rm -f {C_PROSODY} {C_WEB} {C_JICOFO} {C_JVB} 2>/dev/null || true",
+                f"docker rm -f {C_PROSODY} {C_WEB} {C_JICOFO} {C_JVB} "
+                f"$(docker ps -aq --filter 'name={C_JVB}') 2>/dev/null || true",
                 check=False, timeout=15)
 
     # 1. Prosody
@@ -290,31 +296,37 @@ def _start_jitsi(ssh, cluster):
             timeout=90)
     log.info("Jicofo healthy on %s", jicofo_ip)
 
-    # 4. JVB
-    jvb_env = (
-        f"-e XMPP_SERVER={prosody_ip} "
-        f"-e XMPP_DOMAIN={xmpp_domain} "
-        f"-e XMPP_AUTH_DOMAIN=auth.{xmpp_domain} "
-        f"-e XMPP_INTERNAL_MUC_DOMAIN=internal-muc.{xmpp_domain} "
-        f"-e XMPP_PORT=5222 "
-        f"-e JVB_AUTH_USER=jvb "
-        f"-e JVB_AUTH_PASSWORD=jvbsecret "
-        f"-e JVB_ADVERTISE_IPS={data_ip(cluster, jvb_ip)} "
-        f"-e JVB_PORT=10000 "
-        f"-e JVB_TCP_HARVESTER_DISABLED=true "
-        f"-e JVB_STUN_SERVERS= "
-        f"-e TZ=UTC"
-    )
-    ssh.run(jvb_ip,
-            f"docker run -d --name {C_JVB} --network host "
-            f"--ulimit nofile=65536:65536 "
-            f"{jvb_env} jitsi/jvb:{JITSI_IMAGE_TAG}", timeout=60)
-    log.info("JVB started on %s", jvb_ip)
+    # 4. JVB(s) — one per host. Jicofo distributes rooms across JVBs.
+    for jvb_idx, jvb_host in enumerate(jvb_ips):
+        name = f"{C_JVB}-{jvb_idx}"
+        announced = data_ip(cluster, jvb_host)
+        jvb_env = (
+            f"-e XMPP_SERVER={prosody_ip} "
+            f"-e XMPP_DOMAIN={xmpp_domain} "
+            f"-e XMPP_AUTH_DOMAIN=auth.{xmpp_domain} "
+            f"-e XMPP_INTERNAL_MUC_DOMAIN=internal-muc.{xmpp_domain} "
+            f"-e XMPP_PORT=5222 "
+            f"-e JVB_AUTH_USER=jvb "
+            f"-e JVB_AUTH_PASSWORD=jvbsecret "
+            f"-e JVB_ADVERTISE_IPS={announced} "
+            f"-e JVB_PORT=10000 "
+            f"-e JVB_MUC_NICKNAME=jvb-{jvb_idx} "
+            f"-e JVB_TCP_HARVESTER_DISABLED=true "
+            f"-e JVB_STUN_SERVERS= "
+            f"-e TZ=UTC"
+        )
+        ssh.run(jvb_host,
+                f"docker run -d --name {name} --network host "
+                f"--ulimit nofile=65536:65536 "
+                f"{jvb_env} jitsi/jvb:{JITSI_IMAGE_TAG}", timeout=60)
+        log.info("JVB-%d started on %s (announced=%s)", jvb_idx, jvb_host, announced)
 
-    ssh.run(jvb_ip,
-            "for i in $(seq 60); do curl -sf http://localhost:8080/about/health >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1",
-            timeout=90)
-    log.info("JVB healthy on %s - Jitsi fully up", jvb_ip)
+    # Health-check each JVB (each on its own host, all use port 8080).
+    for jvb_idx, jvb_host in enumerate(jvb_ips):
+        ssh.run(jvb_host,
+                "for i in $(seq 60); do curl -sf http://localhost:8080/about/health >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1",
+                timeout=90)
+    log.info("%d JVB(s) healthy - Jitsi fully up", len(jvb_ips))
 
 
 def force_data_plane(ssh, cluster):
@@ -422,13 +434,16 @@ def stop_sfu(ssh, sfu_host, sfu_name, cluster=None):
 
 
 def _stop_jitsi(ssh, cluster):
-    """Stop all Jitsi containers."""
+    """Stop all Jitsi containers across all hosts."""
     jitsi_cfg = cluster.get("jitsi", {})
-    hosts = {jitsi_cfg["jvb"], jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]}
+    jvb_raw = jitsi_cfg["jvb"]
+    jvb_ips = jvb_raw if isinstance(jvb_raw, list) else [jvb_raw]
+    hosts = {jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]} | set(jvb_ips)
     log.info("Stopping Jitsi on %s", hosts)
     for host in hosts:
         ssh.run(host,
-                "docker rm -f bench-prosody bench-jitsi-web bench-jicofo bench-jvb 2>/dev/null || true",
+                "docker rm -f bench-prosody bench-jitsi-web bench-jicofo "
+                "$(docker ps -aq --filter 'name=bench-jvb') 2>/dev/null || true",
                 check=False, timeout=30)
 
 
@@ -453,7 +468,11 @@ def cleanup(ssh, cluster):
     jitsi_cfg = cluster.get("jitsi", {})
     for key in ("jvb", "prosody_web", "jicofo"):
         if key in jitsi_cfg:
-            hosts.add(jitsi_cfg[key])
+            val = jitsi_cfg[key]
+            if isinstance(val, list):
+                hosts.update(val)
+            else:
+                hosts.add(val)
 
     log.info("Cleaning up bench processes on %d hosts...", len(hosts))
     for host in hosts:
