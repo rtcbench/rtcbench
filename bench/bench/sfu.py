@@ -159,11 +159,23 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
     elif sfu_name == "mediasoup":
         ws_port = cluster.get("mediasoup_ws_port", 4443) if cluster else 4443
         announced = data_ip(cluster, sfu_host) if cluster else sfu_host
+        # Maximize UDP socket buffers (same as LiveKit) to prevent kernel
+        # drops at high sender counts.
+        if cluster:
+            for h in {sfu_host} | set(cluster.get("senders", [])) | {cluster.get("viewer", "")}:
+                if h:
+                    ssh.run(h,
+                            "sudo sysctl -w net.core.rmem_max=134217728 "
+                            "net.core.rmem_default=134217728 "
+                            "net.core.wmem_max=134217728 "
+                            "net.core.wmem_default=134217728",
+                            check=False, timeout=10)
         ssh.run(sfu_host,
                 f"docker run -d --name {SFU_CONTAINER_NAME} --network host "
                 "--ulimit nofile=65536:65536 "
                 f"-e DOMAIN={announced} "
                 f"-e MEDIASOUP_ANNOUNCED_ADDRESS={announced} "
+                "-e INITIAL_OUTGOING_BITRATE=500000000 "
                 "callzip-mediasoup:latest", timeout=60)
         ssh.run(sfu_host,
                 f"for i in $(seq 60); do curl -kso /dev/null https://localhost:{ws_port}/ 2>&1 && exit 0; sleep 1; done; exit 1",
