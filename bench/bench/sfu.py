@@ -197,8 +197,14 @@ def _start_jitsi(ssh, cluster):
     log.info("Starting Jitsi: prosody+web=%s, jicofo=%s, jvb=%s",
              prosody_ip, jicofo_ip, jvb_ip)
 
-    for host in [prosody_ip, jicofo_ip, jvb_ip]:
-        ssh.run(host, f"docker rm -f {SFU_CONTAINER_NAME} 2>/dev/null || true",
+    # Use unique container names so all 4 components can live on one machine.
+    C_PROSODY = "bench-prosody"
+    C_WEB = "bench-jitsi-web"
+    C_JICOFO = "bench-jicofo"
+    C_JVB = "bench-jvb"
+    for host in {prosody_ip, jicofo_ip, jvb_ip}:
+        ssh.run(host,
+                f"docker rm -f {C_PROSODY} {C_WEB} {C_JICOFO} {C_JVB} 2>/dev/null || true",
                 check=False, timeout=15)
 
     # 1. Prosody
@@ -216,7 +222,7 @@ def _start_jitsi(ssh, cluster):
         f"-e TZ=UTC"
     )
     ssh.run(prosody_ip,
-            f"docker run -d --name {SFU_CONTAINER_NAME} --network host "
+            f"docker run -d --name {C_PROSODY} --network host "
             f"{prosody_env} jitsi/prosody:{JITSI_IMAGE_TAG}", timeout=60)
     log.info("Prosody started on %s", prosody_ip)
 
@@ -238,7 +244,7 @@ def _start_jitsi(ssh, cluster):
         f"-e TZ=UTC"
     )
     ssh.run(prosody_ip,
-            f"docker run -d --name {WEB_CONTAINER_NAME} --network host "
+            f"docker run -d --name {C_WEB} --network host "
             f"{web_env} callzip-jitsi-web:latest", timeout=60)
     log.info("Jitsi-Web started on %s", prosody_ip)
 
@@ -262,7 +268,7 @@ def _start_jitsi(ssh, cluster):
         f"-e TZ=UTC"
     )
     ssh.run(jicofo_ip,
-            f"docker run -d --name {SFU_CONTAINER_NAME} --network host "
+            f"docker run -d --name {C_JICOFO} --network host "
             f"{jicofo_env} jitsi/jicofo:{JITSI_IMAGE_TAG}", timeout=60)
     log.info("Jicofo started on %s", jicofo_ip)
 
@@ -283,10 +289,11 @@ def _start_jitsi(ssh, cluster):
         f"-e JVB_ADVERTISE_IPS={data_ip(cluster, jvb_ip)} "
         f"-e JVB_PORT=10000 "
         f"-e JVB_TCP_HARVESTER_DISABLED=true "
+        f"-e JVB_STUN_SERVERS= "
         f"-e TZ=UTC"
     )
     ssh.run(jvb_ip,
-            f"docker run -d --name {SFU_CONTAINER_NAME} --network host "
+            f"docker run -d --name {C_JVB} --network host "
             f"--ulimit nofile=65536:65536 "
             f"{jvb_env} jitsi/jvb:{JITSI_IMAGE_TAG}", timeout=60)
     log.info("JVB started on %s", jvb_ip)
@@ -402,13 +409,13 @@ def stop_sfu(ssh, sfu_host, sfu_name, cluster=None):
 
 
 def _stop_jitsi(ssh, cluster):
-    """Stop all Jitsi containers across 3 machines."""
+    """Stop all Jitsi containers."""
     jitsi_cfg = cluster.get("jitsi", {})
-    hosts = [jitsi_cfg["jvb"], jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]]
+    hosts = {jitsi_cfg["jvb"], jitsi_cfg["prosody_web"], jitsi_cfg["jicofo"]}
     log.info("Stopping Jitsi on %s", hosts)
     for host in hosts:
         ssh.run(host,
-                f"docker rm -f {SFU_CONTAINER_NAME} {WEB_CONTAINER_NAME} 2>/dev/null || true",
+                "docker rm -f bench-prosody bench-jitsi-web bench-jicofo bench-jvb 2>/dev/null || true",
                 check=False, timeout=30)
 
 
