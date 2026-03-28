@@ -28,7 +28,7 @@ SENDERS_PER_ROOM = {
     "livekit": 65,      # GCC caps at ~255 Mbps → 72 max; 65 gives margin
     "mediasoup": 50,    # REMB caps at ~220 Mbps + per-worker cliff at ~63
     "janus": 65,        # same as livekit until measured
-    "jitsi": 65,        # same as livekit until measured
+    "jitsi": 25,        # JVB BWE caps at ~109 Mbps → 31 max; 25 gives margin
 }
 
 # Default timing (overridable via cluster config)

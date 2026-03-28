@@ -197,6 +197,19 @@ def _start_jitsi(ssh, cluster):
     log.info("Starting Jitsi: prosody+web=%s, jicofo=%s, jvb=%s",
              prosody_ip, jicofo_ip, jvb_ip)
 
+    # Maximize UDP socket buffers on all hosts (same as LiveKit/mediasoup).
+    all_hosts = {prosody_ip, jicofo_ip, jvb_ip}
+    if cluster:
+        all_hosts |= set(cluster.get("senders", [])) | {cluster.get("viewer", "")}
+    for h in all_hosts:
+        if h:
+            ssh.run(h,
+                    "sudo sysctl -w net.core.rmem_max=134217728 "
+                    "net.core.rmem_default=134217728 "
+                    "net.core.wmem_max=134217728 "
+                    "net.core.wmem_default=134217728",
+                    check=False, timeout=10)
+
     # Use unique container names so all 4 components can live on one machine.
     C_PROSODY = "bench-prosody"
     C_WEB = "bench-jitsi-web"
