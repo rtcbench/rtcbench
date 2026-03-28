@@ -46,8 +46,8 @@ export const config = {
 			],
 		},
 		webRtcTransportOptions: {
-			initialAvailableOutgoingBitrate: 1000000,
-			minimumAvailableOutgoingBitrate: 600000,
+			initialAvailableOutgoingBitrate: Number(process.env['INITIAL_OUTGOING_BITRATE'] || 1000000),
+			minimumAvailableOutgoingBitrate: Number(process.env['MIN_OUTGOING_BITRATE'] || 600000),
 			maxSctpMessageSize: 262144,
 		},
 		plainTransportOptions: {
