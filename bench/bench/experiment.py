@@ -876,7 +876,7 @@ class SenderExperiment:
         """
         # chromium decodes incoming video; webrtcperf does not
         max_decoders = 0 if self.client_name == "webrtcperf" else -1
-        y4m_path = f"{REMOTE_IVF_DIR}/1080p30.y4m"
+        y4m_path = f"{REMOTE_IVF_DIR}/1080p30.mp4"
 
         for host in self.sender_ips:
             url = self._webrtcperf_sender_url()
@@ -888,10 +888,17 @@ class SenderExperiment:
                 "showPageLog": True,
                 "statsInterval": 5,
                 "statsPath": f"{REMOTE_STATS_DIR}/wrp-stats.csv",
+                "videoPath": y4m_path,
             }
+            no_sim_path = "/tmp/bench-no-simulcast.js"
 
             config_json = json.dumps(wrp_config)
             self.ssh.write_remote_file(host, "/tmp/wrp-config.json", config_json)
+            if self.sfu_name == "jitsi":
+                import os
+                script_src = os.path.join(os.path.dirname(__file__), "jitsi-no-simulcast.js")
+                with open(script_src) as f:
+                    self.ssh.write_remote_file(host, no_sim_path, f.read())
             self.ssh.run(host, f"docker rm -f {WRP_CONTAINER_NAME} 2>/dev/null || true",
                          check=False, timeout=10)
 
@@ -903,7 +910,9 @@ class SenderExperiment:
                 f"docker run -d --name {WRP_CONTAINER_NAME} --network host "
                 f"--shm-size=2g {nvidia_mask} "
                 f"-v /tmp/wrp-config.json:/config.json:ro "
+                f"-v {no_sim_path}:{no_sim_path}:ro "
                 f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
+                f"-v {REMOTE_IVF_DIR}:{REMOTE_IVF_DIR}:ro "
                 f"{WRP_IMAGE} "
                 f"--run-xvfb /config.json"
             )
@@ -927,22 +936,12 @@ class SenderExperiment:
             api_port = self.cluster.get("janus_api_port", 8088)
             return (f"http://{sfu_ip}:{web_port}/"
                     f"?room=1234&server=http://{sfu_ip}:{api_port}/janus"
-                    f"&publish=true")
+                    f"&publish=true&receive=false")
         elif self.sfu_name == "jitsi":
-            port = self.cluster.get("jitsi_web_port", 443)
-            return (f"https://{sfu_ip}:{port}/room-1234"
-                    f"#config.prejoinConfig.enabled=false"
-                    f"&config.p2p.enabled=false"
-                    f"&config.startWithAudioMuted=true"
-                    f"&config.startWithVideoMuted=false"
-                    f"&config.startSilent=true"
-                    f"&config.disableDeepLinking=true"
-                    f"&config.requireDisplayName=false"
-                    f"&config.testing.testMode=true"
-                    f"&config.testing.noAutoPlayVideo=true"
-                    f"&config.channelLastN=-1"
-                    f"&config.notifications=[]"
-                    f"&userInfo.displayName=%22bench-sender%22")
+            # Use the bench-specific Jitsi page which uses lib-jitsi-meet
+            # directly without simulcast (served from the jitsi-web container).
+            return (f"https://{sfu_ip}/bench.html"
+                    f"?room=room-1234&publish=true&receive=false")
         elif self.sfu_name == "livekit":
             web_port = self.cluster.get("livekit_web_port", 8080)
             ws_port = self.cluster.get("livekit_ws_port", 7880)

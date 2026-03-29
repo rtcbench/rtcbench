@@ -14,7 +14,7 @@ import (
 // send the offer until a second participant joins. With serial join concurrency,
 // a shorter timeout lets the retry loop unblock the worker so the next user can
 // start joining.
-const jingleOfferTimeout = 30 * time.Second
+const jingleOfferTimeout = 120 * time.Second
 
 func Step09_WaitForJingleOffer(state *model.ConnectionState) error {
 	var err error

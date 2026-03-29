@@ -5,3 +5,7 @@ FROM jitsi/web:stable-9646
 # config.additions.js uses plain JS assignment so it runs after var config={...}.
 COPY config.additions.js /tmp/config.additions.js
 RUN cat /tmp/config.additions.js >> /defaults/config.js
+
+# Bench sender page: uses lib-jitsi-meet directly (no React/UI, no simulcast).
+# Served at /bench.html on the same origin as lib-jitsi-meet.min.js.
+COPY bench-sender.html /usr/share/jitsi-meet/bench.html

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html><head><title>Jitsi Sender</title></head>
+<body style="margin:0;background:#222;">
+<script src="/libs/lib-jitsi-meet.min.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const ROOM = params.get("room") || "room-1234";
+const DOMAIN = window.location.hostname;
+const PUBLISH = params.get("publish") === "true";
+const RECEIVE = params.get("receive") !== "false";
+
+JitsiMeetJS.init({disableAudioLevels: true});
+
+const connection = new JitsiMeetJS.JitsiConnection(null, null, {
+    hosts: {domain: DOMAIN, muc: "conference." + DOMAIN},
+    serviceUrl: "https://" + DOMAIN + "/http-bind",
+    disableSimulcast: true,
+});
+
+connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_ESTABLISHED, () => {
+    const conference = connection.initJitsiConference(ROOM, {
+        p2p: {enabled: false},
+        disableSimulcast: true,
+    });
+
+    if (RECEIVE) {
+        conference.on(JitsiMeetJS.events.conference.TRACK_ADDED, (track) => {
+            if (!track.isLocal()) {
+                const el = track.attach(document.createElement("video"));
+                el.style.display = "none";
+                document.body.appendChild(el);
+            }
+        });
+    }
+
+    conference.on(JitsiMeetJS.events.conference.CONFERENCE_JOINED, async () => {
+        if (PUBLISH) {
+            try {
+                const tracks = await JitsiMeetJS.createLocalTracks({
+                    devices: ["video"],
+                    constraints: {video: {width: 1280, height: 720, frameRate: 30}},
+                });
+                for (const t of tracks) {
+                    await conference.addTrack(t);
+                }
+                console.log("[bench] publishing " + tracks.length + " tracks");
+            } catch(e) { console.error("[bench] createLocalTracks failed:", e); }
+        }
+        document.title = "JOINED";
+        console.log("[bench] joined room=" + ROOM + " publish=" + PUBLISH + " receive=" + RECEIVE);
+    });
+
+    conference.join();
+});
+
+connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_FAILED, (err) => {
+    document.title = "ERROR: " + err;
+    console.error("[bench] connection failed:", err);
+});
+
+connection.connect();
+</script>
+</body></html>

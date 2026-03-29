@@ -207,14 +207,17 @@ def _start_jitsi(ssh, cluster):
     all_hosts = {prosody_ip, jicofo_ip} | set(jvb_ips)
     if cluster:
         all_hosts |= set(cluster.get("senders", [])) | {cluster.get("viewer", "")}
+    all_hosts.discard("")
     for h in all_hosts:
-        if h:
+        try:
             ssh.run(h,
                     "sudo sysctl -w net.core.rmem_max=134217728 "
                     "net.core.rmem_default=134217728 "
                     "net.core.wmem_max=134217728 "
                     "net.core.wmem_default=134217728",
-                    check=False, timeout=10)
+                    check=False, timeout=30)
+        except Exception as e:
+            log.warning("sysctl on %s failed (non-fatal): %s", h, e)
 
     C_PROSODY = "bench-prosody"
     C_WEB = "bench-jitsi-web"
@@ -265,6 +268,13 @@ def _start_jitsi(ssh, cluster):
     ssh.run(prosody_ip,
             f"docker run -d --name {C_WEB} --network host "
             f"{web_env} callzip-jitsi-web:latest", timeout=60)
+    # Start the bench-specific Jitsi web page (port 8080) for webrtcperf/chromium senders.
+    # Uses lib-jitsi-meet directly without simulcast, unlike the full jitsi-meet React app.
+    ssh.run(prosody_ip,
+            "docker rm -f bench-jitsi-sender-web 2>/dev/null || true; "
+            "docker run -d --name bench-jitsi-sender-web --network host "
+            "callzip-jitsi-bench-web:latest",
+            check=False, timeout=30)
     log.info("Jitsi-Web started on %s", prosody_ip)
 
     ssh.run(prosody_ip,
@@ -313,6 +323,9 @@ def _start_jitsi(ssh, cluster):
             f"-e JVB_MUC_NICKNAME=jvb-{jvb_idx} "
             f"-e JVB_TCP_HARVESTER_DISABLED=true "
             f"-e JVB_STUN_SERVERS= "
+            f"-e ENABLE_COLIBRI_WEBSOCKET=1 "
+            f"-e JVB_WS_DOMAIN={announced}:9090 "
+            f"-e JVB_WS_TLS=0 "
             f"-e TZ=UTC"
         )
         ssh.run(jvb_host,

@@ -9,7 +9,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-const receiverVideoConstraints = `{"colibriClass":"ReceiverVideoConstraints","lastN":-1,"selectedSources":[],"onStageSources":[],"defaultConstraints":{"maxHeight":180}}`
+const receiverVideoConstraints = `{"colibriClass":"ReceiverVideoConstraints","lastN":-1,"selectedSources":[],"onStageSources":[],"defaultConstraints":{"maxHeight":1080}}`
 
 func runColibriWS(ctx context.Context, wsURL string, l *log.Logger) {
 	httpClient := &http.Client{
