@@ -43,6 +43,7 @@ async function makeToken(room, identity, key, secret, canPublish) {
     const token = await makeToken(ROOM, identity, API_KEY, API_SECRET, PUBLISH);
 
     const room = new LivekitClient.Room({adaptiveStream: false, dynacast: false});
+    window.room = room;
 
     if (RECEIVE) {
         room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
@@ -60,6 +61,17 @@ async function makeToken(room, identity, key, secret, canPublish) {
     }
 
     document.title = "JOINED";
+
+    // Periodic stats for verification — log subscribed (actually receiving) track count.
+    setInterval(async () => {
+        let subscribed = 0;
+        for (const p of room.remoteParticipants.values()) {
+            for (const pub of p.videoTrackPublications.values()) {
+                if (pub.isSubscribed) subscribed++;
+            }
+        }
+        console.log(`[stats] rx_subscribed=${subscribed} receive=${RECEIVE}`);
+    }, 10000);
 })().catch(e => { console.error(e); document.title = "ERROR: " + e.message; });
 </script>
 </body></html>

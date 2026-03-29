@@ -10,9 +10,9 @@ config.videoQuality = Object.assign(config.videoQuality || {}, {
     mobileCodecPreferenceOrder: ['VP8', 'VP9', 'H264'],
     maxBitratesVideo: {
         VP9: {
-            low:      100000,
-            standard: 1000000,
-            high:     2000000,
+            low:      3500000,
+            standard: 3500000,
+            high:     3500000,
             fullHd:   3500000,
             ultraHd:  3500000,
             ssHigh:   3500000,

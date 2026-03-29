@@ -6,6 +6,7 @@ const params = new URLSearchParams(window.location.search);
 const SERVER = params.get("server") || "http://172.20.0.10:8088/janus";
 const ROOM_ID = parseInt(params.get("room") || "1234", 10);
 const PUBLISH = params.get("publish") === "true";
+const RECEIVE = params.get("receive") !== "false";
 
 function dbg(msg) { console.log(msg); }
 
@@ -82,6 +83,7 @@ async function main() {
             audio: false,
         });
         const pubPC = new RTCPeerConnection();
+        window.pubPC = pubPC;
         for (const track of stream.getTracks()) pubPC.addTrack(track, stream);
         const offer = await pubPC.createOffer();
         await pubPC.setLocalDescription(offer);
@@ -96,6 +98,8 @@ async function main() {
 
     // Step 2: Subscribe to all active publishers in a single multistream
     // PeerConnection via a second handle (the standard Janus pattern).
+    // Skip entirely when receive=false (sender bench — pure send, no viewing).
+    if (!RECEIVE) { document.title = "JOINED"; return; }
     if (publishers.length === 0 && !PUBLISH) { document.title = "ERROR: no publishers"; return; }
     if (publishers.length === 0) { document.title = "JOINED"; return; }
     const streams = publishers.map(p => ({feed: p.id}));
