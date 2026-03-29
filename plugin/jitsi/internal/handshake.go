@@ -8,7 +8,6 @@ import (
 
 	ivfpkg "call.zip/pkg/ivf"
 	"call.zip/pkg/log"
-	"call.zip/pkg/vp9"
 	"call.zip/plugin/jitsi/internal/httpxml"
 	"call.zip/plugin/jitsi/internal/model"
 	"call.zip/plugin/jitsi/internal/sdp_tmpl"
@@ -24,7 +23,6 @@ func (c *Client) performHandshake(
 	l *log.Logger,
 	room string,
 	nickname string,
-	ivf *vp9.IvfSegmenter,
 	src ivfpkg.FrameSource,
 	cameraPaths []string,
 ) error {
@@ -82,7 +80,7 @@ func (c *Client) performHandshake(
 	}
 	state.RemoteSDP = sdp
 
-	pionConnection, err := c.startPion(state, ivf)
+	pionConnection, err := c.startPion(state)
 	if err != nil {
 		l.Errorf("startPion failed: %v", err)
 		return err

@@ -5,19 +5,13 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"os"
-	"path"
-	"path/filepath"
 	"strconv"
 	"sync"
-	"time"
 
 	"call.zip"
 	"call.zip/pkg/ivf"
 	"call.zip/pkg/log"
 	"call.zip/pkg/viewer"
-	"call.zip/pkg/vp9"
-	"call.zip/pkg/vp9_stats"
 	janus "call.zip/plugin/janus/internal"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
@@ -31,8 +25,6 @@ const (
 
 	videoroomPlugin = "janus.plugin.videoroom"
 
-	viewerPacketsPerSample = 1000
-	viewerTrackBufferSize  = 1500
 )
 
 type Plugin struct {
@@ -47,8 +39,7 @@ type Plugin struct {
 	recordingDirectory string
 	packetCaptureDir   string
 	statsBufferSize    int
-	viewerManager      *viewer.Manager
-	publisher          *vp9_stats.Publisher
+	pipeline           *call.StatsPipeline
 
 	mu       sync.Mutex
 	sessions []*janus.Session
@@ -85,40 +76,24 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
 	p.svcConfig = e.Config().Spec.Conference.Cameras.SVC
 
-	if e.Config().Spec.Conference.PacketCapture.Enabled {
-		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
-		p.packetCaptureDir = filepath.Join(e.Config().Spec.Conference.PacketCapture.Directory, ts)
-		if err := os.MkdirAll(p.packetCaptureDir, 0o755); err != nil {
-			return fmt.Errorf("janus: packet capture directory: %w", err)
-		}
+	pcapDir, err := call.SetupPacketCaptureDir(e.Config().Spec.Conference.PacketCapture)
+	if err != nil {
+		return fmt.Errorf("janus: %w", err)
 	}
+	p.packetCaptureDir = pcapDir
 
 	// Validate that the conference name contains a parseable integer for the Janus room ID.
 	if _, err := roomIDFromName(e.Config().Spec.Conference.Name); err != nil {
 		return err
 	}
 
-	// Load IVF camera files for senders.
-	if e.Config().Spec.Conference.Cameras.PerRoom > 0 {
-		cams, err := ivf.NewCameras(e.Config().Spec.Conference.Cameras.Directory, e.Config().Spec.Conference.Cameras.InMemory)
-		if err != nil {
-			return fmt.Errorf("janus: %w", err)
-		}
-		p.cameras = cams
+	cams, err := call.LoadCamerasFromConfig(e.Config().Spec.Conference.Cameras)
+	if err != nil {
+		return fmt.Errorf("janus: %w", err)
 	}
+	p.cameras = cams
 
-	// Stats pipeline shared across all viewer goroutines.
-	statsInput := make(chan vp9_stats.VideoQualitySample, e.Config().Spec.Conference.StatsInputChanSize)
-	statsLog := e.LogRegistry().NewLogger("video_stats", "")
-	p.viewerManager = viewer.NewManager(statsInput, statsLog)
-	p.publisher = vp9_stats.NewPublisher(statsInput)
-	p.publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
-		statsLog.Infof("bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
-	})
-	for _, consumer := range e.StatsConsumers() {
-		p.publisher.AddSubscriber(consumer)
-	}
-	go p.publisher.Run()
+	p.pipeline = call.NewStatsPipeline(e)
 
 	return nil
 }
@@ -151,8 +126,7 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 		s.Close()
 	}
 
-	p.viewerManager.StopAll()
-	p.publisher.Stop()
+	p.pipeline.Stop()
 	return nil
 }
 
@@ -365,43 +339,25 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 		return fmt.Errorf("%w: pion subscriber: %v", call.ErrCannotJoinRoom, err)
 	}
 
-	const pliMinIntervalNanos = 100_000_000 // 100ms
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
-
-		rtcpTracker := &vp9_stats.RTCPTracker{}
 		ssrc := track.SSRC()
-		sendPLI := func() {
-			if writeErr := pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(ssrc)}}); writeErr != nil {
-				l.Errorf("[rtcp] WritePLI: %v", writeErr)
-			} else {
-				l.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
-			}
-		}
-		throttle := vp9_stats.NewPLIThrottle(sendPLI, rtcpTracker, pliMinIntervalNanos)
-
-		cfg := &viewer.Config{
-			PacketsPerSample:  viewerPacketsPerSample,
-			VP9RTPPayloadType: int(track.PayloadType()),
-			TrackBufferSize:   viewerTrackBufferSize,
-			StatsBufferSize:   p.statsBufferSize,
-			PacketCaptureDir:  p.packetCaptureDir,
-		}
-		var seg *vp9.IvfSegmenter
-		if p.enableRecording {
-			recDir := path.Join(p.recordingDirectory, fmt.Sprintf("/room=%d/user=%s", roomID, userID))
-			var recErr error
-			seg, recErr = vp9.NewIvfSegmenter(recDir)
-			if recErr != nil {
-				l.Errorf("[viewer] IvfSegmenter failed: %v", recErr)
-			} else {
-				seg.Enable()
-				l.Infof("enabled IVF file writing for room=%d user=%s", roomID, userID)
-			}
-		}
-		if _, err := p.viewerManager.SpawnViewer(track, receiver, userID, cfg, seg, p.publisher, rtcpTracker, throttle.OnFrameLost); err != nil {
-			l.Errorf("[viewer] SpawnViewer failed: %v", err)
-		}
+		p.pipeline.ViewerManager.HandleTrack(track, receiver, p.pipeline.Publisher, viewer.TrackHandlerOpts{
+			StatsBufferSize:    p.statsBufferSize,
+			PacketCaptureDir:   p.packetCaptureDir,
+			EnableRecording:    p.enableRecording,
+			RecordingDirectory: p.recordingDirectory,
+			RoomID:             fmt.Sprintf("%d", roomID),
+			UserID:             userID,
+			Logger:             l,
+			SendPLI: func() {
+				if writeErr := pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(ssrc)}}); writeErr != nil {
+					l.Errorf("[rtcp] WritePLI: %v", writeErr)
+				} else {
+					l.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
+				}
+			},
+		})
 	})
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {

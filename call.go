@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
+	"call.zip/pkg/ivf"
 	"call.zip/pkg/log"
+	"call.zip/pkg/viewer"
 	"call.zip/pkg/vp9_stats"
 	"github.com/google/uuid"
 )
@@ -36,6 +40,65 @@ type PluginEnv interface {
 	Config() *Config
 	LogRegistry() *log.Registry
 	StatsConsumers() []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
+}
+
+// StatsPipeline encapsulates the viewer manager and stats publisher that every
+// plugin creates identically in Setup(). Use NewStatsPipeline in Setup and
+// call Stop in Shutdown.
+type StatsPipeline struct {
+	ViewerManager *viewer.Manager
+	Publisher     *vp9_stats.Publisher
+}
+
+// NewStatsPipeline builds the stats channel, viewer manager, publisher, default
+// log subscriber, and external consumers. It starts the publisher goroutine.
+func NewStatsPipeline(e PluginEnv) *StatsPipeline {
+	input := make(chan vp9_stats.VideoQualitySample, e.Config().Spec.Conference.StatsInputChanSize)
+	statsLog := e.LogRegistry().NewLogger("video_stats", "")
+	vm := viewer.NewManager(input, statsLog)
+	pub := vp9_stats.NewPublisher(input)
+	pub.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+		statsLog.Infof("bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
+	})
+	for _, consumer := range e.StatsConsumers() {
+		pub.AddSubscriber(consumer)
+	}
+	go pub.Run()
+	return &StatsPipeline{ViewerManager: vm, Publisher: pub}
+}
+
+// Stop shuts down the viewer manager and publisher in the correct order.
+func (sp *StatsPipeline) Stop() {
+	if sp.ViewerManager != nil {
+		sp.ViewerManager.StopAll()
+	}
+	if sp.Publisher != nil {
+		sp.Publisher.Stop()
+	}
+}
+
+// SetupPacketCaptureDir creates a timestamped directory for packet captures
+// under the configured base directory. Returns the path, or empty string if
+// packet capture is disabled.
+func SetupPacketCaptureDir(cfg PacketCaptureConfig) (string, error) {
+	if !cfg.Enabled {
+		return "", nil
+	}
+	ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+	dir := filepath.Join(cfg.Directory, ts)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("packet capture directory: %w", err)
+	}
+	return dir, nil
+}
+
+// LoadCamerasFromConfig loads IVF camera files when senders are configured.
+// Returns nil when perRoom is 0.
+func LoadCamerasFromConfig(cfg CameraConfig) (*ivf.Cameras, error) {
+	if cfg.PerRoom <= 0 {
+		return nil, nil
+	}
+	return ivf.NewCameras(cfg.Directory, cfg.InMemory)
 }
 
 type PluginFactory func() Plugin

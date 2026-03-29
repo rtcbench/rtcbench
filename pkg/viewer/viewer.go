@@ -13,6 +13,21 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+const (
+	// DefaultPacketsPerSample is the default number of packets between stats
+	// samples. LiveKit overrides this with 200 to match its lower-bitrate SVC
+	// configuration; all other plugins use the default.
+	DefaultPacketsPerSample = 1000
+
+	// DefaultTrackBufferSize is the byte buffer length for reading RTP packets
+	// from a track. Shared across all plugins.
+	DefaultTrackBufferSize = 1500
+
+	// DefaultPLIMinIntervalNS is the minimum nanoseconds between PLI sends
+	// (100 ms). Shared across all plugins.
+	DefaultPLIMinIntervalNS = 100_000_000
+)
+
 // Viewer connects to a conference and receives 1 VP9 video stream
 type Viewer struct {
 	track        *webrtc.TrackRemote
