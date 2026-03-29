@@ -2,63 +2,18 @@ package internal
 
 import (
 	"fmt"
-	"net"
 
 	"call.zip/pkg/gcc"
 	"call.zip/pkg/log"
-	"github.com/pion/dtls/v3"
+	pionpkg "call.zip/pkg/pion"
 	"github.com/pion/webrtc/v4"
 )
-
-// newPionAPI creates a pion API with a single shared UDP socket and VP9
-// registered at the given payload type. If forceActiveRole is true, the
-// answering DTLS role is forced to client (active).
-func newPionAPI(clientIP string, vp9PayloadType uint8, forceActiveRole bool, extraOpts ...func(*webrtc.API)) (*webrtc.API, error) {
-	bindAddr := clientIP
-	if bindAddr == "" {
-		bindAddr = "0.0.0.0"
-	}
-	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:0", bindAddr))
-	if err != nil {
-		return nil, fmt.Errorf("bind UDP: %w", err)
-	}
-
-	se := webrtc.SettingEngine{}
-	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
-	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
-	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
-	if forceActiveRole {
-		se.SetAnsweringDTLSRole(webrtc.DTLSRoleClient)
-	}
-
-	m := &webrtc.MediaEngine{}
-	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP9,
-			ClockRate:   90000,
-			SDPFmtpLine: "profile-id=0",
-		},
-		PayloadType: webrtc.PayloadType(vp9PayloadType),
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return nil, fmt.Errorf("register VP9 codec: %w", err)
-	}
-	m.RegisterFeedback(webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBTransportCC}, webrtc.RTPCodecTypeVideo)
-	m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"}, webrtc.RTPCodecTypeVideo)
-
-	opts := []func(*webrtc.API){
-		webrtc.WithSettingEngine(se),
-		webrtc.WithMediaEngine(m),
-	}
-	opts = append(opts, extraOpts...)
-
-	return webrtc.NewAPI(opts...), nil
-}
 
 // StartSendPCSimple creates a PeerConnection with a VP9 sample track (no SVC/GCC).
 func StartSendPCSimple(l *log.Logger, clientIP string, vp9PT uint8) (
 	*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error,
 ) {
-	api, err := newPionAPI(clientIP, vp9PT, false)
+	api, err := pionpkg.NewAPI(clientIP, vp9PT)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -66,16 +21,9 @@ func StartSendPCSimple(l *log.Logger, clientIP string, vp9PT uint8) (
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	registerLoggingCallbacks(l, pc)
+	pionpkg.RegisterLoggingCallbacks(l, pc)
 
-	track, err := webrtc.NewTrackLocalStaticSample(
-		webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP9,
-			ClockRate:   90000,
-			SDPFmtpLine: "profile-id=0",
-		},
-		"video", "ivf",
-	)
+	track, err := pionpkg.NewVP9SampleTrack("ivf")
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewTrackLocalStaticSample: %w", err)
 	}
@@ -106,7 +54,9 @@ func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps 
 		return nil, nil, nil, "", fmt.Errorf("build interceptors: %w", err)
 	}
 
-	api, err := newPionAPI(clientIP, vp9PT, false, webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories)))
+	api, err := pionpkg.NewAPI(clientIP, vp9PT,
+		pionpkg.WithAPIOption(webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories))),
+	)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
@@ -115,16 +65,9 @@ func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps 
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	registerLoggingCallbacks(l, pc)
+	pionpkg.RegisterLoggingCallbacks(l, pc)
 
-	track, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP9,
-			ClockRate:   90000,
-			SDPFmtpLine: "profile-id=0",
-		},
-		"video", "ivf",
-	)
+	track, err := pionpkg.NewVP9RTPTrack("ivf")
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("NewTrackLocalStaticRTP: %w", err)
 	}
@@ -147,7 +90,7 @@ func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps 
 // StartRecvPC creates a PeerConnection for receiving tracks. It forces the
 // DTLS answering role to client (active) to work with mediasoup ICE Lite.
 func StartRecvPC(l *log.Logger, clientIP string, vp9PT uint8) (*webrtc.PeerConnection, error) {
-	api, err := newPionAPI(clientIP, vp9PT, true)
+	api, err := pionpkg.NewAPI(clientIP, vp9PT, pionpkg.WithForceActiveDTLS())
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +99,7 @@ func StartRecvPC(l *log.Logger, clientIP string, vp9PT uint8) (*webrtc.PeerConne
 	if err != nil {
 		return nil, fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	registerLoggingCallbacks(l, pc)
+	pionpkg.RegisterLoggingCallbacks(l, pc)
 
 	l.Infof("[pion] recv PeerConnection created")
 	return pc, nil
@@ -181,15 +124,4 @@ func NegotiateRecvSDP(pc *webrtc.PeerConnection, offerSDP string) (string, error
 		return "", fmt.Errorf("SetLocalDescription: %w", err)
 	}
 	return pc.LocalDescription().SDP, nil
-}
-
-func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
-	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
-		l.Infof("[pion] ICEConnectionState: %s", s)
-	})
-	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c != nil {
-			l.Infof("[pion] local ICE candidate: %s", c.ToJSON().Candidate)
-		}
-	})
 }

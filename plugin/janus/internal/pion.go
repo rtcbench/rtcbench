@@ -2,68 +2,19 @@ package internal
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
 	"call.zip/pkg/gcc"
 	"call.zip/pkg/log"
-	"github.com/pion/dtls/v3"
+	pionpkg "call.zip/pkg/pion"
 	"github.com/pion/webrtc/v4"
 )
-
-func newPionAPI(clientIP string, extraOpts ...func(*webrtc.API)) (*webrtc.API, error) {
-	bindAddr := clientIP
-	if bindAddr == "" {
-		bindAddr = "0.0.0.0"
-	}
-	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:0", bindAddr))
-	if err != nil {
-		return nil, fmt.Errorf("bind UDP: %w", err)
-	}
-
-	se := webrtc.SettingEngine{}
-	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
-	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
-	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
-
-	m := &webrtc.MediaEngine{}
-	m.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP9,
-			ClockRate:   90000,
-			SDPFmtpLine: "profile-id=0",
-		},
-		PayloadType: 98,
-	}, webrtc.RTPCodecTypeVideo)
-	// pion v4 needs explicit transport-cc registration for GCC bandwidth estimation.
-	m.RegisterFeedback(webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBTransportCC}, webrtc.RTPCodecTypeVideo)
-	m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"}, webrtc.RTPCodecTypeVideo)
-
-	opts := []func(*webrtc.API){
-		webrtc.WithSettingEngine(se),
-		webrtc.WithMediaEngine(m),
-	}
-	opts = append(opts, extraOpts...)
-
-	return webrtc.NewAPI(opts...), nil
-}
-
-func registerLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
-	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
-		l.Infof("[pion] ICEConnectionState: %s", s)
-	})
-	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c != nil {
-			l.Infof("[pion] local ICE candidate: %s", c.ToJSON().Candidate)
-		}
-	})
-}
 
 // StartSimplePublisher creates a sendonly PeerConnection without SVC or GCC.
 func StartSimplePublisher(l *log.Logger, clientIP string) (
 	*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error,
 ) {
-	api, err := newPionAPI(clientIP)
+	api, err := pionpkg.NewAPI(clientIP, 98)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -71,16 +22,9 @@ func StartSimplePublisher(l *log.Logger, clientIP string) (
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	registerLoggingCallbacks(l, pc)
+	pionpkg.RegisterLoggingCallbacks(l, pc)
 
-	track, err := webrtc.NewTrackLocalStaticSample(
-		webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP9,
-			ClockRate:   90000,
-			SDPFmtpLine: "profile-id=0",
-		},
-		"video", "ivf",
-	)
+	track, err := pionpkg.NewVP9SampleTrack("ivf")
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewTrackLocalStaticSample: %w", err)
 	}
@@ -113,7 +57,9 @@ func StartPionPublisher(
 		return nil, nil, nil, "", fmt.Errorf("build interceptors: %w", err)
 	}
 
-	api, err := newPionAPI(clientIP, webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories)))
+	api, err := pionpkg.NewAPI(clientIP, 98,
+		pionpkg.WithAPIOption(webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories))),
+	)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
@@ -122,17 +68,9 @@ func StartPionPublisher(
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
+	pionpkg.RegisterLoggingCallbacks(l, pc)
 
-	registerLoggingCallbacks(l, pc)
-
-	track, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP9,
-			ClockRate:   90000,
-			SDPFmtpLine: "profile-id=0",
-		},
-		"video", "ivf",
-	)
+	track, err := pionpkg.NewVP9RTPTrack("ivf")
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("NewTrackLocalStaticRTP: %w", err)
 	}
@@ -160,7 +98,7 @@ func StartPionSubscriber(
 	clientIP string,
 	janusOfferSDP string,
 ) (*webrtc.PeerConnection, string, error) {
-	api, err := newPionAPI(clientIP)
+	api, err := pionpkg.NewAPI(clientIP, 98)
 	if err != nil {
 		return nil, "", err
 	}
@@ -169,8 +107,7 @@ func StartPionSubscriber(
 	if err != nil {
 		return nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-
-	registerLoggingCallbacks(l, pc)
+	pionpkg.RegisterLoggingCallbacks(l, pc)
 
 	if _, err := pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,

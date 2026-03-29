@@ -3,19 +3,13 @@ package livekit
 import (
 	"context"
 	"fmt"
-	"os"
-	"path"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"call.zip"
 	"call.zip/pkg/ivf"
 	"call.zip/pkg/log"
 	"call.zip/pkg/viewer"
-	"call.zip/pkg/vp9"
-	"call.zip/pkg/vp9_stats"
 	lkinternal "call.zip/plugin/livekit/internal"
 	lkproto "github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
@@ -31,10 +25,6 @@ const (
 	cfgMaxSubscriptions = "maxSubscriptions"
 
 	viewerPacketsPerSample = 200
-	viewerTrackBufferSize  = 1500
-
-	// PLI rate limiting: at most one PLI per 100ms
-	pliMinIntervalNanos = 100_000_000
 )
 
 type Plugin struct {
@@ -49,8 +39,7 @@ type Plugin struct {
 	recordingDirectory string
 	packetCaptureDir   string
 	statsBufferSize    int
-	viewerManager      *viewer.Manager
-	publisher          *vp9_stats.Publisher
+	pipeline           *call.StatsPipeline
 	maxSubscriptions   int // 0 = unlimited
 
 	mu                sync.Mutex
@@ -87,33 +76,19 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
 	p.svcConfig = e.Config().Spec.Conference.Cameras.SVC
 
-	if e.Config().Spec.Conference.PacketCapture.Enabled {
-		ts := time.Now().UTC().Format("2006-01-02T15-04-05Z")
-		p.packetCaptureDir = filepath.Join(e.Config().Spec.Conference.PacketCapture.Directory, ts)
-		if err := os.MkdirAll(p.packetCaptureDir, 0o755); err != nil {
-			return fmt.Errorf("livekit: packet capture directory: %w", err)
-		}
+	pcapDir, err := call.SetupPacketCaptureDir(e.Config().Spec.Conference.PacketCapture)
+	if err != nil {
+		return fmt.Errorf("livekit: %w", err)
 	}
+	p.packetCaptureDir = pcapDir
 
-	if e.Config().Spec.Conference.Cameras.PerRoom > 0 {
-		cams, err := ivf.NewCameras(e.Config().Spec.Conference.Cameras.Directory, e.Config().Spec.Conference.Cameras.InMemory)
-		if err != nil {
-			return fmt.Errorf("livekit: %w", err)
-		}
-		p.cameras = cams
+	cams, err := call.LoadCamerasFromConfig(e.Config().Spec.Conference.Cameras)
+	if err != nil {
+		return fmt.Errorf("livekit: %w", err)
 	}
+	p.cameras = cams
 
-	statsInput := make(chan vp9_stats.VideoQualitySample, e.Config().Spec.Conference.StatsInputChanSize)
-	statsLog := e.LogRegistry().NewLogger("video_stats", "")
-	p.viewerManager = viewer.NewManager(statsInput, statsLog)
-	p.publisher = vp9_stats.NewPublisher(statsInput)
-	p.publisher.AddSubscriber(func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
-		statsLog.Infof("bitrate=%s,period=%s,sample=%s", sample.Mbps(), period.String(), sample.String())
-	})
-	for _, consumer := range e.StatsConsumers() {
-		p.publisher.AddSubscriber(consumer)
-	}
-	go p.publisher.Run()
+	p.pipeline = call.NewStatsPipeline(e)
 
 	return nil
 }
@@ -128,8 +103,7 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 		room.Disconnect()
 	}
 
-	p.viewerManager.StopAll()
-	p.publisher.Stop()
+	p.pipeline.Stop()
 	return nil
 }
 
@@ -267,38 +241,21 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		if err := pub.SetVideoQuality(lkproto.VideoQuality_HIGH); err != nil {
 			l.Errorf("[pion] SetVideoQuality: %v", err)
 		}
-		cfg := &viewer.Config{
-			PacketsPerSample:  viewerPacketsPerSample,
-			VP9RTPPayloadType: int(track.PayloadType()),
-			TrackBufferSize:   viewerTrackBufferSize,
-			StatsBufferSize:   p.statsBufferSize,
-			PacketCaptureDir:  p.packetCaptureDir,
-		}
-		var seg *vp9.IvfSegmenter
-		if p.enableRecording {
-			recDir := path.Join(p.recordingDirectory, fmt.Sprintf("/room=%s/user=%s", roomID, userID))
-			var recErr error
-			seg, recErr = vp9.NewIvfSegmenter(recDir)
-			if recErr != nil {
-				l.Errorf("[viewer] IvfSegmenter failed: %v", recErr)
-			} else {
-				seg.Enable()
-				l.Infof("enabled IVF file writing for room=%s user=%s", roomID, userID)
-			}
-		}
-
-		// Set up RTCP feedback: PLI on frame loss
-		rtcpTracker := &vp9_stats.RTCPTracker{}
 		ssrc := track.SSRC()
-		sendPLI := func() {
-			rp.WritePLI(ssrc)
-			l.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
-		}
-		throttle := vp9_stats.NewPLIThrottle(sendPLI, rtcpTracker, pliMinIntervalNanos)
-
-		if _, err := p.viewerManager.SpawnViewer(track, nil, userID, cfg, seg, p.publisher, rtcpTracker, throttle.OnFrameLost); err != nil {
-			l.Errorf("[viewer] SpawnViewer failed: %v", err)
-		}
+		p.pipeline.ViewerManager.HandleTrack(track, nil, p.pipeline.Publisher, viewer.TrackHandlerOpts{
+			StatsBufferSize:    p.statsBufferSize,
+			PacketCaptureDir:   p.packetCaptureDir,
+			EnableRecording:    p.enableRecording,
+			RecordingDirectory: p.recordingDirectory,
+			PacketsPerSample:   viewerPacketsPerSample,
+			RoomID:             roomID,
+			UserID:             userID,
+			Logger:             l,
+			SendPLI: func() {
+				rp.WritePLI(ssrc)
+				l.Infof("[rtcp] sent PLI ssrc=%d", ssrc)
+			},
+		})
 	}
 
 	cb := &lksdk.RoomCallback{

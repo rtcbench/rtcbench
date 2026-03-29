@@ -1,6 +1,8 @@
 package viewer
 
 import (
+	"fmt"
+	"path"
 	"sync"
 
 	"call.zip/pkg/log"
@@ -8,6 +10,68 @@ import (
 	"call.zip/pkg/vp9_stats"
 	"github.com/pion/webrtc/v4"
 )
+
+// TrackHandlerOpts configures HandleTrack. Each plugin provides these values
+// from its own config and transport layer.
+type TrackHandlerOpts struct {
+	StatsBufferSize    int
+	PacketCaptureDir   string
+	EnableRecording    bool
+	RecordingDirectory string
+	PacketsPerSample   int // 0 defaults to DefaultPacketsPerSample
+	RoomID             string
+	UserID             string
+	Logger             *log.Logger
+	SendPLI            func() // plugin-specific PLI sender
+}
+
+// HandleTrack is the shared OnTrack handler. It sets up RTCP PLI throttling,
+// builds a viewer Config, optionally creates an IvfSegmenter for recording, and
+// spawns a Viewer. This replaces ~35 near-identical lines in each plugin.
+func (m *Manager) HandleTrack(
+	track *webrtc.TrackRemote,
+	receiver *webrtc.RTPReceiver,
+	pub *vp9_stats.Publisher,
+	opts TrackHandlerOpts,
+) (*Viewer, error) {
+	l := opts.Logger
+
+	rtcpTracker := &vp9_stats.RTCPTracker{}
+	throttle := vp9_stats.NewPLIThrottle(opts.SendPLI, rtcpTracker, DefaultPLIMinIntervalNS)
+
+	pps := opts.PacketsPerSample
+	if pps == 0 {
+		pps = DefaultPacketsPerSample
+	}
+
+	cfg := &Config{
+		PacketsPerSample:  pps,
+		VP9RTPPayloadType: int(track.PayloadType()),
+		TrackBufferSize:   DefaultTrackBufferSize,
+		StatsBufferSize:   opts.StatsBufferSize,
+		PacketCaptureDir:  opts.PacketCaptureDir,
+	}
+
+	var seg *vp9.IvfSegmenter
+	if opts.EnableRecording {
+		recDir := path.Join(opts.RecordingDirectory, fmt.Sprintf("/room=%s/user=%s", opts.RoomID, opts.UserID))
+		var recErr error
+		seg, recErr = vp9.NewIvfSegmenter(recDir)
+		if recErr != nil {
+			l.Errorf("[viewer] IvfSegmenter failed: %v", recErr)
+		} else {
+			seg.Enable()
+			l.Infof("enabled IVF file writing for room=%s user=%s", opts.RoomID, opts.UserID)
+		}
+	}
+
+	v, err := m.SpawnViewer(track, receiver, opts.UserID, cfg, seg, pub, rtcpTracker, throttle.OnFrameLost)
+	if err != nil {
+		l.Errorf("[viewer] SpawnViewer failed: %v", err)
+		return nil, err
+	}
+	return v, nil
+}
 
 type Manager struct {
 	mu      sync.Mutex
