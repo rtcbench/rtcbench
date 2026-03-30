@@ -114,6 +114,10 @@ spec:
       apiKey: devkey
       apiSecret: secret
 
+  # Disable the automatic update check that runs on startup.
+  # Defaults to false (update check is enabled).
+  # disableUpdateChecker: true
+
   # Expose a /health HTTP endpoint reporting live VP9 bitrate and FPS per viewer.
   # Set port: 0 or omit this section to disable.
   metrics:

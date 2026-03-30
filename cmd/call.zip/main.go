@@ -14,6 +14,7 @@ import (
 
 	"call.zip"
 	"call.zip/internal/netutil"
+	"call.zip/internal/updater"
 	"call.zip/pkg/log"
 	"call.zip/pkg/metricsserver"
 	"call.zip/pkg/statsjsonl"
@@ -78,6 +79,10 @@ func main() {
 	cfg, err = loadYAMLConfig(flag.Arg(0))
 	if err != nil {
 		stdlog.Fatalf("Failed to load YAML config file: %v", err)
+	}
+
+	if !cfg.Spec.DisableUpdateChecker {
+		go updater.Check(version, cfg.Spec.Plugin)
 	}
 
 	reg, err := buildLogRegistry(cfg.Spec.Logging)

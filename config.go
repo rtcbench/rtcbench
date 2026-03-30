@@ -178,21 +178,23 @@ func (yc *YAMLMetadataConfig) mustConvert() MetadataConfig {
 }
 
 type SpecConfig struct {
-	Plugin       string
-	Conference   ConferenceConfig
-	Network      NetworkConfig
-	PluginConfig map[string]any
-	Logging      LoggingConfig
-	Metrics      MetricsConfig
+	Plugin               string
+	Conference           ConferenceConfig
+	Network              NetworkConfig
+	PluginConfig         map[string]any
+	Logging              LoggingConfig
+	Metrics              MetricsConfig
+	DisableUpdateChecker bool
 }
 
 type YAMLSpecConfig struct {
-	Plugin       *string               `yaml:"plugin,omitempty"`
-	Conference   *YAMLConferenceConfig `yaml:"conference,omitempty"`
-	Network      *YAMLNetworkConfig    `yaml:"network,omitempty"`
-	PluginConfig map[string]any        `yaml:"pluginConfig,omitempty"`
-	Logging      *YAMLLoggingConfig    `yaml:"logging,omitempty"`
-	Metrics      *YAMLMetricsConfig    `yaml:"metrics,omitempty"`
+	Plugin               *string               `yaml:"plugin,omitempty"`
+	Conference           *YAMLConferenceConfig `yaml:"conference,omitempty"`
+	Network              *YAMLNetworkConfig    `yaml:"network,omitempty"`
+	PluginConfig         map[string]any        `yaml:"pluginConfig,omitempty"`
+	Logging              *YAMLLoggingConfig    `yaml:"logging,omitempty"`
+	Metrics              *YAMLMetricsConfig    `yaml:"metrics,omitempty"`
+	DisableUpdateChecker *bool                 `yaml:"disableUpdateChecker,omitempty"`
 }
 
 type MetricsConfig struct {
@@ -266,6 +268,9 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 		if yc.Metrics.StatsJSONLPath != nil {
 			c.Metrics.StatsJSONLPath = *yc.Metrics.StatsJSONLPath
 		}
+	}
+	if yc.DisableUpdateChecker != nil {
+		c.DisableUpdateChecker = *yc.DisableUpdateChecker
 	}
 	return c
 }
