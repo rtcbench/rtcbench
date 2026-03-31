@@ -1,7 +1,7 @@
 """
 Packet capture e2e tests.
 
-Verifies that call.zip writes valid pcap files when packetCapture is enabled.
+Verifies that rtcbench writes valid pcap files when packetCapture is enabled.
 Each viewer writes one pcap file per incoming track, named by the viewer's
 track nickname (userID[SSRC]).
 
@@ -24,7 +24,7 @@ from helpers import (
     JANUS_NETWORK,
     LIVEKIT_NETWORK,
     PLUGIN_ENV,
-    callzip_run,
+    rtcbench_run,
     poll_health,
     build_pcap_config,
 )
@@ -84,7 +84,7 @@ def test_janus_packet_capture_1s1v(janus_infra, test_video_dir, tmp_path):
     capture_dir.mkdir()
     cfg = build_pcap_config("smoke.yml")
     try:
-        with callzip_run(cfg, test_video_dir, network=JANUS_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
+        with rtcbench_run(cfg, test_video_dir, network=JANUS_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
             try:
                 poll_health(url, timeout=120, min_active=1)
             except TimeoutError as e:
@@ -101,7 +101,7 @@ def test_livekit_packet_capture_1s1v(livekit_infra, test_video_dir, tmp_path):
     capture_dir.mkdir()
     cfg = build_pcap_config("smoke.yml")
     try:
-        with callzip_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
+        with rtcbench_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
             try:
                 poll_health(url, timeout=120, min_active=1)
             except TimeoutError as e:
@@ -124,7 +124,7 @@ def test_janus_packet_capture_3s2v(janus_infra, test_video_dir, tmp_path):
     capture_dir.mkdir()
     cfg = build_pcap_config("smoke-2s3v.yml")
     try:
-        with callzip_run(cfg, test_video_dir, network=JANUS_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
+        with rtcbench_run(cfg, test_video_dir, network=JANUS_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
             try:
                 poll_health(url, timeout=120, min_active=6)
             except TimeoutError as e:
@@ -143,7 +143,7 @@ def test_livekit_packet_capture_3s2v(livekit_infra, test_video_dir, tmp_path):
     capture_dir.mkdir()
     cfg = build_pcap_config("smoke-2s3v.yml")
     try:
-        with callzip_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
+        with rtcbench_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
             try:
                 poll_health(url, timeout=120, min_active=6)
             except TimeoutError as e:

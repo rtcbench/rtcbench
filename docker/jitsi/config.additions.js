@@ -1,6 +1,6 @@
-// VP9 overrides for call.zip CI load testing.
+// VP9 overrides for rtcbench CI load testing.
 // Appended to the base jitsi/web config.js at image build time.
-// Affects browser clients only - call.zip negotiates VP9 via its own Jingle/SDP path.
+// Affects browser clients only - rtcbench negotiates VP9 via its own Jingle/SDP path.
 
 config.resolution = 1080;
 config.disableSimulcast = true;

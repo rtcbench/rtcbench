@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"call.zip/pkg/vp9_stats"
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 )
 
 // Sample is the JSON structure written to the JSONL file.
@@ -41,9 +41,9 @@ type Writer struct {
 	enc      *json.Encoder
 }
 
-// New creates a Writer that writes to {dir}/bench-callzip-{host}-{instance}.jsonl.
+// New creates a Writer that writes to {dir}/bench-rtcbench-{host}-{instance}.jsonl.
 func New(dir string, host string, instance int) (*Writer, error) {
-	path := fmt.Sprintf("%s/bench-callzip-%s-%d.jsonl", dir, host, instance)
+	path := fmt.Sprintf("%s/bench-rtcbench-%s-%d.jsonl", dir, host, instance)
 	f, err := os.Create(path)
 	if err != nil {
 		return nil, fmt.Errorf("statsjsonl: create %s: %w", path, err)
@@ -70,7 +70,7 @@ func (w *Writer) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySampl
 		}
 		s := Sample{
 			Timestamp:           float64(time.Now().UnixMicro()) / 1e6,
-			Client:              "callzip",
+			Client:              "github.com/rtcbench/rtcbench",
 			Host:                w.host,
 			Instance:            w.instance,
 			Viewer:              sample.Nickname,

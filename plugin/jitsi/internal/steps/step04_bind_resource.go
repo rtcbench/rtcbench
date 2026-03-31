@@ -3,8 +3,8 @@ package steps
 import (
 	"fmt"
 
-	"call.zip/plugin/jitsi/internal/model"
-	"call.zip/plugin/jitsi/internal/util"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/util"
 )
 
 // Step04_BindResource sends an <iq type='set'> to bind a resource and gets your JID.

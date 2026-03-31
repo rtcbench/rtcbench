@@ -1,4 +1,4 @@
-# call.zip outputs
+# rtcbench outputs
 graphs/
 logs/
 
@@ -13,10 +13,10 @@ scripts/remote-e2e/config*.yml
 *.pem
 
 # Binary name from "go build"
-call.zip
-call.zip.exe
+rtcbench
+rtcbench.exe
 ivf-svc
-!cmd/call.zip
+!cmd/rtcbench
 !cmd/ivf-svc
 
 # Screenshot artifacts (keep verify.html, ignore image runs)

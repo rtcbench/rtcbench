@@ -1,4 +1,4 @@
-package call
+package rtcbench
 
 import "testing"
 

@@ -3,8 +3,8 @@ package ivf
 import (
 	"time"
 
-	"call.zip/pkg/log"
-	"call.zip/pkg/vp9"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/vp9"
 	vp9hdr "github.com/pion/rtp/codecs/vp9"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"

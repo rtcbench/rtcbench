@@ -1,7 +1,7 @@
 """
 Screenshot smoke test — 2 senders, 2 receivers, then join in Chromium.
 
-Starts call.zip with 2 senders and 2 receivers, waits for all receivers to
+Starts rtcbench with 2 senders and 2 receivers, waits for all receivers to
 reach healthy bitrate, then opens Chromium (via Playwright) to join the
 conference room and takes screenshots every 5 seconds for 15 seconds.
 
@@ -18,7 +18,7 @@ from helpers import (
     JITSI_NETWORK,
     LIVEKIT_NETWORK,
     PLUGIN_ENV,
-    callzip_run,
+    rtcbench_run,
     poll_health,
 )
 
@@ -451,14 +451,14 @@ def _run_screenshot_test(sfu_name, config, network, join_fn, tmp_path, test_vide
     """
     Core screenshot smoke test logic shared across SFU backends.
 
-    1. Start call.zip with 2s2v config
+    1. Start rtcbench with 2s2v config
     2. Wait for all receivers to reach healthy bitrate
     3. Join in Chromium via join_fn
     4. Take screenshots every 5 s for 15 s
     """
     timeout = 300 if sfu_name == "jitsi" else 120
 
-    with callzip_run(config, test_video_dir, network=network, env=env) as (url, _proc):
+    with rtcbench_run(config, test_video_dir, network=network, env=env) as (url, _proc):
         # Wait for receivers to reach target bitrate before opening browser.
         try:
             poll_health(url, timeout, MIN_ACTIVE)

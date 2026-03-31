@@ -12,15 +12,15 @@ import (
 	"syscall"
 	"time"
 
-	"call.zip"
-	"call.zip/internal/netutil"
-	"call.zip/pkg/log"
-	"call.zip/pkg/metricsserver"
-	"call.zip/pkg/statsjsonl"
-	"call.zip/plugin/janus"
-	"call.zip/plugin/jitsi"
-	"call.zip/plugin/livekit"
-	"call.zip/plugin/mediasoup"
+	"github.com/rtcbench/rtcbench"
+	"github.com/rtcbench/rtcbench/internal/netutil"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/metricsserver"
+	"github.com/rtcbench/rtcbench/pkg/statsjsonl"
+	"github.com/rtcbench/rtcbench/plugin/janus"
+	"github.com/rtcbench/rtcbench/plugin/jitsi"
+	"github.com/rtcbench/rtcbench/plugin/livekit"
+	"github.com/rtcbench/rtcbench/plugin/mediasoup"
 	"github.com/goccy/go-yaml"
 	"github.com/joho/godotenv"
 )
@@ -30,8 +30,8 @@ var version = "dev"
 func main() {
 	var (
 		err                           error
-		cfg                           *call.Config
-		client                        *call.Client
+		cfg                           *rtcbench.Config
+		client                        *rtcbench.Client
 		detectedClientIP              string
 		sigtermCtx, shutdownCtx       context.Context
 		sigtermCancel, shutdownCancel context.CancelFunc
@@ -97,7 +97,7 @@ func main() {
 		cfg.Spec.Network.ClientIP = detectedClientIP
 	}
 
-	client = call.NewClient(cfg, reg)
+	client = rtcbench.NewClient(cfg, reg)
 	client.RegisterPlugin(jitsi.PluginID, jitsi.NewPlugin)
 	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
 	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
@@ -139,7 +139,7 @@ func main() {
 	err = client.JoinAllRooms(context.Background())
 	if err != nil {
 		mainLog.Errorf("error joining all rooms: %v", err)
-		if errors.Is(err, call.ErrUnknownPlugin) {
+		if errors.Is(err, rtcbench.ErrUnknownPlugin) {
 			os.Exit(1)
 		}
 	}
@@ -162,7 +162,7 @@ func main() {
 	}
 }
 
-func buildLogRegistry(lc call.LoggingConfig) (*log.Registry, error) {
+func buildLogRegistry(lc rtcbench.LoggingConfig) (*log.Registry, error) {
 	levels := make(map[string]log.Level, len(lc.Streams))
 	for _, s := range lc.Streams {
 		lvl, err := log.ParseLevel(s.Level)
@@ -195,10 +195,10 @@ func buildLogRegistry(lc call.LoggingConfig) (*log.Registry, error) {
 	return log.NewRegistry(handlers, levels), nil
 }
 
-func loadYAMLConfig(yamlFile string) (*call.Config, error) {
+func loadYAMLConfig(yamlFile string) (*rtcbench.Config, error) {
 	var (
 		bytes      []byte
-		yamlConfig call.YAMLConfig
+		yamlConfig rtcbench.YAMLConfig
 		err        error
 	)
 

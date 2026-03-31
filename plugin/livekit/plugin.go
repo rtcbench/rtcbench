@@ -6,11 +6,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"call.zip"
-	"call.zip/pkg/ivf"
-	"call.zip/pkg/log"
-	"call.zip/pkg/viewer"
-	lkinternal "call.zip/plugin/livekit/internal"
+	"github.com/rtcbench/rtcbench"
+	"github.com/rtcbench/rtcbench/pkg/ivf"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/viewer"
+	lkinternal "github.com/rtcbench/rtcbench/plugin/livekit/internal"
 	lkproto "github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 	"github.com/pion/webrtc/v4"
@@ -32,14 +32,14 @@ type Plugin struct {
 	apiKey             string
 	apiSecret          string
 	cameras            *ivf.Cameras
-	svcConfig          call.SVCCameraConfig
+	svcConfig          rtcbench.SVCCameraConfig
 	log                *log.Logger
 	logRegistry        *log.Registry
 	enableRecording    bool
 	recordingDirectory string
 	packetCaptureDir   string
 	statsBufferSize    int
-	pipeline           *call.StatsPipeline
+	pipeline           *rtcbench.StatsPipeline
 	maxSubscriptions   int // 0 = unlimited
 
 	mu                sync.Mutex
@@ -47,11 +47,11 @@ type Plugin struct {
 	subscriptionCount int32 // atomic
 }
 
-func NewPlugin() call.Plugin {
+func NewPlugin() rtcbench.Plugin {
 	return &Plugin{}
 }
 
-func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
+func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 	cfg := e.Config().Spec.PluginConfig[PluginID].(map[string]any)
 	p.wsURL = cfg[cfgWSURL].(string)
 	p.apiKey = cfg[cfgAPIKey].(string)
@@ -76,19 +76,19 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
 	p.svcConfig = e.Config().Spec.Conference.Cameras.SVC
 
-	pcapDir, err := call.SetupPacketCaptureDir(e.Config().Spec.Conference.PacketCapture)
+	pcapDir, err := rtcbench.SetupPacketCaptureDir(e.Config().Spec.Conference.PacketCapture)
 	if err != nil {
 		return fmt.Errorf("livekit: %w", err)
 	}
 	p.packetCaptureDir = pcapDir
 
-	cams, err := call.LoadCamerasFromConfig(e.Config().Spec.Conference.Cameras)
+	cams, err := rtcbench.LoadCamerasFromConfig(e.Config().Spec.Conference.Cameras)
 	if err != nil {
 		return fmt.Errorf("livekit: %w", err)
 	}
 	p.cameras = cams
 
-	p.pipeline = call.NewStatsPipeline(e)
+	p.pipeline = rtcbench.NewStatsPipeline(e)
 
 	return nil
 }
@@ -107,22 +107,22 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userID string) error {
+func (p *Plugin) JoinRoom(ctx context.Context, role rtcbench.UserRole, roomID, userID string) error {
 	l := p.logRegistry.NewLogger("livekit", fmt.Sprintf("[%s][%s]", role, userID))
 
 	switch role {
-	case call.Sender:
+	case rtcbench.Sender:
 		return p.runSender(ctx, l, roomID, userID)
-	case call.Viewer:
+	case rtcbench.Viewer:
 		return p.runViewer(ctx, l, roomID, userID)
 	default:
-		return call.ErrUnsupportedRole
+		return rtcbench.ErrUnsupportedRole
 	}
 }
 
 func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID string) error {
 	if p.cameras == nil {
-		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
+		return fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
 	}
 
 	// Resolve SVC before connecting so we know whether to add GCC interceptors.
@@ -139,7 +139,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		// 1.2 Mbps matches the target total for 3-layer SVC (S0=150K+S1=350K+S2=700K).
 		interceptors, getBitrate, err := lkinternal.SenderInterceptors(initialBitrateBps)
 		if err != nil {
-			return fmt.Errorf("%w: build interceptors: %v", call.ErrCannotJoinRoom, err)
+			return fmt.Errorf("%w: build interceptors: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		getTargetBitrate = getBitrate
 		connectOpts = append(connectOpts, lksdk.WithInterceptors(interceptors))
@@ -152,7 +152,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		ParticipantIdentity: userID,
 	}, &lksdk.RoomCallback{}, connectOpts...)
 	if err != nil {
-		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("connected to room %s (SVC=%v, autoSubscribe=false)", roomID, svc.Enabled)
 
@@ -169,7 +169,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 			"video", "ivf",
 		)
 		if err != nil {
-			return fmt.Errorf("%w: create track: %v", call.ErrCannotJoinRoom, err)
+			return fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		// Declare all SVC spatial layers to the SFU so it forwards them correctly.
 		// Without this the SFU treats the track as single-layer and strips S1/S2.
@@ -181,7 +181,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 			VideoLayers: svcLayers,
 		}
 		if _, err = room.LocalParticipant.PublishTrack(rtpTrack, pubOpts); err != nil {
-			return fmt.Errorf("%w: publish track: %v", call.ErrCannotJoinRoom, err)
+			return fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		l.Infof("SVC config: %d spatial x %d temporal layers (GCC target=%d bps)", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers, svc.Config.TargetBitrateBps)
 		go ivf.SVCLoopIntoTrack(l, rtpTrack, p.cameras.NewSource(), svc.Config, getTargetBitrate)
@@ -194,10 +194,10 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 			"video", "ivf",
 		)
 		if err != nil {
-			return fmt.Errorf("%w: create track: %v", call.ErrCannotJoinRoom, err)
+			return fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		if _, err = room.LocalParticipant.PublishTrack(sampleTrack, &lksdk.TrackPublicationOptions{Name: "video"}); err != nil {
-			return fmt.Errorf("%w: publish track: %v", call.ErrCannotJoinRoom, err)
+			return fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		go ivf.LoopIntoTrack(l, sampleTrack, p.cameras.NewSource())
 	}
@@ -292,7 +292,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		ParticipantIdentity: userID,
 	}, cb, opts...)
 	if err != nil {
-		return fmt.Errorf("%w: connect to room: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("connected to room %s as viewer", roomID)
 

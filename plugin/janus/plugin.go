@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"sync"
 
-	"call.zip"
-	"call.zip/pkg/ivf"
-	"call.zip/pkg/log"
-	"call.zip/pkg/viewer"
-	janus "call.zip/plugin/janus/internal"
+	"github.com/rtcbench/rtcbench"
+	"github.com/rtcbench/rtcbench/pkg/ivf"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/viewer"
+	janus "github.com/rtcbench/rtcbench/plugin/janus/internal"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
@@ -34,22 +34,22 @@ type Plugin struct {
 	serverIP           string
 	clientIP           string
 	cameras            *ivf.Cameras
-	svcConfig          call.SVCCameraConfig
+	svcConfig          rtcbench.SVCCameraConfig
 	enableRecording    bool
 	recordingDirectory string
 	packetCaptureDir   string
 	statsBufferSize    int
-	pipeline           *call.StatsPipeline
+	pipeline           *rtcbench.StatsPipeline
 
 	mu       sync.Mutex
 	sessions []*janus.Session
 }
 
-func NewPlugin() call.Plugin {
+func NewPlugin() rtcbench.Plugin {
 	return &Plugin{}
 }
 
-func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
+func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 	baseURL := e.Config().Spec.PluginConfig[PluginID].(map[string]any)[cfgServerRoot].(string)
 	allowInsecure := e.Config().Spec.PluginConfig[PluginID].(map[string]any)[cfgAllowInsecure].(bool)
 
@@ -76,7 +76,7 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
 	p.svcConfig = e.Config().Spec.Conference.Cameras.SVC
 
-	pcapDir, err := call.SetupPacketCaptureDir(e.Config().Spec.Conference.PacketCapture)
+	pcapDir, err := rtcbench.SetupPacketCaptureDir(e.Config().Spec.Conference.PacketCapture)
 	if err != nil {
 		return fmt.Errorf("janus: %w", err)
 	}
@@ -87,13 +87,13 @@ func (p *Plugin) Setup(ctx context.Context, e call.PluginEnv) error {
 		return err
 	}
 
-	cams, err := call.LoadCamerasFromConfig(e.Config().Spec.Conference.Cameras)
+	cams, err := rtcbench.LoadCamerasFromConfig(e.Config().Spec.Conference.Cameras)
 	if err != nil {
 		return fmt.Errorf("janus: %w", err)
 	}
 	p.cameras = cams
 
-	p.pipeline = call.NewStatsPipeline(e)
+	p.pipeline = rtcbench.NewStatsPipeline(e)
 
 	return nil
 }
@@ -130,7 +130,7 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userID string) error {
+func (p *Plugin) JoinRoom(ctx context.Context, role rtcbench.UserRole, roomID, userID string) error {
 	roomInt, err := roomIDFromName(roomID)
 	if err != nil {
 		return err
@@ -139,23 +139,23 @@ func (p *Plugin) JoinRoom(ctx context.Context, role call.UserRole, roomID, userI
 	l := p.logRegistry.NewLogger("janus", fmt.Sprintf("[%s][%s]", role, userID))
 
 	switch role {
-	case call.Sender:
+	case rtcbench.Sender:
 		return p.runSender(ctx, l, roomInt, userID)
-	case call.Viewer:
+	case rtcbench.Viewer:
 		return p.runViewer(ctx, l, roomInt, userID)
 	default:
-		return call.ErrUnsupportedRole
+		return rtcbench.ErrUnsupportedRole
 	}
 }
 
 func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, userID string) error {
 	if p.cameras == nil {
-		return fmt.Errorf("%w: no IVF files configured for sender", call.ErrCannotJoinRoom)
+		return fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
 	}
 
 	sessionID, err := p.client.CreateSession()
 	if err != nil {
-		return fmt.Errorf("%w: create session: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: create session: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("session created: %d", sessionID)
 
@@ -164,7 +164,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 	handleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: attach plugin: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: attach plugin: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("handle attached: %d", handleID)
 
@@ -176,11 +176,11 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 	}, nil)
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: join: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: join: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	if joined.PluginData == nil || joined.PluginData.Data["videoroom"] != "joined" {
 		session.Close()
-		return fmt.Errorf("%w: unexpected join response: %v", call.ErrCannotJoinRoom, joined)
+		return fmt.Errorf("%w: unexpected join response: %v", rtcbench.ErrCannotJoinRoom, joined)
 	}
 	l.Infof("joined room %d as publisher", roomID)
 
@@ -199,7 +199,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		pc, rtpTrack, getBitrate, offerSDP, err = janus.StartPionPublisher(l, p.clientIP, initialBitrateBps)
 		if err != nil {
 			session.Close()
-			return fmt.Errorf("%w: pion publisher: %v", call.ErrCannotJoinRoom, err)
+			return fmt.Errorf("%w: pion publisher: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		l.Infof("SVC config: %d spatial x %d temporal layers", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers)
 		startLoop = func() {
@@ -210,7 +210,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		pc, sampleTrack, offerSDP, err = janus.StartSimplePublisher(l, p.clientIP)
 		if err != nil {
 			session.Close()
-			return fmt.Errorf("%w: pion publisher: %v", call.ErrCannotJoinRoom, err)
+			return fmt.Errorf("%w: pion publisher: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		startLoop = func() {
 			go ivf.LoopIntoTrack(l, sampleTrack, p.cameras.NewSource())
@@ -227,18 +227,18 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 	}, &janus.JSEP{Type: "offer", SDP: offerSDP})
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: publish: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: publish: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	if configured.PluginData != nil {
 		if errMsg, ok := configured.PluginData.Data["error"].(string); ok {
 			errCode, _ := configured.PluginData.Data["error_code"].(float64)
 			session.Close()
-			return fmt.Errorf("%w: publish: janus error %d: %s", call.ErrCannotJoinRoom, int(errCode), errMsg)
+			return fmt.Errorf("%w: publish: janus error %d: %s", rtcbench.ErrCannotJoinRoom, int(errCode), errMsg)
 		}
 	}
 	if configured.JSEP == nil {
 		session.Close()
-		return fmt.Errorf("%w: publish response missing JSEP answer", call.ErrCannotJoinRoom)
+		return fmt.Errorf("%w: publish response missing JSEP answer", rtcbench.ErrCannotJoinRoom)
 	}
 	l.Infof("configured, got JSEP answer")
 
@@ -247,7 +247,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 		SDP:  configured.JSEP.SDP,
 	}); err != nil {
 		session.Close()
-		return fmt.Errorf("%w: SetRemoteDescription: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: SetRemoteDescription: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 
 	startLoop()
@@ -262,7 +262,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID int64, use
 func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, userID string) error {
 	sessionID, err := p.client.CreateSession()
 	if err != nil {
-		return fmt.Errorf("%w: create session: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: create session: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("session created: %d", sessionID)
 
@@ -272,7 +272,7 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	pubHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: attach pub handle: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: attach pub handle: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 
 	joined, err := session.Send(pubHandleID, map[string]any{
@@ -283,17 +283,17 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	}, nil)
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: publisher join: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: publisher join: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	if joined.PluginData == nil || joined.PluginData.Data["videoroom"] != "joined" {
 		session.Close()
-		return fmt.Errorf("%w: unexpected publisher join response", call.ErrCannotJoinRoom)
+		return fmt.Errorf("%w: unexpected publisher join response", rtcbench.ErrCannotJoinRoom)
 	}
 
 	pubs, _ := joined.PluginData.Data["publishers"].([]any)
 	if len(pubs) == 0 {
 		session.Close()
-		return fmt.Errorf("%w: no publishers in room %d", call.ErrCannotJoinRoom, roomID)
+		return fmt.Errorf("%w: no publishers in room %d", rtcbench.ErrCannotJoinRoom, roomID)
 	}
 	streams := make([]map[string]any, 0, len(pubs))
 	for _, pub := range pubs {
@@ -307,14 +307,14 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	}
 	if len(streams) == 0 {
 		session.Close()
-		return fmt.Errorf("%w: could not extract publisher IDs", call.ErrCannotJoinRoom)
+		return fmt.Errorf("%w: could not extract publisher IDs", rtcbench.ErrCannotJoinRoom)
 	}
 	l.Infof("found %d publisher(s), subscribing", len(streams))
 
 	subHandleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: attach sub handle: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: attach sub handle: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 
 	attached, err := session.Send(subHandleID, map[string]any{
@@ -325,18 +325,18 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	}, nil)
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: subscriber join: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: subscriber join: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	if attached.JSEP == nil {
 		session.Close()
-		return fmt.Errorf("%w: subscriber join response missing JSEP offer", call.ErrCannotJoinRoom)
+		return fmt.Errorf("%w: subscriber join response missing JSEP offer", rtcbench.ErrCannotJoinRoom)
 	}
 	l.Infof("attached, got JSEP offer from Janus")
 
 	pc, answerSDP, err := janus.StartPionSubscriber(l, p.clientIP, attached.JSEP.SDP)
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: pion subscriber: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: pion subscriber: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
@@ -369,11 +369,11 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID int64, use
 	}, &janus.JSEP{Type: "answer", SDP: answerSDP})
 	if err != nil {
 		session.Close()
-		return fmt.Errorf("%w: start: %v", call.ErrCannotJoinRoom, err)
+		return fmt.Errorf("%w: start: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	if started.PluginData == nil {
 		session.Close()
-		return fmt.Errorf("%w: unexpected start response", call.ErrCannotJoinRoom)
+		return fmt.Errorf("%w: unexpected start response", rtcbench.ErrCannotJoinRoom)
 	}
 	l.Infof("started, streaming")
 

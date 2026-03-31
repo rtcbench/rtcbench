@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 
-	"call.zip/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/pion/dtls/v3"
 	"github.com/pion/webrtc/v4"
 )

@@ -3,8 +3,8 @@ package internal
 import (
 	"sync/atomic"
 
-	"call.zip/pkg/arrival"
-	"call.zip/pkg/gcc"
+	"github.com/rtcbench/rtcbench/pkg/arrival"
+	"github.com/rtcbench/rtcbench/pkg/gcc"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	piongcc "github.com/pion/interceptor/pkg/gcc"

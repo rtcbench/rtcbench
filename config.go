@@ -1,4 +1,4 @@
-package call
+package rtcbench
 
 import (
 	"errors"
@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"call.zip/pkg/vp9_stats"
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 )
 
 const (
-	APIVersionV1            = "call.zip/v1"
+	APIVersionV1            = "rtcbench/v1"
 	KindVideoCallStressTest = "VideoCallStressTest"
 )
 

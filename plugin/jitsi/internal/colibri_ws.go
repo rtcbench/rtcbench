@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"net/http"
 
-	"call.zip/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/coder/websocket"
 )
 

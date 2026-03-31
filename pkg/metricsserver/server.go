@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"call.zip/pkg/vp9_stats"
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 )
 
 const activeViewerWindow = 30 * time.Second

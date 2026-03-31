@@ -1,7 +1,7 @@
 """
 SVC (Scalable Video Coding) e2e tests.
 
-Starts call.zip with a 3-layer SVC IVF file, polls /health, and asserts that
+Starts rtcbench with a 3-layer SVC IVF file, polls /health, and asserts that
 max_recv_tid reflects multi-layer temporal reception. Spatial layers depend on
 SFU forwarding decisions (typically one per subscriber), so only temporal
 layers are asserted end-to-end.
@@ -20,7 +20,7 @@ from helpers import (
     MEDIASOUP_NETWORK,
     PLUGIN_ENV,
     apply_bandwidth_limit,
-    callzip_run,
+    rtcbench_run,
     poll_health_snapshot,
     poll_health_svc,
     record_svc_result,
@@ -77,7 +77,7 @@ def _max_tid(data: dict) -> int:
 
 
 def _run_svc_delivery(test_svc_video_dir, network, env, config, min_active, timeout, min_sid, min_tid, label):
-    with callzip_run(
+    with rtcbench_run(
         config,
         test_svc_video_dir,
         network=network,
@@ -123,7 +123,7 @@ def _run_svc_bandwidth_degradation(test_svc_video_dir, network, env):
     - Combined layer score (SID*3 + TID) decreases, verifying actual SVC adaptation
     - Progressive degradation across bandwidth steps
     """
-    with callzip_run(
+    with rtcbench_run(
         "smoke.yml",
         test_svc_video_dir,
         network=network,

@@ -3,8 +3,8 @@ package steps
 import (
 	"fmt"
 
-	"call.zip/plugin/jitsi/internal/model"
-	"call.zip/plugin/jitsi/internal/util"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/util"
 )
 
 // Step07_CreateConference sends the IQ to the focus component to create/join the conference.

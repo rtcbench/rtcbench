@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"call.zip/pkg/vp9_stats"
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 )
 
 func TestNewCreatesFile(t *testing.T) {
@@ -19,7 +19,7 @@ func TestNewCreatesFile(t *testing.T) {
 	}
 	defer w.Close()
 
-	path := filepath.Join(dir, "bench-callzip-testhost-0.jsonl")
+	path := filepath.Join(dir, "bench-rtcbench-testhost-0.jsonl")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatalf("expected file %s to exist", path)
 	}
@@ -55,7 +55,7 @@ func TestSubscriberWritesJSONL(t *testing.T) {
 		t.Fatalf("Close() error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "bench-callzip-node-01-0.jsonl"))
+	data, err := os.ReadFile(filepath.Join(dir, "bench-rtcbench-node-01-0.jsonl"))
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
 	}
@@ -73,8 +73,8 @@ func TestSubscriberWritesJSONL(t *testing.T) {
 		t.Fatalf("unmarshal line 2: %v", err)
 	}
 
-	if s1.Client != "callzip" {
-		t.Errorf("expected client=callzip, got %q", s1.Client)
+	if s1.Client != "github.com/rtcbench/rtcbench" {
+		t.Errorf("expected client=rtcbench, got %q", s1.Client)
 	}
 	if s1.Host != "node-01" {
 		t.Errorf("expected host=node-01, got %q", s1.Host)
@@ -119,7 +119,7 @@ func TestSubscriberWritesErrors(t *testing.T) {
 		t.Fatalf("Close() error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "bench-callzip-node-01-0.jsonl"))
+	data, err := os.ReadFile(filepath.Join(dir, "bench-rtcbench-node-01-0.jsonl"))
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestSubscriberOmitsEmptyErrors(t *testing.T) {
 		t.Fatalf("Close() error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "bench-callzip-node-01-0.jsonl"))
+	data, err := os.ReadFile(filepath.Join(dir, "bench-rtcbench-node-01-0.jsonl"))
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestSubscriberConcurrentWrites(t *testing.T) {
 		t.Fatalf("Close() error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "bench-callzip-concurrent-host-1.jsonl"))
+	data, err := os.ReadFile(filepath.Join(dir, "bench-rtcbench-concurrent-host-1.jsonl"))
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestInstanceInFilename(t *testing.T) {
 	}
 	defer w.Close()
 
-	path := filepath.Join(dir, "bench-callzip-myhost-42.jsonl")
+	path := filepath.Join(dir, "bench-rtcbench-myhost-42.jsonl")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatalf("expected file %s to exist", path)
 	}

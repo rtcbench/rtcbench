@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"call.zip/pkg/vp9"
+	"github.com/rtcbench/rtcbench/pkg/vp9"
 	"github.com/pion/webrtc/v4/pkg/media/ivfreader"
 )
 

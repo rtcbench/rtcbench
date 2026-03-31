@@ -25,7 +25,7 @@ For each SFU, analyze all screenshots in sequence:
 ### 1. Layout check (from the first screenshot showing video, usually 05s)
 - How many tiles show the color bar test pattern video?
 - Expected: at least 2 sender tiles with video.
-  Jitsi may show extra tiles (browser viewer + call.zip viewers as placeholders) — OK.
+  Jitsi may show extra tiles (browser viewer + rtcbench viewers as placeholders) — OK.
   Janus/LiveKit show a 2x2 grid: 2 senders with video, 2 viewer placeholders.
 
 ### 2. Video liveness check (MOST IMPORTANT)

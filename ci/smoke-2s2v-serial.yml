@@ -1,4 +1,4 @@
-apiVersion: call.zip/v1
+apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
   name: smoke-2s2v-serial
@@ -41,7 +41,7 @@ spec:
       _serverURL: 'wss://{{spec.network.serverIP}}:4443'
   logging:
     console: true
-    directory: /var/log/call-zip
+    directory: /var/log/rtcbench
     streams:
       - name: general
         level: info

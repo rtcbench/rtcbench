@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"call.zip/plugin/jitsi/internal/model"
-	"call.zip/plugin/jitsi/internal/util"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/util"
 )
 
 // jingleOfferTimeout is how long Step09 waits for JVB's Jingle session-initiate

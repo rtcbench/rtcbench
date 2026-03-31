@@ -8,12 +8,12 @@ operating point than the standard delivery tests.
 """
 import pytest
 
-from helpers import LIVEKIT_NETWORK, PLUGIN_ENV, callzip_run, poll_health, record_result
+from helpers import LIVEKIT_NETWORK, PLUGIN_ENV, rtcbench_run, poll_health, record_result
 
 
 @pytest.mark.xdist_group("livekit")
 def test_livekit_buffer_size_256(livekit_infra, test_video_dir_1mbps):
-    with callzip_run("smoke-bufsize256.yml", test_video_dir_1mbps, network=LIVEKIT_NETWORK, env=PLUGIN_ENV["livekit"]) as (url, _proc):
+    with rtcbench_run("smoke-bufsize256.yml", test_video_dir_1mbps, network=LIVEKIT_NETWORK, env=PLUGIN_ENV["livekit"]) as (url, _proc):
         try:
             result = poll_health(url, timeout=120, min_active=1, min_bitrate_bps=800_000)
         except TimeoutError as e:

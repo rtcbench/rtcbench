@@ -2,12 +2,12 @@
 # Talks to the host Docker daemon via socket mount.
 #
 # Usage (from repo root):
-#   docker build -t callzip-e2e-runner:latest -f docker/e2e/Dockerfile .
+#   docker build -t rtcbench-e2e-runner:latest -f docker/e2e/Dockerfile .
 #   docker run --rm \
 #     -v /var/run/docker.sock:/var/run/docker.sock \
 #     -v $(pwd):$(pwd) -v /tmp:/tmp --network host -w $(pwd) \
-#     callzip-e2e-runner:latest \
-#     -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-callzip
+#     rtcbench-e2e-runner:latest \
+#     -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-rtcbench
 
 FROM python:3.12-slim-bookworm
 

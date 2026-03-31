@@ -3,7 +3,7 @@ package ivf
 import (
 	"time"
 
-	"call.zip/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )

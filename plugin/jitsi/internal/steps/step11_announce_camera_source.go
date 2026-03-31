@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"call.zip/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 )
 
 func Step11_Sender_AnnounceCameraSource(state *model.ConnectionState) error {

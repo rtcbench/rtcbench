@@ -109,8 +109,8 @@ def load_hints():
 def save_hints(results, prefix=""):
     """Save discovered max values as hints for future runs.
 
-    prefix="" for receiver mode (keys like "janus/callzip").
-    prefix="sender/" for sender mode (keys like "sender/janus/callzip").
+    prefix="" for receiver mode (keys like "janus/rtcbench").
+    prefix="sender/" for sender mode (keys like "sender/janus/rtcbench").
     """
     hints = load_hints()
     for (sfu, client), r_max in results.items():

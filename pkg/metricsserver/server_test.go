@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"call.zip/pkg/vp9_stats"
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 )
 
 func TestNew(t *testing.T) {

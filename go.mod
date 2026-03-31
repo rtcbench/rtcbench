@@ -1,4 +1,4 @@
-module call.zip
+module github.com/rtcbench/rtcbench
 
 go 1.25.0
 

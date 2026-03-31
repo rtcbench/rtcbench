@@ -10,14 +10,14 @@ import traceback
 from bench.config import (
     VIEWERS_PER_ROOM, SENDERS_PER_ROOM, WARMUP_S, EXPERIMENT_DURATION_S, TEARDOWN_WAIT_S,
     REMOTE_STATS_DIR, REMOTE_LOG_DIR, REMOTE_IVF_DIR,
-    CALLZIP_IMAGE, CALLZIP_SENDER_CONTAINER, CALLZIP_SENDER_LOAD_CONTAINER,
-    CALLZIP_VIEWER_CONTAINER,
+    RTCBENCH_IMAGE, RTCBENCH_SENDER_CONTAINER, RTCBENCH_SENDER_LOAD_CONTAINER,
+    RTCBENCH_VIEWER_CONTAINER,
     WRP_IMAGE, WRP_CONTAINER_NAME, SFU_CONTAINER_NAME, data_ip,
     MIN_BITRATE_BPS, MIN_FPS,
     SENDER_CONFIG, SENDER_LOAD_CONFIG, VIEWER_CONFIGS,
     log,
 )
-from bench.sfu import start_sfu, stop_sfu, REMOTE_CALLZIP_BIN
+from bench.sfu import start_sfu, stop_sfu, REMOTE_RTCBENCH_BIN
 from bench.results import log_experiment
 
 
@@ -85,8 +85,8 @@ class Experiment:
                 "viewer_hosts": list(self.receiver_ips),
             })
 
-        viewer_name = CALLZIP_VIEWER_CONTAINER if self.client_name == "callzip" else WRP_CONTAINER_NAME
-        containers = {CALLZIP_SENDER_CONTAINER: self.sender_ip}
+        viewer_name = RTCBENCH_VIEWER_CONTAINER if self.client_name == "rtcbench" else WRP_CONTAINER_NAME
+        containers = {RTCBENCH_SENDER_CONTAINER: self.sender_ip}
         for host in self.receiver_ips:
             containers[f"{viewer_name}@{host}"] = host
 
@@ -212,33 +212,33 @@ class Experiment:
             f"-e LOG_DIR={REMOTE_LOG_DIR} "
         )
         self.ssh.run(self.sender_ip,
-                     f"docker rm -f {CALLZIP_SENDER_CONTAINER} 2>/dev/null || true",
+                     f"docker rm -f {RTCBENCH_SENDER_CONTAINER} 2>/dev/null || true",
                      check=False, timeout=10)
         self.ssh.run(self.sender_ip,
-                     f"docker run -d --name {CALLZIP_SENDER_CONTAINER} --network host "
+                     f"docker run -d --name {RTCBENCH_SENDER_CONTAINER} --network host "
                      f"--ulimit nofile=65536:65536 "
                      f"{env} "
                      f"-v {REMOTE_IVF_DIR}:{REMOTE_IVF_DIR}:ro "
                      f"-v {config_path}:{config_path}:ro "
                      f"-v {REMOTE_LOG_DIR}:{REMOTE_LOG_DIR} "
-                     f"{CALLZIP_IMAGE} {config_path}", timeout=30)
-        self.pids.setdefault(self.sender_ip, []).append(CALLZIP_SENDER_CONTAINER)
+                     f"{RTCBENCH_IMAGE} {config_path}", timeout=30)
+        self.pids.setdefault(self.sender_ip, []).append(RTCBENCH_SENDER_CONTAINER)
         log.info("Sender started on %s (container=%s, rooms=%d)",
-                 self.sender_ip, CALLZIP_SENDER_CONTAINER, self.num_rooms)
+                 self.sender_ip, RTCBENCH_SENDER_CONTAINER, self.num_rooms)
 
         log.info("Waiting 15s for sender to join and start publishing...")
         time.sleep(15)
         self._start_at = int(time.time())
 
     def _start_receivers(self):
-        if self.client_name == "callzip":
-            self._start_callzip_receivers()
+        if self.client_name == "rtcbench":
+            self._start_rtcbench_receivers()
         elif self.client_name in ("webrtcperf", "chromium"):
             self._start_webrtcperf_receivers()
         else:
             raise ValueError(f"Unknown client: {self.client_name}")
 
-    def _start_callzip_receivers(self):
+    def _start_rtcbench_receivers(self):
         viewer_config = VIEWER_CONFIGS[self.sfu_name]
         with open(viewer_config) as f:
             config_content = f.read()
@@ -256,19 +256,19 @@ class Experiment:
             self.ssh.write_remote_file(host, config_path, config_content)
 
             self.ssh.run(host,
-                         f"docker rm -f {CALLZIP_VIEWER_CONTAINER} 2>/dev/null || true",
+                         f"docker rm -f {RTCBENCH_VIEWER_CONTAINER} 2>/dev/null || true",
                          check=False, timeout=10)
             self.ssh.run(host,
-                         f"docker run -d --name {CALLZIP_VIEWER_CONTAINER} --network host "
+                         f"docker run -d --name {RTCBENCH_VIEWER_CONTAINER} --network host "
                          f"--ulimit nofile=65536:65536 "
                          f"{env} "
                          f"-v {config_path}:{config_path}:ro "
                          f"-v {REMOTE_STATS_DIR}:{REMOTE_STATS_DIR} "
                          f"-v {REMOTE_LOG_DIR}:{REMOTE_LOG_DIR} "
-                         f"{CALLZIP_IMAGE} {config_path}", timeout=30)
-            self.pids.setdefault(host, []).append(CALLZIP_VIEWER_CONTAINER)
-            log.info("call.zip viewer started on %s (container=%s, R=%d, rooms=%d, per_room=%d)",
-                     host, CALLZIP_VIEWER_CONTAINER, self.r_per_machine,
+                         f"{RTCBENCH_IMAGE} {config_path}", timeout=30)
+            self.pids.setdefault(host, []).append(RTCBENCH_VIEWER_CONTAINER)
+            log.info("rtcbench viewer started on %s (container=%s, R=%d, rooms=%d, per_room=%d)",
+                     host, RTCBENCH_VIEWER_CONTAINER, self.r_per_machine,
                      self.num_rooms, self.viewers_per_room)
 
     def _start_webrtcperf_receivers(self):
@@ -707,9 +707,9 @@ class SenderExperiment:
         else:
             sfu_hosts = {SFU_CONTAINER_NAME: self.sfu_ip}
 
-        sender_cname = (CALLZIP_SENDER_LOAD_CONTAINER if self.client_name == "callzip"
+        sender_cname = (RTCBENCH_SENDER_LOAD_CONTAINER if self.client_name == "rtcbench"
                         else WRP_CONTAINER_NAME)
-        containers = {CALLZIP_VIEWER_CONTAINER: self.viewer_ip}
+        containers = {RTCBENCH_VIEWER_CONTAINER: self.viewer_ip}
         for host in self.sender_ips:
             containers[f"{sender_cname}@{host}"] = host
 
@@ -788,7 +788,7 @@ class SenderExperiment:
             self.ssh.run(host, f"rm -f {REMOTE_STATS_DIR}/*.jsonl {REMOTE_STATS_DIR}/*.csv 2>/dev/null || true", timeout=60)
 
     def _start_viewer(self):
-        """Start call.zip viewer(s) on the viewer machine (1 per room)."""
+        """Start rtcbench viewer(s) on the viewer machine (1 per room)."""
         viewer_config = VIEWER_CONFIGS[self.sfu_name]
         with open(viewer_config) as f:
             config_content = f.read()
@@ -807,7 +807,7 @@ class SenderExperiment:
                      timeout=10)
         pid = self.ssh.run_background(
             self.viewer_ip,
-            f"bash -c 'ulimit -n 65536; {env_str} {REMOTE_CALLZIP_BIN} {config_path}'")
+            f"bash -c 'ulimit -n 65536; {env_str} {REMOTE_RTCBENCH_BIN} {config_path}'")
         self.pids.setdefault(self.viewer_ip, []).append(pid)
         log.info("Viewer started on %s (pid=%s, 1 viewer in room-1234)",
                  self.viewer_ip, pid)
@@ -816,15 +816,15 @@ class SenderExperiment:
         time.sleep(10)
 
     def _start_senders(self):
-        if self.client_name == "callzip":
-            self._start_callzip_senders()
+        if self.client_name == "rtcbench":
+            self._start_rtcbench_senders()
         elif self.client_name in ("webrtcperf", "chromium"):
             self._start_webrtcperf_senders()
         else:
             raise ValueError(f"Unknown sender client: {self.client_name}")
 
-    def _start_callzip_senders(self):
-        """Start call.zip sender-load processes on each sender machine."""
+    def _start_rtcbench_senders(self):
+        """Start rtcbench sender-load processes on each sender machine."""
         with open(SENDER_LOAD_CONFIG) as f:
             config_content = f.read()
 
@@ -853,7 +853,7 @@ class SenderExperiment:
             self.ssh.run(host, f"mkdir -p {REMOTE_LOG_DIR}", timeout=10)
             pid = self.ssh.run_background(
                 host,
-                f"bash -c 'ulimit -n 65536; {env_str} {REMOTE_CALLZIP_BIN} {config_path}'")
+                f"bash -c 'ulimit -n 65536; {env_str} {REMOTE_RTCBENCH_BIN} {config_path}'")
             self.pids.setdefault(host, []).append(pid)
             log.info("Sender-load started on %s (pid=%s, S=%d, rooms=%d, per_room=%d)",
                      host, pid, self.s_per_machine,
@@ -1033,7 +1033,7 @@ class SenderExperiment:
             self._health_meta = {"error": str(e)}
             return False
 
-        # Browser fake camera produces ~1 Mbps; callzip IVF produces ~3.5 Mbps.
+        # Browser fake camera produces ~1 Mbps; rtcbench IVF produces ~3.5 Mbps.
         # Use a lower bitrate threshold for browser-based senders.
         if self.client_name in ("webrtcperf", "chromium"):
             min_bps = 800_000

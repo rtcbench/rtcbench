@@ -147,7 +147,7 @@ def run_benchmark(cluster_path, cells, min_r, max_r, dry_run,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Benchmark coordinator for call.zip")
+        description="Benchmark coordinator for rtcbench")
     parser.add_argument("cluster_config",
                         help="Path to cluster config YAML file")
     parser.add_argument("--mode", choices=[MODE_RECEIVER, MODE_SENDER],

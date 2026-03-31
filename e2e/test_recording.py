@@ -1,7 +1,7 @@
 """
 Recording e2e tests.
 
-Verifies that call.zip writes valid VP9/IVF files when recording is enabled,
+Verifies that rtcbench writes valid VP9/IVF files when recording is enabled,
 and that the recorded content is faithful to the source video.
 
 For each recorded IVF file the test:
@@ -21,7 +21,7 @@ recorded frames match the source at that offset. This correctly handles:
   - SSRC rewriting by the SFU (we match by frame content, not SSRC)
   - Loop wrap-around (offset search is modulo source length)
 
-ffprobe and ffmpeg run inside the callzip Docker image; no host-side ffmpeg needed.
+ffprobe and ffmpeg run inside the rtcbench Docker image; no host-side ffmpeg needed.
 """
 import json
 import subprocess
@@ -31,7 +31,7 @@ import pytest
 
 from helpers import (
     JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK,
-    PLUGIN_ENV, callzip_run, poll_health, build_recording_config,
+    PLUGIN_ENV, rtcbench_run, poll_health, build_recording_config,
 )
 
 
@@ -45,7 +45,7 @@ def _docker_ffprobe(ivf_path) -> dict:
             "docker", "run", "--rm",
             "--entrypoint", "ffprobe",
             "-v", f"{ivf_path.parent}:/data:ro",
-            "callzip:latest",
+            "rtcbench:latest",
             "-v", "quiet",
             "-print_format", "json",
             "-show_streams",
@@ -62,7 +62,7 @@ def _docker_ffmpeg_decode(ivf_path) -> subprocess.CompletedProcess:
             "docker", "run", "--rm",
             "--entrypoint", "ffmpeg",
             "-v", f"{ivf_path.parent}:/data:ro",
-            "callzip:latest",
+            "rtcbench:latest",
             "-i", f"/data/{ivf_path.name}",
             "-f", "null", "-",
         ],
@@ -84,7 +84,7 @@ def _frame_md5s(ivf_path) -> list[str]:
             "docker", "run", "--rm",
             "--entrypoint", "ffmpeg",
             "-v", f"{ivf_path.parent}:/data:ro",
-            "callzip:latest",
+            "rtcbench:latest",
             "-i", f"/data/{ivf_path.name}",
             "-f", "framemd5", "-",
         ],
@@ -202,7 +202,7 @@ def test_janus_recording(janus_infra, test_video_dir, tmp_path):
     recording_dir.mkdir()
     cfg = build_recording_config("smoke.yml")
     try:
-        with callzip_run(cfg, test_video_dir, network=JANUS_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
+        with rtcbench_run(cfg, test_video_dir, network=JANUS_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
             try:
                 poll_health(url, timeout=120, min_active=1)
             except TimeoutError as e:
@@ -219,7 +219,7 @@ def test_jitsi_recording(jitsi_infra, test_video_dir, tmp_path):
     recording_dir.mkdir()
     cfg = build_recording_config("smoke.yml")
     try:
-        with callzip_run(cfg, test_video_dir, network=JITSI_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["jitsi"]) as (url, _proc):
+        with rtcbench_run(cfg, test_video_dir, network=JITSI_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["jitsi"]) as (url, _proc):
             try:
                 poll_health(url, timeout=300, min_active=1)
             except TimeoutError as e:
@@ -236,7 +236,7 @@ def test_livekit_recording(livekit_infra, test_video_dir, tmp_path):
     recording_dir.mkdir()
     cfg = build_recording_config("smoke.yml")
     try:
-        with callzip_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
+        with rtcbench_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
             try:
                 poll_health(url, timeout=120, min_active=1)
             except TimeoutError as e:
