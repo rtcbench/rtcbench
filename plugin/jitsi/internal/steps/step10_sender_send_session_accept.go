@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"call.zip/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 )
 
 // extractPrimaryVideoSSRCAndMSID extracts a single (primary) SSRC and its MSID from the SDP.

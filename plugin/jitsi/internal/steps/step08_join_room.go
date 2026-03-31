@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"call.zip/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 )
 
 // Step08_JoinRoom sends the initial <presence/> stanza to the MUC room.

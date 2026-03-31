@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"call.zip/plugin/jitsi/internal/model"
-	"call.zip/plugin/jitsi/internal/util"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/util"
 )
 
 // Step06_DiscoverServices queries the STUN/TURN servers via extdisco.

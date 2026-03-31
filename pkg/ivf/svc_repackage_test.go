@@ -3,7 +3,7 @@ package ivf
 import (
 	"testing"
 
-	"call.zip/pkg/vp9"
+	"github.com/rtcbench/rtcbench/pkg/vp9"
 )
 
 func TestBuildSuperframeRoundTrip(t *testing.T) {

@@ -10,7 +10,7 @@ RUN git clone https://github.com/versatica/mediasoup-demo.git /src && \
 
 # Build server (TypeScript -> JS).
 WORKDIR /src/server
-# Disable iceConsentTimeout -- call.zip thin clients do not run an
+# Disable iceConsentTimeout -- rtcbench thin clients do not run an
 # interceptor registry, so they never send ICE consent refreshes.
 RUN sed -i 's/iceConsentTimeout: 20/iceConsentTimeout: 0/' src/Room.ts
 RUN npm ci && npm run typescript:build

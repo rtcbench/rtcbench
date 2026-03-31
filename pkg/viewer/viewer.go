@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"call.zip/pkg/pcap"
-	"call.zip/pkg/vp9"
-	"call.zip/pkg/vp9_stats"
+	"github.com/rtcbench/rtcbench/pkg/pcap"
+	"github.com/rtcbench/rtcbench/pkg/vp9"
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )

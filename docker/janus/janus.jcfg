@@ -8,7 +8,7 @@ general: {
 	log_to_stdout = true
 	debug_level = 4
 
-	server_name = "callzip-janus"
+	server_name = "rtcbench-janus"
 	session_timeout = 60
 	candidates_timeout = 45
 	no_webrtc_encryption = false

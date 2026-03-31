@@ -1,9 +1,9 @@
 """
-pytest fixtures for call.zip e2e tests.
+pytest fixtures for rtcbench e2e tests.
 
 Session-scoped infrastructure fixtures start Docker Compose stacks once and
-tear them down at the end of the session. The callzip binary runs as a
-per-test Docker container (see helpers.callzip_run).
+tear them down at the end of the session. The rtcbench binary runs as a
+per-test Docker container (see helpers.rtcbench_run).
 """
 import subprocess
 
@@ -18,15 +18,15 @@ from helpers import REPO_ROOT, JANUS_PROJECT, JITSI_PROJECT, LIVEKIT_PROJECT, ME
 
 @pytest.fixture(scope="session", autouse=True)
 def ensure_docker_images():
-    """Fail fast with a helpful message if callzip:latest is not built yet."""
+    """Fail fast with a helpful message if rtcbench:latest is not built yet."""
     r = subprocess.run(
-        ["docker", "image", "inspect", "callzip:latest"], capture_output=True
+        ["docker", "image", "inspect", "rtcbench:latest"], capture_output=True
     )
     if r.returncode != 0:
         pytest.fail(
-            "callzip:latest not found. Build it first:\n"
-            "  make e2e-janus   # builds callzip + janus images then runs tests\n"
-            "  make e2e-jitsi   # builds callzip + jitsi images then runs tests\n"
+            "rtcbench:latest not found. Build it first:\n"
+            "  make e2e-janus   # builds rtcbench + janus images then runs tests\n"
+            "  make e2e-jitsi   # builds rtcbench + jitsi images then runs tests\n"
             "  make e2e         # builds all images then runs all tests"
         )
 
@@ -106,7 +106,7 @@ def mediasoup_infra(ensure_docker_images):
 @pytest.fixture(scope="session")
 def test_video_dir(tmp_path_factory, ensure_docker_images):
     """
-    Generate a VP9/IVF test video using the callzip container's ffmpeg.
+    Generate a VP9/IVF test video using the rtcbench container's ffmpeg.
     Returns the host directory containing test.ivf.
     """
     d = tmp_path_factory.mktemp("test-videos")
@@ -115,7 +115,7 @@ def test_video_dir(tmp_path_factory, ensure_docker_images):
             "docker", "run", "--rm",
             "--entrypoint", "ffmpeg",
             "-v", f"{d}:/output",
-            "callzip:latest",
+            "rtcbench:latest",
             "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=25",
             "-t", "10",
             "-c:v", "libvpx-vp9", "-b:v", "3.5M",
@@ -144,7 +144,7 @@ def test_video_dir_1mbps(tmp_path_factory, ensure_docker_images):
             "docker", "run", "--rm",
             "--entrypoint", "ffmpeg",
             "-v", f"{d}:/output",
-            "callzip:latest",
+            "rtcbench:latest",
             "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=25",
             "-t", "10",
             "-c:v", "libvpx-vp9", "-b:v", "1M",
@@ -168,7 +168,7 @@ def test_video_dir_1mbps(tmp_path_factory, ensure_docker_images):
 def test_svc_video_dir(tmp_path_factory, test_video_dir):
     """
     Generate a 3-layer SVC VP9/IVF test video from the single-layer test video.
-    Uses the ivf-svc tool baked into the callzip Docker image.
+    Uses the ivf-svc tool baked into the rtcbench Docker image.
     Returns the host directory containing a single test.ivf (3-layer superframe).
     """
     d = tmp_path_factory.mktemp("test-videos-svc")
@@ -178,7 +178,7 @@ def test_svc_video_dir(tmp_path_factory, test_video_dir):
             "--entrypoint", "ivf-svc",
             "-v", f"{test_video_dir}:/input:ro",
             "-v", f"{d}:/output",
-            "callzip:latest",
+            "rtcbench:latest",
             "-layers", "3",
             "/input/test.ivf", "/output/test.ivf",
         ],

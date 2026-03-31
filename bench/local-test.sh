@@ -7,7 +7,7 @@ S=${1:-20}
 STATS_DIR=/dev/shm/bench-stats-local
 LOG_DIR=/tmp/bench-logs-local
 IVF_DIR=$(cd "$(dirname "$0")" && pwd)/ivf
-BIN=$(cd "$(dirname "$0")" && pwd)/binaries/call.zip
+BIN=$(cd "$(dirname "$0")" && pwd)/binaries/rtcbench
 VIEWER_CFG=/tmp/bench-viewer-local.yml
 SENDER_CFG=/tmp/bench-sender-local.yml
 LK_CFG=/tmp/bench-livekit-local.yaml
@@ -44,7 +44,7 @@ logging:
 EOF
 
 cat > "$VIEWER_CFG" <<EOF
-apiVersion: call.zip/v1
+apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
   name: bench-local-viewer
@@ -85,7 +85,7 @@ spec:
 EOF
 
 cat > "$SENDER_CFG" <<EOF
-apiVersion: call.zip/v1
+apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
   name: bench-local-senders
@@ -131,7 +131,7 @@ docker rm -f bench-livekit-local 2>/dev/null || true
 docker run -d --name bench-livekit-local --network host \
     --cpuset-cpus 6-9 \
     -v "$LK_CFG:$LK_CFG:ro" \
-    callzip-livekit:latest --config "$LK_CFG"
+    rtcbench-livekit:latest --config "$LK_CFG"
 for i in $(seq 20); do
     wget -qO- http://localhost:7880/ >/dev/null 2>&1 && break || sleep 1
 done

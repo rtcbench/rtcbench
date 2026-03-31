@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"call.zip/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/google/uuid"
 )
 

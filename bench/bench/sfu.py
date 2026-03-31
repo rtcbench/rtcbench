@@ -6,8 +6,8 @@ import time
 
 from bench.config import (
     SFUS, SFU_CONTAINER_NAME, WEB_CONTAINER_NAME, JITSI_IMAGE_TAG,
-    CALLZIP_SENDER_CONTAINER, CALLZIP_SENDER_LOAD_CONTAINER,
-    CALLZIP_VIEWER_CONTAINER, WRP_CONTAINER_NAME,
+    RTCBENCH_SENDER_CONTAINER, RTCBENCH_SENDER_LOAD_CONTAINER,
+    RTCBENCH_VIEWER_CONTAINER, WRP_CONTAINER_NAME,
     REMOTE_IVF_DIR,
     data_ip,
 )
@@ -18,7 +18,7 @@ log = logging.getLogger("bench")
 _BENCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARIES_DIR = os.path.join(_BENCH_DIR, "binaries")
 IVF_DIR = os.path.join(_BENCH_DIR, "ivf")
-REMOTE_CALLZIP_BIN = "/tmp/bench-bin/call.zip"
+REMOTE_RTCBENCH_BIN = "/tmp/bench-bin/rtcbench"
 REMOTE_LIVEKIT_BIN = "/tmp/bench-bin/livekit-server"
 
 
@@ -26,7 +26,7 @@ def setup_machines(ssh, cluster):
     """Push binaries and IVF files to all remote machines.
 
     Copies:
-      - call.zip binary   -> sender/viewer machines at REMOTE_CALLZIP_BIN
+      - rtcbench binary   -> sender/viewer machines at REMOTE_RTCBENCH_BIN
       - livekit-server    -> SFU machines at REMOTE_LIVEKIT_BIN
       - IVF files         -> sender machines at REMOTE_IVF_DIR
     """
@@ -34,25 +34,25 @@ def setup_machines(ssh, cluster):
     viewer_hosts = [cluster["viewer"]] if "viewer" in cluster else []
     sfu_hosts = list(cluster.get("sfu", []))
 
-    callzip_bin = os.path.join(BINARIES_DIR, "call.zip")
+    rtcbench_bin = os.path.join(BINARIES_DIR, "rtcbench")
     livekit_bin = os.path.join(BINARIES_DIR, "livekit-server")
 
-    if not os.path.exists(callzip_bin):
+    if not os.path.exists(rtcbench_bin):
         raise FileNotFoundError(
-            f"call.zip binary not found at {callzip_bin}. "
+            f"rtcbench binary not found at {rtcbench_bin}. "
             "Build with: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "
-            "go build -o bench/binaries/call.zip ./cmd/call.zip")
+            "go build -o bench/binaries/rtcbench ./cmd/rtcbench")
     if not os.path.exists(livekit_bin):
         raise FileNotFoundError(
             f"livekit-server binary not found at {livekit_bin}. "
             "Copy from docker/livekit/livekit-server")
 
-    # Push call.zip to sender and viewer machines
+    # Push rtcbench to sender and viewer machines
     for host in set(sender_hosts + viewer_hosts):
-        log.info("Pushing call.zip binary to %s", host)
-        ssh.run(host, f"mkdir -p {os.path.dirname(REMOTE_CALLZIP_BIN)}", timeout=10)
-        ssh.rsync_to(host, callzip_bin, REMOTE_CALLZIP_BIN)
-        ssh.run(host, f"chmod +x {REMOTE_CALLZIP_BIN}", timeout=10)
+        log.info("Pushing rtcbench binary to %s", host)
+        ssh.run(host, f"mkdir -p {os.path.dirname(REMOTE_RTCBENCH_BIN)}", timeout=10)
+        ssh.rsync_to(host, rtcbench_bin, REMOTE_RTCBENCH_BIN)
+        ssh.run(host, f"chmod +x {REMOTE_RTCBENCH_BIN}", timeout=10)
 
     # Push livekit-server to SFU machines
     for host in sfu_hosts:
@@ -97,13 +97,13 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
         ssh.run(sfu_host,
                 f"docker run -d --name {SFU_CONTAINER_NAME} --network host "
                 "--ulimit nofile=65536:65536 "
-                "callzip-janus:latest", timeout=60)
+                "rtcbench-janus:latest", timeout=60)
         ssh.run(sfu_host,
                 "for i in $(seq 30); do curl -sf http://localhost:8088/janus/info >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1",
                 timeout=60)
         ssh.run(sfu_host,
                 f"docker run -d --name {WEB_CONTAINER_NAME} --network host "
-                "callzip-janus-web:latest", timeout=30)
+                "rtcbench-janus-web:latest", timeout=30)
     elif sfu_name == "livekit":
         # Maximize UDP socket buffers so all ICE sockets get 128 MB receive
         # buffers — prevents kernel drops at S=200+ (which caused GCC to
@@ -150,7 +150,7 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
         ssh.run(sfu_host,
                 f"docker rm -f {WEB_CONTAINER_NAME} 2>/dev/null || true; "
                 f"docker run -d --name {WEB_CONTAINER_NAME} --network host "
-                f"callzip-livekit-web:latest",
+                f"rtcbench-livekit-web:latest",
                 check=False, timeout=30)
         # Force all ICE/media onto the data plane. Without this, Pion
         # gathers candidates from all interfaces and may route media
@@ -177,13 +177,13 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
                 f"-e DOMAIN={announced} "
                 f"-e MEDIASOUP_ANNOUNCED_ADDRESS={announced} "
                 "-e INITIAL_OUTGOING_BITRATE=500000000 "
-                "callzip-mediasoup:latest", timeout=60)
+                "rtcbench-mediasoup:latest", timeout=60)
         ssh.run(sfu_host,
                 f"for i in $(seq 60); do curl -kso /dev/null https://localhost:{ws_port}/ 2>&1 && exit 0; sleep 1; done; exit 1",
                 timeout=90)
         ssh.run(sfu_host,
                 f"docker run -d --name {WEB_CONTAINER_NAME} --network host "
-                "callzip-mediasoup-web:latest", timeout=30)
+                "rtcbench-mediasoup-web:latest", timeout=30)
     log.info("SFU %s is up on %s", sfu_name, sfu_host)
 
 
@@ -267,13 +267,13 @@ def _start_jitsi(ssh, cluster):
     )
     ssh.run(prosody_ip,
             f"docker run -d --name {C_WEB} --network host "
-            f"{web_env} callzip-jitsi-web:latest", timeout=60)
+            f"{web_env} rtcbench-jitsi-web:latest", timeout=60)
     # Start the bench-specific Jitsi web page (port 8080) for webrtcperf/chromium senders.
     # Uses lib-jitsi-meet directly without simulcast, unlike the full jitsi-meet React app.
     ssh.run(prosody_ip,
             "docker rm -f bench-jitsi-sender-web 2>/dev/null || true; "
             "docker run -d --name bench-jitsi-sender-web --network host "
-            "callzip-jitsi-bench-web:latest",
+            "rtcbench-jitsi-bench-web:latest",
             check=False, timeout=30)
     log.info("Jitsi-Web started on %s", prosody_ip)
 
@@ -491,7 +491,7 @@ def cleanup(ssh, cluster):
     for host in hosts:
         try:
             ssh.run(host,
-                    "pkill -f 'call.zip' 2>/dev/null || true; "
+                    "pkill -f 'rtcbench' 2>/dev/null || true; "
                     "pkill -f 'livekit-server' 2>/dev/null || true; "
                     "rm -f /tmp/livekit.pid",
                     check=False, timeout=15)

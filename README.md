@@ -1,7 +1,9 @@
-# [call.zip](https://call.zip) [![CI](https://github.com/ioqr/call.zip/actions/workflows/ci.yml/badge.svg)](https://github.com/ioqr/call.zip/actions/workflows/ci.yml)
+![rtcbench-logo](docs/media/logo.svg)
 
-Stress test large video calls using lightweight viewer bots.  
-Compatible with Jicofo and JVB (using VP9 SVC codec) to test Jitsi Meet conferences over LAN.
+[![CI](https://github.com/rtcbench/rtcbench/actions/workflows/ci.yml/badge.svg)](https://github.com/rtcbench/rtcbench/actions/workflows/ci.yml)
+
+Benchmark large WebRTC video conferences using lightweight participant bots across multiple platforms (Jitsi, LiveKit, ...). Very light on CPU usage compared to Chrome.
+
 
 ### Getting started
 
@@ -9,10 +11,10 @@ Launch 250 viewer bots with:
 
 ```bash
 make
-./call.zip example/jitsi/250-viewer-bots.yml
+./rtcbench config-examples/jitsi/250-viewer-bots.yml
 ```
 
-[Go 1.24 or newer](https://go.dev) is required.
+[Go 1.25 or newer](https://go.dev) is required.
 
 ### Contribution
 
@@ -22,6 +24,6 @@ Created by [Evan Ram](https://linkedin.com/in/evanram) in the [Internet Systems 
 
 This software is intended solely for legitimate testing and research purposes.
 
-The authors and distributors of call.zip do not condone or support any use of this tool to conduct denial‑of‑service attacks, disrupt services, or otherwise violate the laws of any jurisdiction.  Users are responsible for ensuring that their use complies with all applicable regulations and the terms of service of the target system.
+The authors and distributors of rtcbench do not condone or support any use of this tool to conduct denial‑of‑service attacks, disrupt services, or otherwise violate the laws of any jurisdiction.  Users are responsible for ensuring that their use complies with all applicable regulations and the terms of service of the target system.
 
-By downloading, building, or running call.zip, you acknowledge that you understand these restrictions and agree to use the software only in lawful and authorized contexts.
+By downloading, building, or running rtcbench, you acknowledge that you understand these restrictions and agree to use the software only in lawful and authorized contexts.

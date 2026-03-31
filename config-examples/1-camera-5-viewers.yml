@@ -1,4 +1,4 @@
-apiVersion: call.zip/v1
+apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
   name: 1-camera-5-viewers
@@ -31,7 +31,7 @@ spec:
       allowInsecureHttps: true
   logging:
     console: true
-    directory: '/var/log/call-zip'
+    directory: '/var/log/rtcbench'
     streams:
       - name: general
         level: info

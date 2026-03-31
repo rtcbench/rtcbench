@@ -4,7 +4,7 @@
 #   1 sender, 1 SFU, 1 receiver (normalizes all SFUs to same receiver count)
 #   Jitsi uses 3 machines for SFU components, same single receiver.
 
-ssh_key: ~/.ssh/id_callzip
+ssh_key: ~/.ssh/id_rtcbench
 ssh_user: ubuntu-server
 
 sender: 192.168.10.11
@@ -49,6 +49,6 @@ min_fps: 20.0
 
 # Binary search upper bounds per client type
 initial_hi:
-  callzip: 5000
+  rtcbench: 5000
   webrtcperf: 200
   chromium: 200

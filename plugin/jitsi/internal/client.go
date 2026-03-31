@@ -3,29 +3,29 @@ package jitsi
 import (
 	"fmt"
 
-	"call.zip"
-	ivfpkg "call.zip/pkg/ivf"
-	"call.zip/pkg/log"
+	"github.com/rtcbench/rtcbench"
+	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
+	"github.com/rtcbench/rtcbench/pkg/log"
 )
 
 type Client struct {
-	pipeline           *call.StatsPipeline
+	pipeline           *rtcbench.StatsPipeline
 	log                *log.Logger
 	serverIP           string
 	clientIP           string
 	statsBufferSize    int
 	packetCaptureDir   string
-	svcConfig          call.SVCCameraConfig
+	svcConfig          rtcbench.SVCCameraConfig
 	enableRecording    bool
 	recordingDirectory string
 }
 
-func NewClient(e call.PluginEnv) (*Client, error) {
+func NewClient(e rtcbench.PluginEnv) (*Client, error) {
 	cfg := e.Config()
 
-	pipeline := call.NewStatsPipeline(e)
+	pipeline := rtcbench.NewStatsPipeline(e)
 
-	pcapDir, pcapErr := call.SetupPacketCaptureDir(cfg.Spec.Conference.PacketCapture)
+	pcapDir, pcapErr := rtcbench.SetupPacketCaptureDir(cfg.Spec.Conference.PacketCapture)
 	if pcapErr != nil {
 		return nil, fmt.Errorf("jitsi: %w", pcapErr)
 	}

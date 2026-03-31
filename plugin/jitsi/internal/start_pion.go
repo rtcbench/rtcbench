@@ -6,11 +6,11 @@ import (
 	"regexp"
 	"strings"
 
-	"call.zip/pkg/gcc"
-	ivfpkg "call.zip/pkg/ivf"
-	pionpkg "call.zip/pkg/pion"
-	"call.zip/pkg/viewer"
-	"call.zip/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/pkg/gcc"
+	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
+	pionpkg "github.com/rtcbench/rtcbench/pkg/pion"
+	"github.com/rtcbench/rtcbench/pkg/viewer"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )

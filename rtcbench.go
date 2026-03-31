@@ -1,4 +1,4 @@
-package call
+package rtcbench
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"call.zip/pkg/ivf"
-	"call.zip/pkg/log"
-	"call.zip/pkg/viewer"
-	"call.zip/pkg/vp9_stats"
+	"github.com/rtcbench/rtcbench/pkg/ivf"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/viewer"
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 	"github.com/google/uuid"
 )
 

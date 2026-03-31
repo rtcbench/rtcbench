@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"call.zip/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 )
 
 type HostCandidate struct {

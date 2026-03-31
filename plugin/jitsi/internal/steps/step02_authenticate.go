@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"call.zip/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 )
 
 // Step02_Authenticate sends the SASL auth request (ANONYMOUS) and checks for success.

@@ -5,9 +5,9 @@ import (
 	"path"
 	"sync"
 
-	"call.zip/pkg/log"
-	"call.zip/pkg/vp9"
-	"call.zip/pkg/vp9_stats"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/vp9"
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 	"github.com/pion/webrtc/v4"
 )
 

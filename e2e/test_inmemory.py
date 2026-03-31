@@ -9,7 +9,7 @@ import pytest
 
 from helpers import (
     JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK, MEDIASOUP_NETWORK,
-    PLUGIN_ENV, callzip_run, poll_health, record_result,
+    PLUGIN_ENV, rtcbench_run, poll_health, record_result,
 )
 
 CONFIG = "smoke-2s2v.yml"
@@ -17,7 +17,7 @@ CONFIG = "smoke-2s2v.yml"
 
 def _run_inmemory(plugin, network, min_active, timeout, test_video_dir):
     env = {**PLUGIN_ENV[plugin], "ENABLE_IN_MEMORY_CAMERA": "true"}
-    with callzip_run(CONFIG, test_video_dir, network=network, env=env) as (url, _proc):
+    with rtcbench_run(CONFIG, test_video_dir, network=network, env=env) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:

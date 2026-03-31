@@ -2,7 +2,7 @@
 # Cluster configs reference this via: project: project.yml
 
 remote:
-  workdir: ~/call.zip
+  workdir: ~/rtcbench
 
 ssh:
   key: ~/.ssh/id_ed25519
@@ -14,7 +14,7 @@ rsync:
     - "target/"
     - "__pycache__/"
     - "e2e/screenshots/*/"
-    - "/call.zip"
+    - "/rtcbench"
     - ".idea/"
     - ".vscode/"
     - "*.exe"
@@ -23,11 +23,11 @@ rsync:
     - "bench/"
 
 discover:
-  command: "docker run --rm -v {root}:{root} -w {root} callzip-e2e-runner:latest -m pytest e2e/ --collect-only -q"
+  command: "docker run --rm -v {root}:{root} -w {root} rtcbench-e2e-runner:latest -m pytest e2e/ --collect-only -q"
   group_regex: "(janus|jitsi|livekit)"
 
 run:
-  command: "make _e2e-run PYTEST_ARGS='{tests} -v --durations=0 --basetemp=/tmp/pytest-callzip-{group} --tb=short'"
+  command: "make _e2e-run PYTEST_ARGS='{tests} -v --durations=0 --basetemp=/tmp/pytest-rtcbench-{group} --tb=short'"
   duration_regex: "\\s*([\\d.]+)s call\\s+(.+)"
 
 seed:

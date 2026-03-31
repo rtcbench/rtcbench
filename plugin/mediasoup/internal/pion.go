@@ -3,9 +3,9 @@ package internal
 import (
 	"fmt"
 
-	"call.zip/pkg/gcc"
-	"call.zip/pkg/log"
-	pionpkg "call.zip/pkg/pion"
+	"github.com/rtcbench/rtcbench/pkg/gcc"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	pionpkg "github.com/rtcbench/rtcbench/pkg/pion"
 	"github.com/pion/webrtc/v4"
 )
 

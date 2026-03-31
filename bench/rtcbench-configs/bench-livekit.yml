@@ -1,9 +1,9 @@
-apiVersion: call.zip/v1
+apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
-  name: bench-janus
+  name: bench-livekit
 spec:
-  plugin: janus
+  plugin: livekit
   conference:
     name: room-1234
     usersPerRoom: $env:VIEWERS_PER_ROOM=10
@@ -13,9 +13,10 @@ spec:
     joinPolicy:
       concurrency: $env:VIEWERS_PER_ROOM=10
   pluginConfig:
-    janus:
-      _serverRoot: 'http://{{spec.network.serverIP}}:8088/janus'
-      allowInsecureHttps: false
+    livekit:
+      _wsURL: 'ws://{{spec.network.serverIP}}:7880'
+      apiKey: devkey
+      apiSecret: secret
   network:
     serverIP: $env:SERVER_IP
   metrics:

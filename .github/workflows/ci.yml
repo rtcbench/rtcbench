@@ -33,21 +33,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build call.zip image
+      - name: Build rtcbench image
         uses: docker/build-push-action@v5
         with:
           context: .
           load: true
-          tags: callzip:latest
-          cache-from: type=gha,scope=callzip
-          cache-to: type=gha,mode=max,scope=callzip
+          tags: rtcbench:latest
+          cache-from: type=gha,scope=rtcbench
+          cache-to: type=gha,mode=max,scope=rtcbench
 
       - name: Build Janus image
         uses: docker/build-push-action@v5
         with:
           context: docker/janus
           load: true
-          tags: callzip-janus:latest
+          tags: rtcbench-janus:latest
           cache-from: type=gha,scope=janus
           cache-to: type=gha,mode=max,scope=janus
 
@@ -57,15 +57,15 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run Janus e2e tests
-        run: python -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-callzip
+        run: python -m pytest e2e/ -v -k janus --basetemp=/tmp/pytest-rtcbench
 
       - name: Show Docker logs on failure
         if: failure()
-        run: docker compose --project-name callzip-janus --profile janus logs
+        run: docker compose --project-name rtcbench-janus --profile janus logs
 
       - name: Cleanup
         if: always()
-        run: docker compose --project-name callzip-janus --profile janus down -v
+        run: docker compose --project-name rtcbench-janus --profile janus down -v
 
   e2e-jitsi:
     name: e2e – Jitsi
@@ -77,21 +77,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build call.zip image
+      - name: Build rtcbench image
         uses: docker/build-push-action@v5
         with:
           context: .
           load: true
-          tags: callzip:latest
-          cache-from: type=gha,scope=callzip
-          cache-to: type=gha,mode=max,scope=callzip
+          tags: rtcbench:latest
+          cache-from: type=gha,scope=rtcbench
+          cache-to: type=gha,mode=max,scope=rtcbench
 
       - name: Build Jitsi web image
         uses: docker/build-push-action@v5
         with:
           context: docker/jitsi
           load: true
-          tags: callzip-jitsi-web:latest
+          tags: rtcbench-jitsi-web:latest
           cache-from: type=gha,scope=jitsi-web
           cache-to: type=gha,mode=max,scope=jitsi-web
 
@@ -101,15 +101,15 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run Jitsi e2e tests
-        run: python -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-callzip
+        run: python -m pytest e2e/ -v -k jitsi --basetemp=/tmp/pytest-rtcbench
 
       - name: Show Docker logs on failure
         if: failure()
-        run: docker compose --project-name callzip-jitsi --profile jitsi logs
+        run: docker compose --project-name rtcbench-jitsi --profile jitsi logs
 
       - name: Cleanup
         if: always()
-        run: docker compose --project-name callzip-jitsi --profile jitsi down -v
+        run: docker compose --project-name rtcbench-jitsi --profile jitsi down -v
 
   e2e-livekit:
     name: e2e – LiveKit
@@ -121,21 +121,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build call.zip image
+      - name: Build rtcbench image
         uses: docker/build-push-action@v5
         with:
           context: .
           load: true
-          tags: callzip:latest
-          cache-from: type=gha,scope=callzip
-          cache-to: type=gha,mode=max,scope=callzip
+          tags: rtcbench:latest
+          cache-from: type=gha,scope=rtcbench
+          cache-to: type=gha,mode=max,scope=rtcbench
 
       - name: Build LiveKit image
         uses: docker/build-push-action@v5
         with:
           context: docker/livekit
           load: true
-          tags: callzip-livekit:latest
+          tags: rtcbench-livekit:latest
           cache-from: type=gha,scope=livekit
           cache-to: type=gha,mode=max,scope=livekit
 
@@ -145,15 +145,15 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run LiveKit e2e tests
-        run: python -m pytest e2e/ -v -k livekit --basetemp=/tmp/pytest-callzip
+        run: python -m pytest e2e/ -v -k livekit --basetemp=/tmp/pytest-rtcbench
 
       - name: Show Docker logs on failure
         if: failure()
-        run: docker compose --project-name callzip-livekit --profile livekit logs
+        run: docker compose --project-name rtcbench-livekit --profile livekit logs
 
       - name: Cleanup
         if: always()
-        run: docker compose --project-name callzip-livekit --profile livekit down -v
+        run: docker compose --project-name rtcbench-livekit --profile livekit down -v
 
   e2e-mediasoup:
     name: e2e – Mediasoup
@@ -165,21 +165,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build call.zip image
+      - name: Build rtcbench image
         uses: docker/build-push-action@v5
         with:
           context: .
           load: true
-          tags: callzip:latest
-          cache-from: type=gha,scope=callzip
-          cache-to: type=gha,mode=max,scope=callzip
+          tags: rtcbench:latest
+          cache-from: type=gha,scope=rtcbench
+          cache-to: type=gha,mode=max,scope=rtcbench
 
       - name: Build Mediasoup image
         uses: docker/build-push-action@v5
         with:
           context: docker/mediasoup
           load: true
-          tags: callzip-mediasoup:latest
+          tags: rtcbench-mediasoup:latest
           cache-from: type=gha,scope=mediasoup
           cache-to: type=gha,mode=max,scope=mediasoup
 
@@ -189,12 +189,12 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run Mediasoup e2e tests
-        run: python -m pytest e2e/ -v -k mediasoup --basetemp=/tmp/pytest-callzip
+        run: python -m pytest e2e/ -v -k mediasoup --basetemp=/tmp/pytest-rtcbench
 
       - name: Show Docker logs on failure
         if: failure()
-        run: docker compose --project-name callzip-mediasoup --profile mediasoup logs
+        run: docker compose --project-name rtcbench-mediasoup --profile mediasoup logs
 
       - name: Cleanup
         if: always()
-        run: docker compose --project-name callzip-mediasoup --profile mediasoup down -v
+        run: docker compose --project-name rtcbench-mediasoup --profile mediasoup down -v

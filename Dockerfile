@@ -6,7 +6,7 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags="-s -w" -o /call.zip ./cmd/call.zip \
+    go build -trimpath -ldflags="-s -w" -o /rtcbench ./cmd/rtcbench \
  && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /ivf-svc ./cmd/ivf-svc
 
@@ -23,9 +23,9 @@ RUN apt-get update \
       iproute2 \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /call.zip /usr/local/bin/call.zip
+COPY --from=builder /rtcbench /usr/local/bin/rtcbench
 COPY --from=builder /ivf-svc /usr/local/bin/ivf-svc
 
-RUN mkdir -p /var/log/call-zip /test-videos
+RUN mkdir -p /var/log/rtcbench /test-videos
 
-ENTRYPOINT ["/usr/local/bin/call.zip"]
+ENTRYPOINT ["/usr/local/bin/rtcbench"]

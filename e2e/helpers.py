@@ -1,8 +1,8 @@
 """
-Shared helpers for call.zip e2e tests.
+Shared helpers for rtcbench e2e tests.
 
 Infrastructure (janus/jitsi) runs in Docker Compose (fixtures in conftest.py).
-call.zip itself runs as a Docker container per test, joined to the infra network.
+rtcbench itself runs as a Docker container per test, joined to the infra network.
 """
 import contextlib
 import subprocess
@@ -18,14 +18,14 @@ REPO_ROOT = Path(__file__).parent.parent
 
 # Each plugin gets its own compose project so parallel runs don't fight over
 # the same project state or network.
-JANUS_PROJECT = "callzip-janus"
-JITSI_PROJECT = "callzip-jitsi"
-LIVEKIT_PROJECT = "callzip-livekit"
-MEDIASOUP_PROJECT = "callzip-mediasoup"
-JANUS_NETWORK = f"{JANUS_PROJECT}_callzip-net"                     # 172.20.0.0/24
-JITSI_NETWORK = f"{JITSI_PROJECT}_callzip-jitsi-net"              # 172.21.0.0/24
-LIVEKIT_NETWORK = f"{LIVEKIT_PROJECT}_callzip-livekit-net"         # 172.22.0.0/24
-MEDIASOUP_NETWORK = f"{MEDIASOUP_PROJECT}_callzip-mediasoup-net"   # 172.23.0.0/24
+JANUS_PROJECT = "rtcbench-janus"
+JITSI_PROJECT = "rtcbench-jitsi"
+LIVEKIT_PROJECT = "rtcbench-livekit"
+MEDIASOUP_PROJECT = "rtcbench-mediasoup"
+JANUS_NETWORK = f"{JANUS_PROJECT}_rtcbench-net"                     # 172.20.0.0/24
+JITSI_NETWORK = f"{JITSI_PROJECT}_rtcbench-jitsi-net"              # 172.21.0.0/24
+LIVEKIT_NETWORK = f"{LIVEKIT_PROJECT}_rtcbench-livekit-net"         # 172.22.0.0/24
+MEDIASOUP_NETWORK = f"{MEDIASOUP_PROJECT}_rtcbench-mediasoup-net"   # 172.23.0.0/24
 
 # Environment variables needed by the generic ci/ smoke configs ($env: substitution).
 PLUGIN_ENV = {
@@ -153,7 +153,7 @@ def poll_health_svc(
 
 
 @contextlib.contextmanager
-def callzip_run(
+def rtcbench_run(
     config,
     video_dir: Path,
     network: str,
@@ -163,7 +163,7 @@ def callzip_run(
     cap_add: list = None,
 ):
     """
-    Start call.zip in a Docker container joined to the given Docker network.
+    Start rtcbench in a Docker container joined to the given Docker network.
 
     config: str filename (resolved under ci/, e.g. "janus-smoke.yml")
             OR absolute Path to a YAML file (used for recording tests with overrides).
@@ -177,7 +177,7 @@ def callzip_run(
     Yields (health_url, container_name, proc).
     On exit: stops the container, waits for the process, prints captured output.
     """
-    name = f"callzip-e2e-{uuid.uuid4().hex[:8]}"
+    name = f"rtcbench-e2e-{uuid.uuid4().hex[:8]}"
     config = Path(config)
 
     if config.is_absolute():
@@ -210,7 +210,7 @@ def callzip_run(
         cmd += ["-v", f"{recording_dir}:/tmp/recordings"]
     if capture_dir is not None:
         cmd += ["-v", f"{capture_dir}:/tmp/captures"]
-    cmd += ["callzip:latest", container_config]
+    cmd += ["rtcbench:latest", container_config]
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     proc.container_name = name  # attach container name for callers that need docker exec
@@ -233,7 +233,7 @@ def callzip_run(
         subprocess.run(["docker", "stop", name], capture_output=True, timeout=15)
         out, _ = proc.communicate(timeout=15)
         if out:
-            print(f"\n--- callzip output ({config.name}) ---\n{out}---")
+            print(f"\n--- rtcbench output ({config.name}) ---\n{out}---")
 
 
 def apply_bandwidth_limit(container_name: str, rate_kbit: int) -> None:
@@ -310,7 +310,7 @@ def build_pcap_config(base_config_name: str) -> Path:
         "directory": "/tmp/captures",
     }
     tmp = tempfile.NamedTemporaryFile(
-        suffix=".yml", delete=False, mode="w", prefix="callzip-e2e-pcap-", dir="/tmp"
+        suffix=".yml", delete=False, mode="w", prefix="rtcbench-e2e-pcap-", dir="/tmp"
     )
     yaml.dump(cfg, tmp)
     tmp.close()
@@ -329,7 +329,7 @@ def build_recording_config(base_config_name: str) -> Path:
     cfg["spec"]["conference"]["recording"]["enabled"] = True
     cfg["spec"]["conference"]["recording"]["directory"] = "/tmp/recordings"
     tmp = tempfile.NamedTemporaryFile(
-        suffix=".yml", delete=False, mode="w", prefix="callzip-e2e-", dir="/tmp"
+        suffix=".yml", delete=False, mode="w", prefix="rtcbench-e2e-", dir="/tmp"
     )
     yaml.dump(cfg, tmp)
     tmp.close()

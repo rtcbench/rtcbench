@@ -6,12 +6,12 @@ import (
 	"net/url"
 	"time"
 
-	ivfpkg "call.zip/pkg/ivf"
-	"call.zip/pkg/log"
-	"call.zip/plugin/jitsi/internal/httpxml"
-	"call.zip/plugin/jitsi/internal/model"
-	"call.zip/plugin/jitsi/internal/sdp_tmpl"
-	"call.zip/plugin/jitsi/internal/steps"
+	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/httpxml"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/sdp_tmpl"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/steps"
 	"github.com/google/uuid"
 )
 

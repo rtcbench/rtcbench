@@ -1,9 +1,9 @@
 package model
 
 import (
-	"call.zip/pkg/ivf"
-	"call.zip/pkg/log"
-	"call.zip/plugin/jitsi/internal/httpxml"
+	"github.com/rtcbench/rtcbench/pkg/ivf"
+	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/httpxml"
 )
 
 // ConnectionState is an object built by the signaling flow

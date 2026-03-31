@@ -8,10 +8,10 @@ VERSION := $(shell git describe --tags --always --dirty)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 all:
-	go build -v $(LDFLAGS) ./cmd/call.zip
+	go build -v $(LDFLAGS) ./cmd/rtcbench
 
 install:
-	go install -v $(LDFLAGS) ./cmd/call.zip
+	go install -v $(LDFLAGS) ./cmd/rtcbench
 
 test:
 	go vet ./...
@@ -20,12 +20,12 @@ test:
 # ---------------------------------------------------------------------------
 # e2e tests (Python/pytest)
 # ---------------------------------------------------------------------------
-# Infrastructure (janus/jitsi/livekit) runs in Docker Compose; call.zip runs
+# Infrastructure (janus/jitsi/livekit) runs in Docker Compose; rtcbench runs
 # as a per-test Docker container managed by pytest fixtures. New scenarios are
 # discovered automatically — no Makefile changes required.
 
-E2E_RUNNER := callzip-e2e-runner:latest
-BASETEMP := /tmp/pytest-callzip
+E2E_RUNNER := rtcbench-e2e-runner:latest
+BASETEMP := /tmp/pytest-rtcbench
 E2E_RUN := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(CURDIR):$(CURDIR) -v /tmp:/tmp --network host -w $(CURDIR) $(E2E_RUNNER)
 
 _build-e2e-runner:
@@ -57,34 +57,34 @@ screenshots: _build-all _build-e2e-runner
 	$(E2E_RUN) -m pytest e2e/test_screenshot.py -v -n auto --dist=loadgroup --basetemp=$(BASETEMP)
 	$(eval FOLDER := $(shell date +%Y%m%d-%H%M%S))
 	mkdir -p $(SCREENSHOTS_DIR)/$(FOLDER)/janus $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi $(SCREENSHOTS_DIR)/$(FOLDER)/livekit
-	cp /tmp/pytest-callzip/popen-gw*/test_janus_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/janus/ 2>/dev/null || true
-	cp /tmp/pytest-callzip/popen-gw*/test_jitsi_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi/ 2>/dev/null || true
-	cp /tmp/pytest-callzip/popen-gw*/test_livekit_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/livekit/ 2>/dev/null || true
+	cp /tmp/pytest-rtcbench/popen-gw*/test_janus_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/janus/ 2>/dev/null || true
+	cp /tmp/pytest-rtcbench/popen-gw*/test_jitsi_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi/ 2>/dev/null || true
+	cp /tmp/pytest-rtcbench/popen-gw*/test_livekit_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/livekit/ 2>/dev/null || true
 	@echo "Screenshots saved to $(SCREENSHOTS_DIR)/$(FOLDER)/"
 	@echo "View at http://$$(hostname -I | awk '{print $$1}'):8099/verify.html?dir=$(FOLDER)"
 
 _build-all:
-	docker build -t callzip:latest .
-	docker build -t callzip-janus:latest docker/janus
-	docker build -t callzip-jitsi-web:latest docker/jitsi
-	docker build -t callzip-livekit:latest docker/livekit
-	docker build -t callzip-mediasoup:latest docker/mediasoup
+	docker build -t rtcbench:latest .
+	docker build -t rtcbench-janus:latest docker/janus
+	docker build -t rtcbench-jitsi-web:latest docker/jitsi
+	docker build -t rtcbench-livekit:latest docker/livekit
+	docker build -t rtcbench-mediasoup:latest docker/mediasoup
 
 _build-janus:
-	docker build -t callzip:latest .
-	docker build -t callzip-janus:latest docker/janus
+	docker build -t rtcbench:latest .
+	docker build -t rtcbench-janus:latest docker/janus
 
 _build-jitsi:
-	docker build -t callzip:latest .
-	docker build -t callzip-jitsi-web:latest docker/jitsi
+	docker build -t rtcbench:latest .
+	docker build -t rtcbench-jitsi-web:latest docker/jitsi
 
 _build-livekit:
-	docker build -t callzip:latest .
-	docker build -t callzip-livekit:latest docker/livekit
+	docker build -t rtcbench:latest .
+	docker build -t rtcbench-livekit:latest docker/livekit
 
 _build-mediasoup:
-	docker build -t callzip:latest .
-	docker build -t callzip-mediasoup:latest docker/mediasoup
+	docker build -t rtcbench:latest .
+	docker build -t rtcbench-mediasoup:latest docker/mediasoup
 
 # ---------------------------------------------------------------------------
 # Remote distributed e2e (via ssh-parallel-test)
@@ -128,18 +128,18 @@ ci:
 	$(MAKE) test e2e
 
 clean-ci:
-	docker compose --project-name callzip-janus --profile janus down -v --remove-orphans 2>/dev/null || true
-	docker compose --project-name callzip-jitsi --profile jitsi down -v --remove-orphans 2>/dev/null || true
-	docker compose --project-name callzip-livekit --profile livekit down -v --remove-orphans 2>/dev/null || true
-	docker compose --project-name callzip-mediasoup --profile mediasoup down -v --remove-orphans 2>/dev/null || true
-	docker rmi -f callzip:latest callzip-janus:latest callzip-jitsi-web:latest callzip-livekit:latest callzip-mediasoup:latest callzip-e2e-runner:latest 2>/dev/null || true
+	docker compose --project-name rtcbench-janus --profile janus down -v --remove-orphans 2>/dev/null || true
+	docker compose --project-name rtcbench-jitsi --profile jitsi down -v --remove-orphans 2>/dev/null || true
+	docker compose --project-name rtcbench-livekit --profile livekit down -v --remove-orphans 2>/dev/null || true
+	docker compose --project-name rtcbench-mediasoup --profile mediasoup down -v --remove-orphans 2>/dev/null || true
+	docker rmi -f rtcbench:latest rtcbench-janus:latest rtcbench-jitsi-web:latest rtcbench-livekit:latest rtcbench-mediasoup:latest rtcbench-e2e-runner:latest 2>/dev/null || true
 	sudo rm -rf $(BASETEMP)
 
 clean-screenshots:
 	rm -rf e2e/screenshots/*/
 
 clean:
-	rm -f call.zip call.zip.exe
+	rm -f rtcbench rtcbench.exe
 	go clean -cache
 	go clean -testcache
 	go clean -modcache

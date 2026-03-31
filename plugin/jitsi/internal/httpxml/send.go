@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"runtime"
 
-	"call.zip/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/tdewolff/minify"
 	"github.com/tdewolff/minify/xml"
 )

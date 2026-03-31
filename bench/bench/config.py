@@ -6,7 +6,7 @@ import sys
 
 # SFU and client types
 SFUS = ["janus", "jitsi", "livekit", "mediasoup"]
-CLIENTS = ["callzip", "webrtcperf", "chromium"]
+CLIENTS = ["rtcbench", "webrtcperf", "chromium"]
 
 # WebRTCPerf
 WRP_IMAGE = "ghcr.io/vpalmisano/webrtcperf:devel"
@@ -46,11 +46,11 @@ REMOTE_IVF_DIR = "/opt/ivf-videos"
 MODE_RECEIVER = "receiver"
 MODE_SENDER = "sender"
 
-# call.zip Docker image and container names
-CALLZIP_IMAGE = "callzip:latest"
-CALLZIP_SENDER_CONTAINER = "bench-sender"
-CALLZIP_VIEWER_CONTAINER = "bench-viewer"
-CALLZIP_SENDER_LOAD_CONTAINER = "bench-sender-load"
+# rtcbench Docker image and container names
+RTCBENCH_IMAGE = "rtcbench:latest"
+RTCBENCH_SENDER_CONTAINER = "bench-sender"
+RTCBENCH_VIEWER_CONTAINER = "bench-viewer"
+RTCBENCH_SENDER_LOAD_CONTAINER = "bench-sender-load"
 
 # Binary search bounds
 DEFAULT_MIN_R = 1
@@ -58,23 +58,23 @@ DEFAULT_MAX_R = 5000
 
 # Paths relative to cwd (bench/ is the working directory)
 RESULTS_BASE = "results"
-CALLZIP_CONFIGS_DIR = "callzip-configs"
-SENDER_CONFIG = os.path.join(CALLZIP_CONFIGS_DIR, "bench-sender.yml")
-SENDER_LOAD_CONFIG = os.path.join(CALLZIP_CONFIGS_DIR, "bench-sender-load.yml")
+RTCBENCH_CONFIGS_DIR = "rtcbench-configs"
+SENDER_CONFIG = os.path.join(RTCBENCH_CONFIGS_DIR, "bench-sender.yml")
+SENDER_LOAD_CONFIG = os.path.join(RTCBENCH_CONFIGS_DIR, "bench-sender-load.yml")
 VIEWER_CONFIGS = {
-    "janus": os.path.join(CALLZIP_CONFIGS_DIR, "bench-janus.yml"),
-    "jitsi": os.path.join(CALLZIP_CONFIGS_DIR, "bench-jitsi.yml"),
-    "livekit": os.path.join(CALLZIP_CONFIGS_DIR, "bench-livekit.yml"),
-    "mediasoup": os.path.join(CALLZIP_CONFIGS_DIR, "bench-mediasoup.yml"),
+    "janus": os.path.join(RTCBENCH_CONFIGS_DIR, "bench-janus.yml"),
+    "jitsi": os.path.join(RTCBENCH_CONFIGS_DIR, "bench-jitsi.yml"),
+    "livekit": os.path.join(RTCBENCH_CONFIGS_DIR, "bench-livekit.yml"),
+    "mediasoup": os.path.join(RTCBENCH_CONFIGS_DIR, "bench-mediasoup.yml"),
 }
 HINTS_FILE = "hints.json"
 
 # Docker compose project names
 COMPOSE_PROJECTS = {
-    "janus": "callzip-janus",
-    "jitsi": "callzip-jitsi",
-    "livekit": "callzip-livekit",
-    "mediasoup": "callzip-mediasoup",
+    "janus": "rtcbench-janus",
+    "jitsi": "rtcbench-jitsi",
+    "livekit": "rtcbench-livekit",
+    "mediasoup": "rtcbench-mediasoup",
 }
 
 COMPOSE_PROFILES = {

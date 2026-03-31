@@ -1,7 +1,7 @@
 """
 Video delivery e2e tests.
 
-Each scenario starts call.zip against a live SFU stack, polls the /health
+Each scenario starts rtcbench against a live SFU stack, polls the /health
 endpoint until all expected viewers are active with healthy bitrate and fps,
 then asserts on the result.
 
@@ -12,7 +12,7 @@ import pytest
 
 from helpers import (
     JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK, MEDIASOUP_NETWORK,
-    PLUGIN_ENV, callzip_run, poll_health, record_result,
+    PLUGIN_ENV, rtcbench_run, poll_health, record_result,
 )
 
 JANUS_SCENARIOS = [
@@ -51,7 +51,7 @@ MEDIASOUP_SCENARIOS = [
     ids=[f"janus-{s[0].removesuffix('.yml')}" for s in JANUS_SCENARIOS],
 )
 def test_janus_delivery(janus_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir, network=JANUS_NETWORK, env=PLUGIN_ENV["janus"]) as (url, _proc):
+    with rtcbench_run(config, test_video_dir, network=JANUS_NETWORK, env=PLUGIN_ENV["janus"]) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:
@@ -75,7 +75,7 @@ def test_janus_delivery(janus_infra, test_video_dir, config, min_active, timeout
     ids=[f"jitsi-{s[0].removesuffix('.yml')}" for s in JITSI_SCENARIOS],
 )
 def test_jitsi_delivery(jitsi_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir, network=JITSI_NETWORK, env=PLUGIN_ENV["jitsi"]) as (url, _proc):
+    with rtcbench_run(config, test_video_dir, network=JITSI_NETWORK, env=PLUGIN_ENV["jitsi"]) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:
@@ -99,7 +99,7 @@ def test_jitsi_delivery(jitsi_infra, test_video_dir, config, min_active, timeout
     ids=[f"livekit-{s[0].removesuffix('.yml')}" for s in LIVEKIT_SCENARIOS],
 )
 def test_livekit_delivery(livekit_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir, network=LIVEKIT_NETWORK, env=PLUGIN_ENV["livekit"]) as (url, _proc):
+    with rtcbench_run(config, test_video_dir, network=LIVEKIT_NETWORK, env=PLUGIN_ENV["livekit"]) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:
@@ -123,7 +123,7 @@ def test_livekit_delivery(livekit_infra, test_video_dir, config, min_active, tim
     ids=[f"mediasoup-{s[0].removesuffix('.yml')}" for s in MEDIASOUP_SCENARIOS],
 )
 def test_mediasoup_delivery(mediasoup_infra, test_video_dir, config, min_active, timeout):
-    with callzip_run(config, test_video_dir, network=MEDIASOUP_NETWORK, env=PLUGIN_ENV["mediasoup"]) as (url, _proc):
+    with rtcbench_run(config, test_video_dir, network=MEDIASOUP_NETWORK, env=PLUGIN_ENV["mediasoup"]) as (url, _proc):
         try:
             result = poll_health(url, timeout, min_active)
         except TimeoutError as e:

@@ -1,4 +1,4 @@
-# Remote e2e test configuration for call.zip.
+# Remote e2e test configuration for rtcbench.
 # Copy to config.yml and fill in your machine IPs.
 #
 # Requires ssh-parallel-test (git@github.com:ioqr/ssh-parallel-test.git)

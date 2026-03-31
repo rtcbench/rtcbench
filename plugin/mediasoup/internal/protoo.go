@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"call.zip/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/coder/websocket"
 )
 

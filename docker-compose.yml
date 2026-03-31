@@ -1,31 +1,31 @@
 networks:
-  # Janus uses 172.20.0.0/24 — project callzip-janus creates callzip-janus_callzip-net
-  callzip-net:
+  # Janus uses 172.20.0.0/24 — project rtcbench-janus creates rtcbench-janus_rtcbench-net
+  rtcbench-net:
     driver: bridge
     ipam:
       driver: default
       config:
         - subnet: 172.20.0.0/24
 
-  # Jitsi uses 172.21.0.0/24 — project callzip-jitsi creates callzip-jitsi_callzip-jitsi-net
+  # Jitsi uses 172.21.0.0/24 — project rtcbench-jitsi creates rtcbench-jitsi_rtcbench-jitsi-net
   # Separate subnet so both stacks can run in parallel without address conflicts.
-  callzip-jitsi-net:
+  rtcbench-jitsi-net:
     driver: bridge
     ipam:
       driver: default
       config:
         - subnet: 172.21.0.0/24
 
-  # LiveKit uses 172.22.0.0/24 — project callzip-livekit creates callzip-livekit_callzip-livekit-net
-  callzip-livekit-net:
+  # LiveKit uses 172.22.0.0/24 — project rtcbench-livekit creates rtcbench-livekit_rtcbench-livekit-net
+  rtcbench-livekit-net:
     driver: bridge
     ipam:
       driver: default
       config:
         - subnet: 172.22.0.0/24
 
-  # Mediasoup uses 172.23.0.0/24 — project callzip-mediasoup creates callzip-mediasoup_callzip-mediasoup-net
-  callzip-mediasoup-net:
+  # Mediasoup uses 172.23.0.0/24 — project rtcbench-mediasoup creates rtcbench-mediasoup_rtcbench-mediasoup-net
+  rtcbench-mediasoup-net:
     driver: bridge
     ipam:
       driver: default
@@ -37,9 +37,9 @@ services:
     profiles: [janus]
     build:
       context: docker/janus
-    image: callzip-janus:latest
+    image: rtcbench-janus:latest
     networks:
-      callzip-net:
+      rtcbench-net:
         ipv4_address: 172.20.0.10
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8088/janus/info"]
@@ -49,12 +49,12 @@ services:
       retries: 24
 
 # Network layout (172.21.0.0/24):
-#   172.21.0.20  jitsi-web      (nginx + BOSH proxy)  <- serverIP for call.zip
+#   172.21.0.20  jitsi-web      (nginx + BOSH proxy)  <- serverIP for rtcbench
 #   172.21.0.21  jitsi-prosody  (XMPP)
 #   172.21.0.22  jitsi-jicofo   (focus component)
 #   172.21.0.23  jitsi-jvb      (video bridge)
 #
-# The call.zip client hardcodes MUC as conference.<domain> and focus as focus.<domain>,
+# The rtcbench client hardcodes MUC as conference.<domain> and focus as focus.<domain>,
 # so XMPP_MUC_DOMAIN and the focus component must follow that pattern.
 
   jitsi-prosody:
@@ -74,7 +74,7 @@ services:
       - JVB_AUTH_PASSWORD=jvbsecret
       - TZ=UTC
     networks:
-      callzip-jitsi-net:
+      rtcbench-jitsi-net:
         ipv4_address: 172.21.0.21
     healthcheck:
       test: ["CMD-SHELL", "timeout 3 bash -c 'echo > /dev/tcp/localhost/5222' 2>/dev/null || exit 1"]
@@ -103,7 +103,7 @@ services:
       - JICOFO_ENABLE_HEALTH_CHECKS=true
       - TZ=UTC
     networks:
-      callzip-jitsi-net:
+      rtcbench-jitsi-net:
         ipv4_address: 172.21.0.22
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8888/about/health || exit 1"]
@@ -134,7 +134,7 @@ services:
       - JVB_TCP_HARVESTER_DISABLED=true
       - TZ=UTC
     networks:
-      callzip-jitsi-net:
+      rtcbench-jitsi-net:
         ipv4_address: 172.21.0.23
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/about/health || exit 1"]
@@ -147,7 +147,7 @@ services:
     profiles: [jitsi]
     build:
       context: docker/jitsi
-    image: callzip-jitsi-web:latest
+    image: rtcbench-jitsi-web:latest
     restart: on-failure
     depends_on:
       jitsi-jicofo:
@@ -165,7 +165,7 @@ services:
       - PUBLIC_URL=https://172.21.0.20
       - TZ=UTC
     networks:
-      callzip-jitsi-net:
+      rtcbench-jitsi-net:
         ipv4_address: 172.21.0.20
     healthcheck:
       test: ["CMD-SHELL", "curl -kso /dev/null -w '%{http_code}' https://localhost/ | grep -q '200'"]
@@ -178,9 +178,9 @@ services:
     profiles: [livekit]
     build:
       context: docker/livekit
-    image: callzip-livekit:latest
+    image: rtcbench-livekit:latest
     networks:
-      callzip-livekit-net:
+      rtcbench-livekit-net:
         ipv4_address: 172.22.0.10
     healthcheck:
       test: ["CMD-SHELL", "curl -so /dev/null http://localhost:7880/ 2>/dev/null || exit 1"]
@@ -193,12 +193,12 @@ services:
     profiles: [mediasoup]
     build:
       context: docker/mediasoup
-    image: callzip-mediasoup:latest
+    image: rtcbench-mediasoup:latest
     environment:
       - DOMAIN=172.23.0.10
       - MEDIASOUP_ANNOUNCED_ADDRESS=172.23.0.10
     networks:
-      callzip-mediasoup-net:
+      rtcbench-mediasoup-net:
         ipv4_address: 172.23.0.10
     healthcheck:
       test: ["CMD-SHELL", "curl -kso /dev/null https://localhost:4443/ || exit 1"]

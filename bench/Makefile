@@ -10,44 +10,44 @@ SSH_USER := $(shell grep ssh_user cluster.yml | awk '{print $$2}')
 SSH := ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	-o LogLevel=ERROR -o ConnectTimeout=10 -i $(SSH_KEY)
 
-# Hosts that need the callzip image (sender + receivers).
-CALLZIP_HOSTS := $(shell grep -E '^\s*(sender|-)' cluster.yml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+# Hosts that need the rtcbench image (sender + receivers).
+RTCBENCH_HOSTS := $(shell grep -E '^\s*(sender|-)' cluster.yml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
 
-.PHONY: build build-web build-callzip push-callzip bench bench-quick bench-run bench-analyze
+.PHONY: build build-web build-rtcbench push-rtcbench bench bench-quick bench-run bench-analyze
 
 build:
 	docker build -t $(IMAGE) .
 
 build-web:
-	docker build -t callzip-janus-web:latest docker/janus-web
-	docker build -t callzip-livekit-web:latest docker/livekit-web
-	docker build -t callzip-mediasoup-web:latest docker/mediasoup-web
+	docker build -t rtcbench-janus-web:latest docker/janus-web
+	docker build -t rtcbench-livekit-web:latest docker/livekit-web
+	docker build -t rtcbench-mediasoup-web:latest docker/mediasoup-web
 
-build-callzip:
-	cd $(REPO_ROOT) && docker build -t callzip:latest .
+build-rtcbench:
+	cd $(REPO_ROOT) && docker build -t rtcbench:latest .
 
 # Only push if the local image ID differs from the remote.
-push-callzip: build-callzip
-	@LOCAL_ID=$$(docker images -q callzip:latest); \
-	for host in $(CALLZIP_HOSTS); do \
-		REMOTE_ID=$$($(SSH) $(SSH_USER)@$$host docker images -q callzip:latest 2>/dev/null); \
+push-rtcbench: build-rtcbench
+	@LOCAL_ID=$$(docker images -q rtcbench:latest); \
+	for host in $(RTCBENCH_HOSTS); do \
+		REMOTE_ID=$$($(SSH) $(SSH_USER)@$$host docker images -q rtcbench:latest 2>/dev/null); \
 		if [ "$$LOCAL_ID" = "$$REMOTE_ID" ] && [ -n "$$REMOTE_ID" ]; then \
-			echo "callzip:latest up-to-date on $$host ($$LOCAL_ID)"; \
+			echo "rtcbench:latest up-to-date on $$host ($$LOCAL_ID)"; \
 		else \
-			echo "Pushing callzip:latest to $$host..."; \
-			docker save callzip:latest | $(SSH) $(SSH_USER)@$$host 'docker load && docker image prune -f > /dev/null'; \
+			echo "Pushing rtcbench:latest to $$host..."; \
+			docker save rtcbench:latest | $(SSH) $(SSH_USER)@$$host 'docker load && docker image prune -f > /dev/null'; \
 		fi; \
 	done
 
-bench-quick: build build-web push-callzip
-	$(RUN) -m bench cluster.yml --sfus janus --clients callzip,chromium --quick -v
+bench-quick: build build-web push-rtcbench
+	$(RUN) -m bench cluster.yml --sfus janus --clients rtcbench,chromium --quick -v
 
-bench: build build-web push-callzip
-	$(RUN) -m bench cluster.yml --clients callzip,chromium,webrtcperf -v
+bench: build build-web push-rtcbench
+	$(RUN) -m bench cluster.yml --clients rtcbench,chromium,webrtcperf -v
 
 # Run specific cells or custom args:
 #   make bench-run ARGS="--cells 'janus:chromium,webrtcperf;jitsi:webrtcperf' -v"
-bench-run: build build-web push-callzip
+bench-run: build build-web push-rtcbench
 	$(RUN) -m bench cluster.yml $(ARGS)
 
 # Analyze results:

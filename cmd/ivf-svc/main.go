@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"os"
 
-	"call.zip/pkg/ivf"
+	"github.com/rtcbench/rtcbench/pkg/ivf"
 )
 
 func main() {

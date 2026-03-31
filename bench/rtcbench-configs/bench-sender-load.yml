@@ -1,4 +1,4 @@
-apiVersion: call.zip/v1
+apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
   name: bench-sender-load

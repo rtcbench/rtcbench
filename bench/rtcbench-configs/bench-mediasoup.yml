@@ -1,9 +1,9 @@
-apiVersion: call.zip/v1
+apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
-  name: bench-jitsi
+  name: bench-mediasoup
 spec:
-  plugin: jitsi
+  plugin: mediasoup
   conference:
     name: room-1234
     usersPerRoom: $env:VIEWERS_PER_ROOM=10
@@ -13,9 +13,8 @@ spec:
     joinPolicy:
       concurrency: $env:VIEWERS_PER_ROOM=10
   pluginConfig:
-    jitsi:
-      _boshURL: 'https://{{spec.network.serverIP}}/http-bind'
-      _domain: '{{spec.network.serverIP}}'
+    mediasoup:
+      _serverURL: 'wss://{{spec.network.serverIP}}:4443'
   network:
     serverIP: $env:SERVER_IP
   metrics:

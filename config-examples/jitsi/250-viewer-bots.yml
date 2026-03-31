@@ -1,4 +1,4 @@
-apiVersion: call.zip/v1
+apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
   name: 250-viewer-bots
@@ -31,7 +31,7 @@ spec:
       _domain: '{{spec.network.serverIP}}'
   logging:
     console: true
-    directory: '/var/log/call-zip'
+    directory: '/var/log/rtcbench'
     streams:
       - name: general
         level: info

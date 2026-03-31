@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"call.zip/pkg/vp9"
+	"github.com/rtcbench/rtcbench/pkg/vp9"
 )
 
 const (

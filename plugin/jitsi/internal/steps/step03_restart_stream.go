@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"call.zip/plugin/jitsi/internal/model"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 )
 
 // Step03_RestartStream sends the stream restart request after SASL success.
