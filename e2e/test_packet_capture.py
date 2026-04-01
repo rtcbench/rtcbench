@@ -22,7 +22,9 @@ import pytest
 
 from helpers import (
     JANUS_NETWORK,
+    JITSI_NETWORK,
     LIVEKIT_NETWORK,
+    MEDIASOUP_NETWORK,
     PLUGIN_ENV,
     rtcbench_run,
     poll_health,
@@ -74,81 +76,67 @@ def _assert_captures(capture_dir, min_files: int):
         )
 
 
+def _run_pcap_test(infra, test_video_dir, tmp_path, base_config, network, env, min_active, min_files, timeout=120):
+    """Run a packet capture test: start rtcbench with pcap enabled, wait for
+    health, accumulate 5 s of data, then validate the pcap files."""
+    capture_dir = tmp_path / "captures"
+    capture_dir.mkdir()
+    cfg = build_pcap_config(base_config)
+    try:
+        with rtcbench_run(cfg, test_video_dir, network=network, capture_dir=capture_dir, env=env) as (url, _proc):
+            try:
+                poll_health(url, timeout=timeout, min_active=min_active)
+            except TimeoutError as e:
+                pytest.fail(str(e))
+            time.sleep(5)  # accumulate capture data
+        _assert_captures(capture_dir, min_files=min_files)
+    finally:
+        cfg.unlink(missing_ok=True)
+
+
 # ---------------------------------------------------------------------------
 # 1 sender, 1 viewer (smoke.yml = 2 users, 1 camera)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.xdist_group("janus")
 def test_janus_packet_capture_1s1v(janus_infra, test_video_dir, tmp_path):
-    capture_dir = tmp_path / "captures"
-    capture_dir.mkdir()
-    cfg = build_pcap_config("smoke.yml")
-    try:
-        with rtcbench_run(cfg, test_video_dir, network=JANUS_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
-            try:
-                poll_health(url, timeout=120, min_active=1)
-            except TimeoutError as e:
-                pytest.fail(str(e))
-            time.sleep(5)  # accumulate capture data
-        _assert_captures(capture_dir, min_files=1)
-    finally:
-        cfg.unlink(missing_ok=True)
+    _run_pcap_test(janus_infra, test_video_dir, tmp_path, "smoke.yml", JANUS_NETWORK, PLUGIN_ENV["janus"], min_active=1, min_files=1)
+
+
+@pytest.mark.xdist_group("jitsi")
+def test_jitsi_packet_capture_1s1v(jitsi_infra, test_video_dir, tmp_path):
+    _run_pcap_test(jitsi_infra, test_video_dir, tmp_path, "smoke.yml", JITSI_NETWORK, PLUGIN_ENV["jitsi"], min_active=1, min_files=1, timeout=300)
 
 
 @pytest.mark.xdist_group("livekit")
 def test_livekit_packet_capture_1s1v(livekit_infra, test_video_dir, tmp_path):
-    capture_dir = tmp_path / "captures"
-    capture_dir.mkdir()
-    cfg = build_pcap_config("smoke.yml")
-    try:
-        with rtcbench_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
-            try:
-                poll_health(url, timeout=120, min_active=1)
-            except TimeoutError as e:
-                pytest.fail(str(e))
-            time.sleep(5)
-        _assert_captures(capture_dir, min_files=1)
-    finally:
-        cfg.unlink(missing_ok=True)
+    _run_pcap_test(livekit_infra, test_video_dir, tmp_path, "smoke.yml", LIVEKIT_NETWORK, PLUGIN_ENV["livekit"], min_active=1, min_files=1)
+
+
+@pytest.mark.xdist_group("mediasoup")
+def test_mediasoup_packet_capture_1s1v(mediasoup_infra, test_video_dir, tmp_path):
+    _run_pcap_test(mediasoup_infra, test_video_dir, tmp_path, "smoke.yml", MEDIASOUP_NETWORK, PLUGIN_ENV["mediasoup"], min_active=1, min_files=1)
 
 
 # ---------------------------------------------------------------------------
-# 3 senders, 2 viewers (smoke-2s3v.yml = 5 users, 2 cameras -> actually 2s3v)
-# We use smoke-1s3v.yml for a simpler 1s3v case: 1 sender + 3 viewers = 3 pcap files
+# 2 senders, 3 viewers (smoke-2s3v.yml): each viewer gets 2 tracks -> 6 pcap files
 # ---------------------------------------------------------------------------
 
 @pytest.mark.xdist_group("janus")
 def test_janus_packet_capture_3s2v(janus_infra, test_video_dir, tmp_path):
-    """smoke-2s3v: 2 senders, 3 viewers. Each viewer gets 2 tracks -> 6 pcap files."""
-    capture_dir = tmp_path / "captures"
-    capture_dir.mkdir()
-    cfg = build_pcap_config("smoke-2s3v.yml")
-    try:
-        with rtcbench_run(cfg, test_video_dir, network=JANUS_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
-            try:
-                poll_health(url, timeout=120, min_active=6)
-            except TimeoutError as e:
-                pytest.fail(str(e))
-            time.sleep(5)
-        # 3 viewers x 2 senders = 6 tracks = 6 pcap files
-        _assert_captures(capture_dir, min_files=6)
-    finally:
-        cfg.unlink(missing_ok=True)
+    _run_pcap_test(janus_infra, test_video_dir, tmp_path, "smoke-2s3v.yml", JANUS_NETWORK, PLUGIN_ENV["janus"], min_active=6, min_files=6)
+
+
+@pytest.mark.xdist_group("jitsi")
+def test_jitsi_packet_capture_3s2v(jitsi_infra, test_video_dir, tmp_path):
+    _run_pcap_test(jitsi_infra, test_video_dir, tmp_path, "smoke-2s3v.yml", JITSI_NETWORK, PLUGIN_ENV["jitsi"], min_active=6, min_files=6, timeout=300)
 
 
 @pytest.mark.xdist_group("livekit")
 def test_livekit_packet_capture_3s2v(livekit_infra, test_video_dir, tmp_path):
-    """smoke-2s3v: 2 senders, 3 viewers. Each viewer gets 2 tracks -> 6 pcap files."""
-    capture_dir = tmp_path / "captures"
-    capture_dir.mkdir()
-    cfg = build_pcap_config("smoke-2s3v.yml")
-    try:
-        with rtcbench_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, capture_dir=capture_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
-            try:
-                poll_health(url, timeout=120, min_active=6)
-            except TimeoutError as e:
-                pytest.fail(str(e))
-            time.sleep(5)
-        _assert_captures(capture_dir, min_files=6)
-    finally:
-        cfg.unlink(missing_ok=True)
+    _run_pcap_test(livekit_infra, test_video_dir, tmp_path, "smoke-2s3v.yml", LIVEKIT_NETWORK, PLUGIN_ENV["livekit"], min_active=6, min_files=6)
+
+
+@pytest.mark.xdist_group("mediasoup")
+def test_mediasoup_packet_capture_3s2v(mediasoup_infra, test_video_dir, tmp_path):
+    _run_pcap_test(mediasoup_infra, test_video_dir, tmp_path, "smoke-2s3v.yml", MEDIASOUP_NETWORK, PLUGIN_ENV["mediasoup"], min_active=6, min_files=6)

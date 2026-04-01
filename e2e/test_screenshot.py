@@ -5,18 +5,20 @@ Starts rtcbench with 2 senders and 2 receivers, waits for all receivers to
 reach healthy bitrate, then opens Chromium (via Playwright) to join the
 conference room and takes screenshots every 5 seconds for 15 seconds.
 
-Works for Janus, Jitsi, and LiveKit.
+Works for Janus, Jitsi, LiveKit, and Mediasoup.
 """
 import time
 
 import jwt
 import pytest
+import requests
 from playwright.sync_api import sync_playwright
 
 from helpers import (
     JANUS_NETWORK,
     JITSI_NETWORK,
     LIVEKIT_NETWORK,
+    MEDIASOUP_NETWORK,
     PLUGIN_ENV,
     rtcbench_run,
     poll_health,
@@ -361,7 +363,7 @@ def _generate_livekit_token(room_name: str, identity: str = "browser-viewer") ->
             "canPublish": False,
         },
     }
-    return jwt.encode(claims, "secret", algorithm="HS256")
+    return jwt.encode(claims, "secret-secret-secret-secret-secret", algorithm="HS256")
 
 
 def _launch_browser(pw):
@@ -419,12 +421,23 @@ def _join_janus(page, room_id: int):
 
 def _join_livekit(page, room_name: str):
     """Load a minimal LiveKit subscriber page and wait for video."""
+    _prefetch_livekit_client()
+
     token = _generate_livekit_token(room_name)
     html = (
         _LIVEKIT_HTML
         .replace("LIVEKIT_WS_URL", "ws://172.22.0.10:7880")
         .replace("LIVEKIT_TOKEN", token)
     )
+    # Serve the pre-fetched LiveKit UMD bundle so the browser never hits the CDN.
+    def handle_cdn(route):
+        url = route.request.url
+        if url in _CDN_CACHE:
+            route.fulfill(status=200, content_type="application/javascript; charset=utf-8", body=_CDN_CACHE[url])
+        else:
+            route.continue_()
+    page.route("https://cdn.jsdelivr.net/**", handle_cdn)
+
     page.set_content(html, wait_until="load", timeout=60_000)
     page.wait_for_function("document.title === 'JOINED' || document.title.startsWith('ERROR')", timeout=60_000)
     title = page.title()
@@ -528,4 +541,260 @@ def test_livekit_screenshot(livekit_infra, test_video_dir, tmp_path):
         tmp_path=tmp_path,
         test_video_dir=test_video_dir,
         env=PLUGIN_ENV["livekit"],
+    )
+
+
+_MEDIASOUP_HTML = """<!DOCTYPE html>
+<html><head><title>Mediasoup Viewer</title></head>
+<body style="margin:0;background:#222;">
+<div style="background:#9C27B0;color:#fff;font:bold 20px sans-serif;padding:8px 16px;">mediasoup</div>
+<div id="grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
+     padding:8px;min-height:calc(100vh - 40px);box-sizing:border-box;"></div>
+<script type="module">
+import { Device } from 'https://esm.sh/mediasoup-client@3';
+
+const WS_URL = "MEDIASOUP_WS_URL";
+const ROOM_ID = "MEDIASOUP_ROOM_ID";
+const COLORS = ["#E57373","#64B5F6","#81C784","#FFD54F","#BA68C8","#4DD0E1","#FF8A65","#A1887F"];
+function hc(s) { let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return h; }
+
+function getOrCreateTile(identity) {
+    let t = document.getElementById("t-" + identity);
+    if (t) return t;
+    t = document.createElement("div");
+    t.id = "t-" + identity;
+    t.style.cssText = "position:relative;background:#1a1a1a;border-radius:8px;overflow:hidden;" +
+        "aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;";
+    const ph = document.createElement("div");
+    ph.className = "ph";
+    const c = document.createElement("div");
+    const col = COLORS[Math.abs(hc(identity)) % COLORS.length];
+    c.style.cssText = "width:64px;height:64px;border-radius:50%;background:" + col +
+        ";display:flex;align-items:center;justify-content:center;font-size:22px;" +
+        "color:#fff;font-family:sans-serif;font-weight:bold;";
+    c.textContent = identity.substring(0, 2).toUpperCase();
+    ph.appendChild(c);
+    t.appendChild(ph);
+    const b = document.createElement("div");
+    b.style.cssText = "position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,.6);" +
+        "color:#fff;padding:2px 6px;border-radius:4px;font:11px sans-serif;" +
+        "max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+    b.textContent = identity;
+    t.appendChild(b);
+    document.getElementById("grid").appendChild(t);
+    return t;
+}
+
+// Minimal protoo-client over WebSocket.
+class Protoo {
+    constructor(url) {
+        this._ws = new WebSocket(url, "protoo");
+        this._pending = {};
+        this._nextId = 1;
+        this.onRequest = null;
+        this._ws.onmessage = (e) => this._onMessage(JSON.parse(e.data));
+    }
+    _onMessage(msg) {
+        if (msg.response) {
+            const p = this._pending[msg.id];
+            if (p) { delete this._pending[msg.id]; msg.ok ? p.resolve(msg.data) : p.reject(new Error(msg.errorReason)); }
+        } else if (msg.request && this.onRequest) {
+            this.onRequest(msg.method, msg.data).then(result => {
+                this._ws.send(JSON.stringify({response:true, id:msg.id, ok:true, data:result||{}}));
+            });
+        } else if (msg.notification && this.onNotification) {
+            this.onNotification(msg.method, msg.data);
+        }
+    }
+    request(method, data) {
+        return new Promise((resolve, reject) => {
+            const id = this._nextId++;
+            this._pending[id] = {resolve, reject};
+            this._ws.send(JSON.stringify({request:true, id, method, data: data||{}}));
+        });
+    }
+    notify(method, data) {
+        this._ws.send(JSON.stringify({notification:true, method, data: data||{}}));
+    }
+    ready() {
+        return new Promise((resolve, reject) => {
+            if (this._ws.readyState === 1) resolve();
+            else { this._ws.onopen = () => resolve(); this._ws.onerror = (e) => reject(e); }
+        });
+    }
+}
+
+async function main() {
+    const peer = "browser-viewer-" + Math.random().toString(36).slice(2, 8);
+    const protoo = new Protoo(WS_URL + "/?roomId=" + ROOM_ID + "&peerId=" + peer);
+    await protoo.ready();
+    console.log("protoo connected");
+
+    const routerCaps = await protoo.request("getRouterRtpCapabilities");
+    const caps = routerCaps.routerRtpCapabilities || routerCaps;
+
+    const device = new Device();
+    await device.load({routerRtpCapabilities: caps});
+    console.log("device loaded, canProduce video=" + device.canProduce("video"));
+
+    const rawTransport = await protoo.request("createWebRtcTransport", {
+        forceTcp: false, appData: {direction: "consumer"},
+    });
+    // mediasoup-demo returns transportId; mediasoup-client expects id.
+    const transportData = {...rawTransport, id: rawTransport.id || rawTransport.transportId};
+    const recvTransport = device.createRecvTransport(transportData);
+
+    recvTransport.on("connect", ({dtlsParameters}, callback, errback) => {
+        protoo.request("connectWebRtcTransport", {
+            transportId: recvTransport.id, dtlsParameters,
+        }).then(callback).catch(errback);
+    });
+    console.log("recv transport created: " + recvTransport.id);
+
+    protoo.onRequest = async (method, data) => {
+        if (method !== "newConsumer") return {};
+        console.log("newConsumer kind=" + data.kind + " peer=" + data.peerId);
+
+        try {
+            const consumer = await recvTransport.consume({
+                id: data.id || data.consumerId,
+                producerId: data.producerId,
+                kind: data.kind,
+                rtpParameters: data.rtpParameters,
+            });
+            console.log("consumed " + consumer.kind + " track=" + consumer.track.id);
+
+            if (consumer.kind === "video") {
+                const tile = getOrCreateTile(data.peerId || data.appData?.source || "unknown");
+                const ph = tile.querySelector(".ph");
+                if (ph) ph.style.display = "none";
+                const v = document.createElement("video");
+                v.autoplay = true; v.muted = true; v.playsInline = true;
+                v.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;";
+                v.srcObject = new MediaStream([consumer.track]);
+                tile.insertBefore(v, tile.firstChild);
+                v.play().catch(() => {});
+            }
+
+            protoo.notify("resumeConsumer", {consumerId: data.id});
+        } catch(e) {
+            console.error("consume error: " + e.message);
+        }
+        return {};
+    };
+
+    protoo.onNotification = (method, data) => {
+        if (method === "newPeer") {
+            console.log("newPeer: " + data.id + " display=" + data.displayName);
+            getOrCreateTile(data.id);
+        }
+    };
+
+    const joinResult = await protoo.request("join", {
+        displayName: peer,
+        rtpCapabilities: device.rtpCapabilities,
+        device: {name: "RTCBench-e2e", flag: "browser"},
+    });
+    console.log("joined room, peers=" + (joinResult.peers || []).length);
+    for (const p of (joinResult.peers || [])) {
+        getOrCreateTile(p.id || p.peerId);
+    }
+    document.title = "JOINED";
+}
+main().catch(e => { console.error(e); document.title = "ERROR: " + e.message; });
+</script>
+</body></html>"""
+
+
+_CDN_CACHE: dict[str, str] = {}
+
+_LIVEKIT_CLIENT_URL = "https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"
+
+
+def _prefetch_livekit_client():
+    """Pre-fetch the LiveKit client UMD bundle from jsdelivr.
+
+    A single file, but under parallel load the CDN can be slow enough to
+    cause Chromium to give up, leaving LivekitClient undefined.
+    """
+    if _LIVEKIT_CLIENT_URL in _CDN_CACHE:
+        return
+    r = requests.get(_LIVEKIT_CLIENT_URL, timeout=30)
+    r.raise_for_status()
+    _CDN_CACHE[_LIVEKIT_CLIENT_URL] = r.text
+
+
+def _prefetch_mediasoup_client():
+    """Pre-fetch mediasoup-client and all its ESM sub-imports from esm.sh.
+
+    The esm.sh CDN splits the package into many small modules (one per import).
+    Under parallel test load, fetching them on-the-fly from the browser can
+    time out. We pre-download them in Python and serve them via Playwright
+    route interception so the browser has zero CDN dependency.
+    """
+    if any(k.startswith("https://esm.sh/") for k in _CDN_CACHE):
+        return
+    to_fetch = ["https://esm.sh/mediasoup-client@3"]
+    while to_fetch:
+        url = to_fetch.pop(0)
+        if url in _CDN_CACHE:
+            continue
+        r = requests.get(url, allow_redirects=True, timeout=30)
+        _CDN_CACHE[r.url] = r.text
+        if r.url != url:
+            _CDN_CACHE[url] = r.text
+        for line in r.text.splitlines():
+            if 'from "/' in line or 'import "/' in line:
+                for part in line.split('"'):
+                    if part.startswith("/"):
+                        dep = f"https://esm.sh{part}"
+                        if dep not in _CDN_CACHE:
+                            to_fetch.append(dep)
+
+
+def _join_mediasoup(page, room_name: str):
+    """Load a minimal mediasoup subscriber page and wait for video.
+
+    The mediasoup-demo server validates the Origin header on WebSocket
+    connections. We intercept the page load via Playwright routing so
+    the browser's origin matches the server, allowing the WebSocket
+    handshake to succeed.
+    """
+    _prefetch_mediasoup_client()
+
+    html = (
+        _MEDIASOUP_HTML
+        .replace("MEDIASOUP_WS_URL", "wss://172.23.0.10:4443")
+        .replace("MEDIASOUP_ROOM_ID", room_name)
+    )
+    # Intercept the page load so origin matches the WebSocket server.
+    page.route("https://172.23.0.10:4443/e2e-viewer", lambda route: route.fulfill(
+        status=200, content_type="text/html", body=html,
+    ))
+    # Serve pre-fetched ESM modules so the browser never hits the CDN.
+    def handle_esm(route):
+        url = route.request.url
+        if url in _CDN_CACHE:
+            route.fulfill(status=200, content_type="application/javascript; charset=utf-8", body=_CDN_CACHE[url])
+        else:
+            route.continue_()
+    page.route("https://esm.sh/**", handle_esm)
+
+    page.goto("https://172.23.0.10:4443/e2e-viewer", wait_until="load", timeout=60_000)
+    page.wait_for_function("document.title === 'JOINED' || document.title.startsWith('ERROR')", timeout=60_000)
+    title = page.title()
+    assert not title.startswith("ERROR"), f"Mediasoup join failed: {title}"
+    page.wait_for_selector("video", timeout=30_000)
+
+
+@pytest.mark.xdist_group("mediasoup")
+def test_mediasoup_screenshot(mediasoup_infra, test_video_dir, tmp_path):
+    _run_screenshot_test(
+        sfu_name="mediasoup",
+        config="smoke-2s2v.yml",
+        network=MEDIASOUP_NETWORK,
+        join_fn=lambda page: _join_mediasoup(page, room_name="room-1234"),
+        tmp_path=tmp_path,
+        test_video_dir=test_video_dir,
+        env=PLUGIN_ENV["mediasoup"],
     )

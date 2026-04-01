@@ -16,7 +16,7 @@ spec:
     livekit:
       _wsURL: 'ws://{{spec.network.serverIP}}:7880'
       apiKey: devkey
-      apiSecret: secret
+      apiSecret: secret-secret-secret-secret-secret
   network:
     serverIP: $env:SERVER_IP
   metrics:

@@ -58,13 +58,17 @@ SCREENSHOTS_DIR := e2e/screenshots
 screenshots: _build-all _build-e2e-runner
 	sudo rm -rf $(BASETEMP)
 	$(E2E_RUN) -m pytest e2e/test_screenshot.py -v -n auto --dist=loadgroup --basetemp=$(BASETEMP)
+	sudo chmod -R a+rX $(BASETEMP)
 	$(eval FOLDER := $(shell date +%Y%m%d-%H%M%S))
-	mkdir -p $(SCREENSHOTS_DIR)/$(FOLDER)/janus $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi $(SCREENSHOTS_DIR)/$(FOLDER)/livekit
+	mkdir -p $(SCREENSHOTS_DIR)/$(FOLDER)/janus $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi $(SCREENSHOTS_DIR)/$(FOLDER)/livekit $(SCREENSHOTS_DIR)/$(FOLDER)/mediasoup
 	cp /tmp/pytest-rtcbench/popen-gw*/test_janus_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/janus/ 2>/dev/null || true
 	cp /tmp/pytest-rtcbench/popen-gw*/test_jitsi_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/jitsi/ 2>/dev/null || true
 	cp /tmp/pytest-rtcbench/popen-gw*/test_livekit_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/livekit/ 2>/dev/null || true
+	cp /tmp/pytest-rtcbench/popen-gw*/test_mediasoup_screenshot*/*.png $(SCREENSHOTS_DIR)/$(FOLDER)/mediasoup/ 2>/dev/null || true
+	@echo ""
 	@echo "Screenshots saved to $(SCREENSHOTS_DIR)/$(FOLDER)/"
-	@echo "View at http://$$(hostname -I | awk '{print $$1}'):8099/verify.html?dir=$(FOLDER)"
+	@echo "View: http://$$(hostname -I | awk '{print $$1}'):8099/verify.html?dir=$(FOLDER)"
+	@echo "Run: ./scripts/serve-screenshots.sh"
 
 _build-all:
 	docker build -t rtcbench:latest .

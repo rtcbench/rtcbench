@@ -112,7 +112,7 @@ spec:
     livekit:
       _wsURL: 'ws://{{spec.network.serverIP}}:7880'
       apiKey: devkey
-      apiSecret: secret
+      apiSecret: secret-secret-secret-secret-secret
 
   # Expose a /health HTTP endpoint reporting live VP9 bitrate and FPS per viewer.
   # Set port: 0 or omit this section to disable.
