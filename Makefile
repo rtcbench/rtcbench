@@ -2,7 +2,7 @@
 	e2e e2e-janus e2e-jitsi e2e-livekit e2e-mediasoup screenshots \
 	_build-all _build-e2e-runner _build-janus _build-jitsi _build-livekit _build-mediasoup \
 	_e2e-run remote-ci remote-run remote-seed remote-status remote-clean remote-estimate \
-	ci
+	ci e2e-coverage
 
 VERSION := $(shell git describe --tags --always --dirty)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -49,6 +49,9 @@ e2e-mediasoup: _build-mediasoup _build-e2e-runner
 # Run arbitrary pytest args in e2e runner (used by remote_e2e.py)
 _e2e-run: _build-e2e-runner
 	$(E2E_RUN) -m pytest $(PYTEST_ARGS)
+
+e2e-coverage: _build-e2e-runner
+	$(E2E_RUN) e2e/check_coverage.py
 
 SCREENSHOTS_DIR := e2e/screenshots
 
