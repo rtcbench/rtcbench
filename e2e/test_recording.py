@@ -30,7 +30,7 @@ import time
 import pytest
 
 from helpers import (
-    JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK,
+    JANUS_NETWORK, JITSI_NETWORK, LIVEKIT_NETWORK, MEDIASOUP_NETWORK,
     PLUGIN_ENV, rtcbench_run, poll_health, build_recording_config,
 )
 
@@ -196,15 +196,16 @@ def _assert_recordings(recording_dir, source_ivf):
 # Tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xdist_group("janus")
-def test_janus_recording(janus_infra, test_video_dir, tmp_path):
+def _run_recording_test(infra, test_video_dir, tmp_path, network, env, timeout=120):
+    """Run a recording test: start rtcbench with recording enabled, wait for
+    health, accumulate 10 s of data, then validate the IVF files."""
     recording_dir = tmp_path / "recordings"
     recording_dir.mkdir()
     cfg = build_recording_config("smoke.yml")
     try:
-        with rtcbench_run(cfg, test_video_dir, network=JANUS_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["janus"]) as (url, _proc):
+        with rtcbench_run(cfg, test_video_dir, network=network, recording_dir=recording_dir, env=env) as (url, _proc):
             try:
-                poll_health(url, timeout=120, min_active=1)
+                poll_health(url, timeout=timeout, min_active=1)
             except TimeoutError as e:
                 pytest.fail(str(e))
             time.sleep(10)  # accumulate recording post-warmup
@@ -213,35 +214,21 @@ def test_janus_recording(janus_infra, test_video_dir, tmp_path):
         cfg.unlink(missing_ok=True)
 
 
+@pytest.mark.xdist_group("janus")
+def test_janus_recording(janus_infra, test_video_dir, tmp_path):
+    _run_recording_test(janus_infra, test_video_dir, tmp_path, JANUS_NETWORK, PLUGIN_ENV["janus"])
+
+
 @pytest.mark.xdist_group("jitsi")
 def test_jitsi_recording(jitsi_infra, test_video_dir, tmp_path):
-    recording_dir = tmp_path / "recordings"
-    recording_dir.mkdir()
-    cfg = build_recording_config("smoke.yml")
-    try:
-        with rtcbench_run(cfg, test_video_dir, network=JITSI_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["jitsi"]) as (url, _proc):
-            try:
-                poll_health(url, timeout=300, min_active=1)
-            except TimeoutError as e:
-                pytest.fail(str(e))
-            time.sleep(10)
-        _assert_recordings(recording_dir, test_video_dir / "test.ivf")
-    finally:
-        cfg.unlink(missing_ok=True)
+    _run_recording_test(jitsi_infra, test_video_dir, tmp_path, JITSI_NETWORK, PLUGIN_ENV["jitsi"], timeout=300)
 
 
 @pytest.mark.xdist_group("livekit")
 def test_livekit_recording(livekit_infra, test_video_dir, tmp_path):
-    recording_dir = tmp_path / "recordings"
-    recording_dir.mkdir()
-    cfg = build_recording_config("smoke.yml")
-    try:
-        with rtcbench_run(cfg, test_video_dir, network=LIVEKIT_NETWORK, recording_dir=recording_dir, env=PLUGIN_ENV["livekit"]) as (url, _proc):
-            try:
-                poll_health(url, timeout=120, min_active=1)
-            except TimeoutError as e:
-                pytest.fail(str(e))
-            time.sleep(10)
-        _assert_recordings(recording_dir, test_video_dir / "test.ivf")
-    finally:
-        cfg.unlink(missing_ok=True)
+    _run_recording_test(livekit_infra, test_video_dir, tmp_path, LIVEKIT_NETWORK, PLUGIN_ENV["livekit"])
+
+
+@pytest.mark.xdist_group("mediasoup")
+def test_mediasoup_recording(mediasoup_infra, test_video_dir, tmp_path):
+    _run_recording_test(mediasoup_infra, test_video_dir, tmp_path, MEDIASOUP_NETWORK, PLUGIN_ENV["mediasoup"])

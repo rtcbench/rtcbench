@@ -8,7 +8,7 @@ rtc:
     stream_allocator:
       min_channel_capacity: 10000000000
 keys:
-  devkey: secret
+  devkey: secret-secret-secret-secret-secret
 room:
   auto_create: true
   departure_timeout: 5

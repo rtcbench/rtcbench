@@ -62,7 +62,7 @@ spec:
     livekit:
       wsURL: 'ws://127.0.0.1:7880'
       apiKey: devkey
-      apiSecret: secret
+      apiSecret: secret-secret-secret-secret-secret
   network:
     serverIP: 127.0.0.1
   metrics:
@@ -107,7 +107,7 @@ spec:
     livekit:
       wsURL: 'ws://127.0.0.1:7880'
       apiKey: devkey
-      apiSecret: secret
+      apiSecret: secret-secret-secret-secret-secret
   network:
     serverIP: 127.0.0.1
   logging:

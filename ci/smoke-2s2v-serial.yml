@@ -36,7 +36,7 @@ spec:
     livekit:
       _wsURL: 'ws://{{spec.network.serverIP}}:7880'
       apiKey: devkey
-      apiSecret: secret
+      apiSecret: secret-secret-secret-secret-secret
     mediasoup:
       _serverURL: 'wss://{{spec.network.serverIP}}:4443'
   logging:

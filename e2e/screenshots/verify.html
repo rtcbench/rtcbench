@@ -19,6 +19,7 @@
   .tab[data-sfu="janus"] { color: #64B5F6; }
   .tab[data-sfu="jitsi"] { color: #81C784; }
   .tab[data-sfu="livekit"] { color: #FF8A65; }
+  .tab[data-sfu="mediasoup"] { color: #CE93D8; }
   main { padding: 16px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 12px; }
   .card { background: #252525; border-radius: 6px; overflow: hidden; border: 1px solid #333; }
@@ -48,7 +49,7 @@
   <div class="nav-hint">Click or Esc to close &middot; Arrow keys to navigate</div>
 </div>
 <script>
-const SFUS = ["janus", "jitsi", "livekit"];
+const SFUS = ["janus", "jitsi", "livekit", "mediasoup"];
 const dirSelect = document.getElementById("dirSelect");
 const tabs = document.getElementById("tabs");
 const grid = document.getElementById("grid");
