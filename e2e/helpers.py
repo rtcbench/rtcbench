@@ -16,6 +16,11 @@ import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
 
+# When the test runner itself is in a Docker container (local dev via Makefile),
+# published ports are reachable via host.docker.internal, not localhost.
+# On CI (native Linux process), localhost works fine.
+_HEALTH_HOST = "host.docker.internal" if Path("/.dockerenv").exists() else "localhost"
+
 # Each plugin gets its own compose project so parallel runs don't fight over
 # the same project state or network.
 JANUS_PROJECT = "rtcbench-janus"
@@ -228,7 +233,7 @@ def rtcbench_run(
         raise RuntimeError(f"container {name} did not publish port 9090 within 15s")
 
     try:
-        yield f"http://localhost:{host_port}/health", proc
+        yield f"http://{_HEALTH_HOST}:{host_port}/health", proc
     finally:
         subprocess.run(["docker", "stop", name], capture_output=True, timeout=15)
         out, _ = proc.communicate(timeout=15)
