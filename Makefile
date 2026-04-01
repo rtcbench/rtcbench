@@ -26,7 +26,7 @@ test:
 
 E2E_RUNNER := rtcbench-e2e-runner:latest
 BASETEMP := /tmp/pytest-rtcbench
-E2E_RUN := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(CURDIR):$(CURDIR) -v /tmp:/tmp --network host -w $(CURDIR) $(E2E_RUNNER)
+E2E_RUN := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(CURDIR):$(CURDIR) -v /tmp:/tmp --network host --add-host=host.docker.internal:host-gateway -w $(CURDIR) $(E2E_RUNNER)
 
 _build-e2e-runner:
 	docker build -t $(E2E_RUNNER) -f docker/e2e/Dockerfile .
