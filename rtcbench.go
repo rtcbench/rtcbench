@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
@@ -135,31 +134,6 @@ func (e *pluginEnv) LogRegistry() *log.Registry {
 
 func (e *pluginEnv) StatsConsumers() []func(vp9_stats.Period, vp9_stats.VideoQualitySample) {
 	return e.statsConsumers
-}
-
-type joinRoomConfig struct {
-	roomName     string
-	usersPerRoom int
-
-	signaling signalingConfig
-}
-
-type signalingConfig struct {
-	concurrency int
-}
-
-type userConfig struct {
-	roomID string
-	userID string
-	role   UserRole
-}
-
-type wrappedSignalingError struct {
-	error error
-
-	// other metadata for retrying
-	roomName string
-	nickname string
 }
 
 type Client struct {
@@ -309,25 +283,6 @@ func (c *Client) JoinAllRooms(ctx context.Context) error {
 	return c.RunScenario(ctx, DefaultScenarioID)
 }
 
-func (c *Client) joinAllRooms(ctx context.Context) error {
-	if err := c.SetupPlugin(ctx, c.env.config.Spec.Plugin); err != nil {
-		return err
-	}
-	wg := sync.WaitGroup{}
-	for i := 0; i < c.env.config.Spec.Conference.TotalRooms; i++ {
-		wg.Add(1)
-		fmtRoomName := expandRoomName(c.env.config.Spec.Conference.Name, i)
-		go func() {
-			c.log.Infof("joining room %q (%d users)", fmtRoomName, c.env.config.Spec.Conference.UsersPerRoom)
-			c.joinRoomByName(ctx, fmtRoomName)
-			c.log.Infof("finished joining room %q", fmtRoomName)
-			wg.Done()
-		}()
-	}
-	wg.Wait()
-	return nil
-}
-
 // expandRoomName generates the room name for a given index in a multi-room
 // setup. If the base name ends with digits, those digits are parsed as a
 // number and incremented by offset. For index 0 the original name is returned.
@@ -353,143 +308,6 @@ func expandRoomName(base string, offset int) string {
 		return base + "_" + strconv.Itoa(offset)
 	}
 	return base[:start] + strconv.FormatInt(n+int64(offset), 10)
-}
-
-func (c *Client) joinRoomByName(ctx context.Context, roomName string) {
-	if c.env.config.Spec.Conference.JoinPolicy.AlwaysRetryFailedJoins {
-		nUsersRemaining := c.env.config.Spec.Conference.UsersPerRoom
-		var errs []wrappedSignalingError
-		for {
-			errs = c.joinRoom(ctx, joinRoomConfig{
-				roomName:     roomName,
-				usersPerRoom: nUsersRemaining,
-				signaling: signalingConfig{
-					concurrency: c.env.config.Spec.Conference.JoinPolicy.Concurrency,
-				},
-			})
-			if len(errs) == 0 {
-				c.log.Infof("[AlwaysRetryFailedJoins] finished joining room %s", roomName)
-				break
-			}
-
-			retryDelay := c.env.config.Spec.Conference.JoinPolicy.JoinStartSpacing
-			if retryDelay < 1*time.Second {
-				retryDelay = 1 * time.Second
-			}
-
-			c.log.Errorf("[AlwaysRetryFailedJoins] %d errors occurred, will retry in %s", len(errs), retryDelay.String())
-			for _, e := range errs {
-				c.log.Errorf("[AlwaysRetryFailedJoins] error: %v", e.error)
-			}
-			nUsersRemaining = len(errs)
-
-			time.Sleep(retryDelay)
-		}
-	} else {
-		if errs := c.joinRoom(ctx, joinRoomConfig{
-			roomName:     roomName,
-			usersPerRoom: c.env.config.Spec.Conference.UsersPerRoom,
-			signaling: signalingConfig{
-				concurrency: c.env.config.Spec.Conference.JoinPolicy.Concurrency,
-			},
-		}); errs != nil {
-			c.log.Errorf("%d errors from JoinRoom: %v", len(errs), errs)
-			for _, e := range errs {
-				c.log.Errorf("error: %v", e.error)
-			}
-		}
-	}
-}
-
-func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSignalingError {
-	size := cfg.usersPerRoom
-	if size < 1 {
-		return nil
-	}
-
-	cfgCh := make(chan userConfig)
-	go func() {
-		defer close(cfgCh)
-
-		spacing := c.env.config.Spec.Conference.JoinPolicy.JoinStartSpacing
-		senders := c.env.config.Spec.Conference.Cameras.PerRoom
-
-		for i := 0; i < cfg.usersPerRoom; i++ {
-			if i > 0 && spacing > 0 {
-				time.Sleep(spacing)
-			}
-
-			role := Viewer
-			if i < senders { // senders have join priority over viewers
-				role = Sender
-			}
-
-			cfgCh <- userConfig{
-				roomID: cfg.roomName,
-				userID: fmt.Sprintf("%s-%s", string(role), uuid.NewString()),
-				role:   role,
-			}
-		}
-	}()
-
-	errCh := make(chan wrappedSignalingError, size)
-
-	concurrency := size
-	if cfg.signaling.concurrency > 0 && cfg.signaling.concurrency < size {
-		concurrency = cfg.signaling.concurrency
-	} else if cfg.signaling.concurrency <= 0 {
-		concurrency = 1 // default to serial
-	}
-
-	var wg sync.WaitGroup
-	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			for vc := range cfgCh {
-				user := c.CreateUser(ctx, &UserConfig{
-					UserID: vc.userID,
-					Role:   vc.role,
-				})
-				if err := user.JoinRoom(ctx, &JoinRequest{
-					Plugin: c.env.config.Spec.Plugin,
-					RoomID: vc.roomID,
-				}); err != nil {
-					errCh <- wrappedSignalingError{
-						error:    fmt.Errorf("cannot join %q to room %q: %w", vc.userID, cfg.roomName, err),
-						roomName: cfg.roomName,
-						nickname: vc.userID,
-					}
-					continue
-				}
-				if vc.role == Sender {
-					err := user.PublishVideo(ctx, &PublishVideoRequest{
-						Plugin: c.env.config.Spec.Plugin,
-						RoomID: vc.roomID,
-					})
-					if err != nil && !errors.Is(err, ErrUnsupportedCapability) {
-						errCh <- wrappedSignalingError{
-							error:    fmt.Errorf("cannot publish %q in room %q: %w", vc.userID, cfg.roomName, err),
-							roomName: cfg.roomName,
-							nickname: vc.userID,
-						}
-					}
-				}
-			}
-			c.log.Infof("[JoinRoom] worker #%d done (room=%s)", workerID, cfg.roomName)
-		}(i)
-	}
-
-	wg.Wait()
-	close(errCh)
-
-	var errs []wrappedSignalingError
-
-	for err := range errCh {
-		errs = append(errs, err)
-	}
-
-	return errs
 }
 
 func (c *Client) getPlugin(pluginID string) Plugin {

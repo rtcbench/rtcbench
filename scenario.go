@@ -24,6 +24,30 @@ type ScenarioEnv interface {
 	Log() *log.Logger
 }
 
+type joinRoomConfig struct {
+	roomName     string
+	usersPerRoom int
+
+	signaling signalingConfig
+}
+
+type signalingConfig struct {
+	concurrency int
+}
+
+type userConfig struct {
+	roomID string
+	userID string
+	role   UserRole
+}
+
+type wrappedSignalingError struct {
+	error error
+
+	roomName string
+	nickname string
+}
+
 type scenarioEnv struct {
 	config *Config
 	client *Client
