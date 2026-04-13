@@ -1,18 +1,19 @@
 package jitsi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
+	"github.com/pion/rtcp"
+	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench/pkg/gcc"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
 	pionpkg "github.com/rtcbench/rtcbench/pkg/pion"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
-	"github.com/pion/rtcp"
-	"github.com/pion/webrtc/v4"
 )
 
 func parseIceCredentials(sdp string) (ufrag, pwd, fingerprint string) {
@@ -56,7 +57,7 @@ func parseLocalVideoMSID(sdp string) (primarySSRC, msid string) {
 
 const initialBitrateBps = 3_500_000
 
-func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection, error) {
+func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection, func() context.CancelFunc, error) {
 	state.Log.Infof("[startPion] initializing pion PeerConnection...")
 
 	// Resolve SVC mode for senders.
@@ -71,7 +72,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 		if useSVC {
 			factories, getBitrate, err := gcc.SenderFactories(initialBitrateBps)
 			if err != nil {
-				return nil, fmt.Errorf("build interceptors: %w", err)
+				return nil, nil, fmt.Errorf("build interceptors: %w", err)
 			}
 			getTargetBitrate = getBitrate
 			apiOpts = append(apiOpts,
@@ -82,12 +83,12 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 
 	api, err := pionpkg.NewAPI(state.LANClientIP, 101, apiOpts...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
-		return nil, fmt.Errorf("create PeerConnection failed: %w", err)
+		return nil, nil, fmt.Errorf("create PeerConnection failed: %w", err)
 	}
 
 	// Jitsi uses a superset of the standard logging callbacks.
@@ -104,23 +105,23 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 	var sampleTrack *webrtc.TrackLocalStaticSample
 	if state.Sender {
 		if state.FrameSource == nil {
-			return nil, errors.New("expected a frame source for sending")
+			return nil, nil, errors.New("expected a frame source for sending")
 		}
 		if useSVC {
 			svcTrack, err = pionpkg.NewVP9RTPTrack(state.Nickname)
 			if err != nil {
-				return nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
+				return nil, nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
 			}
 			if _, err := pc.AddTrack(svcTrack); err != nil {
-				return nil, fmt.Errorf("AddTrack failed: %w", err)
+				return nil, nil, fmt.Errorf("AddTrack failed: %w", err)
 			}
 		} else {
 			sampleTrack, err = pionpkg.NewVP9SampleTrack(state.Nickname)
 			if err != nil {
-				return nil, fmt.Errorf("NewTrackLocalStaticSample failed: %w", err)
+				return nil, nil, fmt.Errorf("NewTrackLocalStaticSample failed: %w", err)
 			}
 			if _, err := pc.AddTrack(sampleTrack); err != nil {
-				return nil, fmt.Errorf("AddTrack failed: %w", err)
+				return nil, nil, fmt.Errorf("AddTrack failed: %w", err)
 			}
 		}
 		state.Log.Infof("[startPion] sender mode: frame source ready (svc=%v)", useSVC)
@@ -130,7 +131,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 			webrtc.RTPCodecTypeVideo,
 			webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly},
 		); err != nil {
-			return nil, fmt.Errorf("AddTransceiver (recvonly) failed: %w", err)
+			return nil, nil, fmt.Errorf("AddTransceiver (recvonly) failed: %w", err)
 		}
 	}
 
@@ -139,7 +140,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 		SDP:  state.RemoteSDP,
 	}
 	if err := pc.SetRemoteDescription(offer); err != nil {
-		return nil, fmt.Errorf("SetRemoteDescription failed: %w", err)
+		return nil, nil, fmt.Errorf("SetRemoteDescription failed: %w", err)
 	}
 	state.Log.Debugf("[after SetRemoteDescription] received SDP offer:\n%s", pc.RemoteDescription().SDP)
 
@@ -152,7 +153,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 			Candidate: staticCandidate,
 			SDPMid:    &mid0,
 		}); err != nil {
-			return nil, fmt.Errorf("AddICECandidate (fallback) failed: %w", err)
+			return nil, nil, fmt.Errorf("AddICECandidate (fallback) failed: %w", err)
 		}
 		state.Log.Infof("[pion] added static remote candidate: %s", staticCandidate)
 	} else {
@@ -165,7 +166,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 				Candidate: candidateLine,
 				SDPMid:    &mid0,
 			}); err != nil {
-				return nil, fmt.Errorf("AddICECandidate failed: %w", err)
+				return nil, nil, fmt.Errorf("AddICECandidate failed: %w", err)
 			}
 			state.Log.Infof("[pion] added remote candidate: %s", candidateLine)
 		}
@@ -173,26 +174,34 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
-		return nil, fmt.Errorf("CreateAnswer failed: %w", err)
+		return nil, nil, fmt.Errorf("CreateAnswer failed: %w", err)
 	}
 	// Keep this if you've actually observed "actpass" leaking into an answer in your environment.
 	answer.SDP = strings.Replace(answer.SDP, "a=setup:actpass", "a=setup:active", 1)
 
 	gatherComplete := webrtc.GatheringCompletePromise(pc)
 	if err := pc.SetLocalDescription(answer); err != nil {
-		return nil, fmt.Errorf("SetLocalDescription failed: %w", err)
+		return nil, nil, fmt.Errorf("SetLocalDescription failed: %w", err)
 	}
 	<-gatherComplete
 
 	state.Log.Debugf("[after SetLocalDescription] generated SDP answer:\n%s", pc.LocalDescription().SDP)
 
-	// Start send loop after local description is set.
+	var startPublishLoop func() context.CancelFunc
 	if state.Sender {
 		if useSVC && svcTrack != nil {
 			state.Log.Infof("[startPion] SVC config: %d spatial x %d temporal layers", svcCfg.NumSpatialLayers, svcCfg.NumTemporalLayers)
-			go ivfpkg.SVCLoopIntoTrack(state.Log, svcTrack, state.FrameSource, svcCfg, getTargetBitrate)
+			startPublishLoop = func() context.CancelFunc {
+				loopCtx, cancel := context.WithCancel(context.Background())
+				go ivfpkg.SVCLoopIntoTrackUntil(loopCtx, state.Log, svcTrack, state.FrameSource, svcCfg, getTargetBitrate)
+				return cancel
+			}
 		} else if sampleTrack != nil {
-			go ivfpkg.LoopIntoTrack(state.Log, sampleTrack, state.FrameSource)
+			startPublishLoop = func() context.CancelFunc {
+				loopCtx, cancel := context.WithCancel(context.Background())
+				go ivfpkg.LoopIntoTrackUntil(loopCtx, state.Log, sampleTrack, state.FrameSource)
+				return cancel
+			}
 		}
 	}
 
@@ -238,5 +247,5 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 		})
 	})
 
-	return pc, nil
+	return pc, startPublishLoop, nil
 }

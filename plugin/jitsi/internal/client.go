@@ -3,6 +3,7 @@ package jitsi
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench"
@@ -23,18 +24,84 @@ type Client struct {
 }
 
 type Session struct {
-	pc     *webrtc.PeerConnection
-	cancel context.CancelFunc
+	mu               sync.Mutex
+	pc               *webrtc.PeerConnection
+	cancel           context.CancelFunc
+	startPublishLoop func() context.CancelFunc
+	publishCancel    context.CancelFunc
 }
 
 func (s *Session) Close() error {
+	s.mu.Lock()
+	publishCancel := s.publishCancel
+	s.publishCancel = nil
+	cancel := s.cancel
+	pc := s.pc
+	s.cancel = nil
+	s.pc = nil
+	s.mu.Unlock()
+
+	if publishCancel != nil {
+		publishCancel()
+	}
+	if cancel != nil {
+		cancel()
+	}
+	if pc != nil {
+		return pc.Close()
+	}
+	return nil
+}
+
+func (s *Session) StartPublishing() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.startPublishLoop == nil {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if s.publishCancel != nil {
+		return nil
+	}
+	s.publishCancel = s.startPublishLoop()
+	return nil
+}
+
+func (s *Session) StopPublishing() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.startPublishLoop == nil {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if s.publishCancel == nil {
+		return nil
+	}
+	s.publishCancel()
+	s.publishCancel = nil
+	return nil
+}
+
+func (s *Session) IsSender() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startPublishLoop != nil
+}
+
+func (s *Session) PeerConnection() *webrtc.PeerConnection {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pc
+}
+
+func (s *Session) ContextCancel() context.CancelFunc {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancel
+}
+
+func (s *Session) resetPublishing() {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	if s.pc != nil {
-		return s.pc.Close()
-	}
-	return nil
 }
 
 func NewClient(e rtcbench.PluginEnv) (*Client, error) {

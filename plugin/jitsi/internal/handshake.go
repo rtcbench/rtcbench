@@ -85,7 +85,7 @@ func (c *Client) performHandshake(
 	}
 	state.RemoteSDP = sdp
 
-	pionConnection, err := c.startPion(state)
+	pionConnection, startPublishLoop, err := c.startPion(state)
 	if err != nil {
 		cancel()
 		l.Errorf("startPion failed: %v", err)
@@ -159,7 +159,8 @@ func (c *Client) performHandshake(
 	}()
 
 	return &Session{
-		pc:     pionConnection,
-		cancel: cancel,
+		pc:               pionConnection,
+		cancel:           cancel,
+		startPublishLoop: startPublishLoop,
 	}, nil
 }

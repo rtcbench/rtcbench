@@ -110,6 +110,36 @@ func (p *participant) LeaveRoom(ctx context.Context, req *rtcbench.LeaveRequest)
 	return p.Close()
 }
 
+func (p *participant) PublishVideo(ctx context.Context, req *rtcbench.PublishVideoRequest) error {
+	p.mu.Lock()
+	session := p.session
+	role := p.role
+	p.mu.Unlock()
+
+	if role != rtcbench.Sender {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if session == nil {
+		return fmt.Errorf("%w: participant not joined", rtcbench.ErrCannotJoinRoom)
+	}
+	return session.StartPublishing()
+}
+
+func (p *participant) UnpublishVideo(ctx context.Context, req *rtcbench.UnpublishVideoRequest) error {
+	p.mu.Lock()
+	session := p.session
+	role := p.role
+	p.mu.Unlock()
+
+	if role != rtcbench.Sender {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if session == nil {
+		return nil
+	}
+	return session.StopPublishing()
+}
+
 func (p *participant) Close() error {
 	p.mu.Lock()
 	session := p.session

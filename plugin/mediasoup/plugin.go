@@ -147,13 +147,15 @@ func (p *Plugin) JoinRoom(ctx context.Context, role rtcbench.UserRole, roomID, u
 }
 
 type participant struct {
-	mu     sync.Mutex
-	plugin *Plugin
-	userID string
-	role   rtcbench.UserRole
-	log    *log.Logger
-	protoo *ms.Protoo
-	pc     *webrtc.PeerConnection
+	mu               sync.Mutex
+	plugin           *Plugin
+	userID           string
+	role             rtcbench.UserRole
+	log              *log.Logger
+	protoo           *ms.Protoo
+	pc               *webrtc.PeerConnection
+	startPublishLoop func() context.CancelFunc
+	publishCancel    context.CancelFunc
 }
 
 func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
@@ -169,13 +171,14 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	p.mu.Unlock()
 
 	var (
-		protoo *ms.Protoo
-		pc     *webrtc.PeerConnection
-		err    error
+		protoo           *ms.Protoo
+		pc               *webrtc.PeerConnection
+		startPublishLoop func() context.CancelFunc
+		err              error
 	)
 	switch p.role {
 	case rtcbench.Sender:
-		protoo, pc, err = p.plugin.joinSender(ctx, p.log, req.RoomID, p.userID)
+		protoo, pc, startPublishLoop, err = p.plugin.joinSender(ctx, p.log, req.RoomID, p.userID)
 	case rtcbench.Viewer:
 		protoo, pc, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID)
 	default:
@@ -188,6 +191,7 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	p.mu.Lock()
 	p.protoo = protoo
 	p.pc = pc
+	p.startPublishLoop = startPublishLoop
 	p.mu.Unlock()
 	return nil
 }
@@ -200,10 +204,16 @@ func (p *participant) Close() error {
 	p.mu.Lock()
 	protoo := p.protoo
 	pc := p.pc
+	publishCancel := p.publishCancel
 	p.protoo = nil
 	p.pc = nil
+	p.startPublishLoop = nil
+	p.publishCancel = nil
 	p.mu.Unlock()
 
+	if publishCancel != nil {
+		publishCancel()
+	}
 	if protoo != nil {
 		protoo.Close()
 	}
@@ -213,20 +223,53 @@ func (p *participant) Close() error {
 	return nil
 }
 
+func (p *participant) PublishVideo(ctx context.Context, req *rtcbench.PublishVideoRequest) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.role != rtcbench.Sender {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if p.protoo == nil || p.pc == nil {
+		return fmt.Errorf("%w: participant not joined", rtcbench.ErrCannotJoinRoom)
+	}
+	if p.publishCancel != nil {
+		return nil
+	}
+	if p.startPublishLoop == nil {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	p.publishCancel = p.startPublishLoop()
+	return nil
+}
+
+func (p *participant) UnpublishVideo(ctx context.Context, req *rtcbench.UnpublishVideoRequest) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.role != rtcbench.Sender {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if p.publishCancel == nil {
+		return nil
+	}
+	p.publishCancel()
+	p.publishCancel = nil
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // sender
 // ---------------------------------------------------------------------------
 
-func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID string) (*ms.Protoo, *webrtc.PeerConnection, error) {
+func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID string) (*ms.Protoo, *webrtc.PeerConnection, func() context.CancelFunc, error) {
 	if p.cameras == nil {
-		return nil, nil, fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
+		return nil, nil, nil, fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
 	}
 
 	// 1. Connect protoo.
 	url := fmt.Sprintf("%s/?roomId=%s&peerId=%s", p.serverURL, roomID, userID)
 	protoo, err := ms.NewProtoo(ctx, url, l, nil, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: protoo: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: protoo: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("protoo connected")
 
@@ -234,12 +277,12 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 	capsData, err := protoo.Request("getRouterRtpCapabilities", nil)
 	if err != nil {
 		protoo.Close()
-		return nil, nil, fmt.Errorf("%w: getRouterRtpCapabilities: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: getRouterRtpCapabilities: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	caps, err := unmarshalRouterCaps(capsData)
 	if err != nil {
 		protoo.Close()
-		return nil, nil, fmt.Errorf("%w: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 
 	// 3. Create send transport.
@@ -249,12 +292,12 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 	})
 	if err != nil {
 		protoo.Close()
-		return nil, nil, fmt.Errorf("%w: createWebRtcTransport: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: createWebRtcTransport: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	var transport ms.TransportOptions
 	if err := json.Unmarshal(transportData, &transport); err != nil {
 		protoo.Close()
-		return nil, nil, fmt.Errorf("%w: unmarshal transport: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: unmarshal transport: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("send transport created: %s", transport.ID)
 
@@ -266,7 +309,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 	})
 	if err != nil {
 		protoo.Close()
-		return nil, nil, fmt.Errorf("%w: join: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: join: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("joined room %s", roomID)
 
@@ -277,7 +320,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 	var (
 		pc        *webrtc.PeerConnection
 		offerSDP  string
-		startLoop func()
+		startLoop func() context.CancelFunc
 	)
 
 	if svc.Enabled {
@@ -286,21 +329,25 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 		pc, rtpTrack, getBitrate, offerSDP, err = ms.StartSendPC(l, p.clientIP, p.vp9PT, initialBitrateBps)
 		if err != nil {
 			protoo.Close()
-			return nil, nil, fmt.Errorf("%w: pion send: %v", rtcbench.ErrCannotJoinRoom, err)
+			return nil, nil, nil, fmt.Errorf("%w: pion send: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		l.Infof("SVC config: %d spatial x %d temporal layers", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers)
-		startLoop = func() {
-			go ivf.SVCLoopIntoTrack(l, rtpTrack, p.cameras.NewSource(), svc.Config, getBitrate)
+		startLoop = func() context.CancelFunc {
+			loopCtx, cancel := context.WithCancel(context.Background())
+			go ivf.SVCLoopIntoTrackUntil(loopCtx, l, rtpTrack, p.cameras.NewSource(), svc.Config, getBitrate)
+			return cancel
 		}
 	} else {
 		var sampleTrack *webrtc.TrackLocalStaticSample
 		pc, sampleTrack, offerSDP, err = ms.StartSendPCSimple(l, p.clientIP, p.vp9PT)
 		if err != nil {
 			protoo.Close()
-			return nil, nil, fmt.Errorf("%w: pion send: %v", rtcbench.ErrCannotJoinRoom, err)
+			return nil, nil, nil, fmt.Errorf("%w: pion send: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
-		startLoop = func() {
-			go ivf.LoopIntoTrack(l, sampleTrack, p.cameras.NewSource())
+		startLoop = func() context.CancelFunc {
+			loopCtx, cancel := context.WithCancel(context.Background())
+			go ivf.LoopIntoTrackUntil(loopCtx, l, sampleTrack, p.cameras.NewSource())
+			return cancel
 		}
 	}
 
@@ -316,7 +363,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 	}); err != nil {
 		protoo.Close()
 		_ = pc.Close()
-		return nil, nil, fmt.Errorf("%w: SetRemoteDescription: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: SetRemoteDescription: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("remote description set (fake answer)")
 
@@ -332,7 +379,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 	if err != nil {
 		protoo.Close()
 		_ = pc.Close()
-		return nil, nil, fmt.Errorf("%w: connectWebRtcTransport: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: connectWebRtcTransport: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("transport connected")
 
@@ -347,16 +394,13 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 	if err != nil {
 		protoo.Close()
 		_ = pc.Close()
-		return nil, nil, fmt.Errorf("%w: produce: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: produce: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	var result ms.ProduceResult
 	json.Unmarshal(produceData, &result)
 	l.Infof("producing [id:%s]", result.ID)
 
-	// 9. Start streaming IVF frames.
-	startLoop()
-
-	return protoo, pc, nil
+	return protoo, pc, startLoop, nil
 }
 
 // ---------------------------------------------------------------------------
