@@ -1,6 +1,12 @@
 package rtcbench
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+
+	pkglog "github.com/rtcbench/rtcbench/pkg/log"
+)
 
 func TestExpandRoomName(t *testing.T) {
 	tests := []struct {
@@ -45,4 +51,252 @@ func TestExpandRoomName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUserJoinRoomUsesParticipantFactory(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Viewer,
+	})
+
+	err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	})
+	if err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+
+	if plugin.setupCalls != 1 {
+		t.Fatalf("Setup() calls = %d, want 1", plugin.setupCalls)
+	}
+	if plugin.newParticipantCalls != 1 {
+		t.Fatalf("NewParticipant() calls = %d, want 1", plugin.newParticipantCalls)
+	}
+	if len(plugin.participants) != 1 {
+		t.Fatalf("participants = %d, want 1", len(plugin.participants))
+	}
+
+	p := plugin.participants[0]
+	if p.joinCalls != 1 {
+		t.Fatalf("participant JoinRoom() calls = %d, want 1", p.joinCalls)
+	}
+	if p.joinReq == nil || p.joinReq.RoomID != "room-1" || p.joinReq.Plugin != "fake" {
+		t.Fatalf("participant JoinRoom() request = %+v, want room-1/fake", p.joinReq)
+	}
+
+	if got := len(user.connections); got != 1 {
+		t.Fatalf("user connections = %d, want 1", got)
+	}
+	for _, conn := range user.connections {
+		if conn.state != StateJoined {
+			t.Fatalf("connection state = %v, want StateJoined", conn.state)
+		}
+	}
+}
+
+func TestUserLeaveRoomAndCloseAreIdempotent(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Viewer,
+	})
+
+	err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	})
+	if err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+
+	err = user.LeaveRoom(context.Background(), &LeaveRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	})
+	if err != nil {
+		t.Fatalf("LeaveRoom() error = %v", err)
+	}
+
+	err = user.LeaveRoom(context.Background(), &LeaveRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	})
+	if err != nil {
+		t.Fatalf("second LeaveRoom() error = %v", err)
+	}
+
+	p := plugin.participants[0]
+	if p.leaveCalls != 1 {
+		t.Fatalf("participant LeaveRoom() calls = %d, want 1", p.leaveCalls)
+	}
+
+	if err := user.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := user.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+
+	if p.closeCalls != 1 {
+		t.Fatalf("participant Close() calls = %d, want 1", p.closeCalls)
+	}
+}
+
+func TestClientShutdownAllClosesUsersAndPlugins(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Viewer,
+	})
+
+	if err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+
+	if err := client.ShutdownAll(context.Background()); err != nil {
+		t.Fatalf("ShutdownAll() error = %v", err)
+	}
+
+	p := plugin.participants[0]
+	if p.closeCalls != 1 {
+		t.Fatalf("participant Close() calls = %d, want 1", p.closeCalls)
+	}
+	if plugin.shutdownCalls != 1 {
+		t.Fatalf("plugin Shutdown() calls = %d, want 1", plugin.shutdownCalls)
+	}
+}
+
+func TestJoinAllRoomsSupportsLegacyPlugins(t *testing.T) {
+	plugin := &fakeLegacyPlugin{}
+	client := newTestClient("legacy", func() Plugin { return plugin })
+	client.env.config.Spec.Conference.UsersPerRoom = 3
+
+	err := client.JoinAllRooms(context.Background())
+	if err != nil {
+		t.Fatalf("JoinAllRooms() error = %v", err)
+	}
+
+	if plugin.setupCalls != 1 {
+		t.Fatalf("Setup() calls = %d, want 1", plugin.setupCalls)
+	}
+	if plugin.joinCalls != 3 {
+		t.Fatalf("JoinRoom() calls = %d, want 3", plugin.joinCalls)
+	}
+}
+
+func newTestClient(pluginID string, factory PluginFactory) *Client {
+	cfg := &Config{
+		Spec: SpecConfig{
+			Plugin: pluginID,
+			Conference: ConferenceConfig{
+				Name:         "room-1000",
+				UsersPerRoom: 1,
+				TotalRooms:   1,
+				Cameras: CameraConfig{
+					PerRoom: 0,
+				},
+				JoinPolicy: JoinPolicyConfig{
+					Concurrency: 1,
+				},
+			},
+			Network: NetworkConfig{
+				ServerIP: "127.0.0.1",
+				ClientIP: "127.0.0.1",
+			},
+		},
+	}
+	reg := pkglog.NewRegistry(nil, nil)
+	client := NewClient(cfg, reg)
+	client.RegisterPlugin(pluginID, factory)
+	return client
+}
+
+type fakeParticipantPlugin struct {
+	setupCalls          int
+	shutdownCalls       int
+	newParticipantCalls int
+	participants        []*fakeParticipant
+}
+
+func (p *fakeParticipantPlugin) Setup(ctx context.Context, e PluginEnv) error {
+	p.setupCalls++
+	return nil
+}
+
+func (p *fakeParticipantPlugin) Shutdown(ctx context.Context) error {
+	p.shutdownCalls++
+	return nil
+}
+
+func (p *fakeParticipantPlugin) JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error {
+	return errors.New("legacy JoinRoom should not be used")
+}
+
+func (p *fakeParticipantPlugin) NewParticipant(ctx context.Context, cfg *UserConfig) (Participant, error) {
+	p.newParticipantCalls++
+	part := &fakeParticipant{userID: cfg.UserID}
+	p.participants = append(p.participants, part)
+	return part, nil
+}
+
+type fakeParticipant struct {
+	userID     string
+	joinCalls  int
+	leaveCalls int
+	closeCalls int
+	joinReq    *JoinRequest
+	leaveReq   *LeaveRequest
+}
+
+func (p *fakeParticipant) JoinRoom(ctx context.Context, req *JoinRequest) error {
+	p.joinCalls++
+	cp := *req
+	p.joinReq = &cp
+	return nil
+}
+
+func (p *fakeParticipant) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
+	p.leaveCalls++
+	if req != nil {
+		cp := *req
+		p.leaveReq = &cp
+	}
+	return nil
+}
+
+func (p *fakeParticipant) Close() error {
+	p.closeCalls++
+	return nil
+}
+
+type fakeLegacyPlugin struct {
+	setupCalls    int
+	shutdownCalls int
+	joinCalls     int
+}
+
+func (p *fakeLegacyPlugin) Setup(ctx context.Context, e PluginEnv) error {
+	p.setupCalls++
+	return nil
+}
+
+func (p *fakeLegacyPlugin) Shutdown(ctx context.Context) error {
+	p.shutdownCalls++
+	return nil
+}
+
+func (p *fakeLegacyPlugin) JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error {
+	p.joinCalls++
+	return nil
 }
