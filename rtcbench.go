@@ -184,6 +184,7 @@ func NewClient(config *Config, logRegistry *log.Registry) *Client {
 		log:       logRegistry.NewLogger("general", ""),
 	}
 	client.RegisterScenario(DefaultScenarioID, func() Scenario { return DefaultScenario{} })
+	client.RegisterScenario(ChurnScenarioID, func() Scenario { return ChurnScenario{} })
 	return client
 }
 
@@ -253,6 +254,12 @@ func (c *Client) GetUser(userID string) *User {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.users[userID]
+}
+
+func (c *Client) removeUser(userID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.users, userID)
 }
 
 func (c *Client) Shutdown(ctx context.Context) error {

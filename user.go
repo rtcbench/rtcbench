@@ -190,6 +190,10 @@ func (u *User) Close() error {
 		}
 	}
 
+	if u.client != nil {
+		u.client.removeUser(u.id)
+	}
+
 	return errors.Join(errs...)
 }
 

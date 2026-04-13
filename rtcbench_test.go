@@ -3,7 +3,9 @@ package rtcbench
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	pkglog "github.com/rtcbench/rtcbench/pkg/log"
 )
@@ -227,6 +229,102 @@ func TestClientRunScenarioUnknownScenario(t *testing.T) {
 	}
 }
 
+func TestUserCloseRemovesUserFromClient(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Viewer,
+	})
+	if client.GetUser("alice") == nil {
+		t.Fatal("GetUser() = nil, want tracked user")
+	}
+
+	if err := user.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got := client.GetUser("alice"); got != nil {
+		t.Fatalf("GetUser() = %#v, want nil after close", got)
+	}
+}
+
+func TestLoadChurnConfigDefaults(t *testing.T) {
+	cfg, err := loadChurnConfig(nil)
+	if err != nil {
+		t.Fatalf("loadChurnConfig() error = %v", err)
+	}
+	if cfg.sessionDuration != 30*time.Second {
+		t.Fatalf("sessionDuration = %s, want 30s", cfg.sessionDuration)
+	}
+	if cfg.rejoinDelay != 0 {
+		t.Fatalf("rejoinDelay = %s, want 0", cfg.rejoinDelay)
+	}
+}
+
+func TestLoadChurnConfigInvalidDuration(t *testing.T) {
+	_, err := loadChurnConfig(map[string]any{
+		"sessionDuration": "nope",
+	})
+	if err == nil {
+		t.Fatal("loadChurnConfig() error = nil, want error")
+	}
+}
+
+func TestChurnScenarioRejoinsUsers(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+	client.env.config.Spec.ScenarioConfig = map[string]any{
+		"sessionDuration": "20ms",
+		"rejoinDelay":     "5ms",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 85*time.Millisecond)
+	defer cancel()
+
+	if err := client.RunScenario(ctx, ChurnScenarioID); err != nil {
+		t.Fatalf("RunScenario(churn) error = %v", err)
+	}
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		plugin.mu.Lock()
+		participantCount := len(plugin.participants)
+		plugin.mu.Unlock()
+		client.mu.Lock()
+		userCount := len(client.users)
+		client.mu.Unlock()
+		if participantCount >= 2 && userCount == 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	plugin.mu.Lock()
+	participantCount := len(plugin.participants)
+	participants := append([]*fakeParticipant(nil), plugin.participants...)
+	plugin.mu.Unlock()
+	if participantCount < 2 {
+		t.Fatalf("participants = %d, want at least 2 churned joins", participantCount)
+	}
+	client.mu.Lock()
+	userCount := len(client.users)
+	client.mu.Unlock()
+	if userCount != 0 {
+		t.Fatalf("tracked users = %d, want 0 after churn shutdown", userCount)
+	}
+
+	closed := 0
+	for _, p := range participants {
+		if p.closeCalls > 0 {
+			closed++
+		}
+	}
+	if closed == 0 {
+		t.Fatal("no churn participants were closed")
+	}
+}
+
 func newTestClient(pluginID string, factory PluginFactory) *Client {
 	cfg := &Config{
 		Spec: SpecConfig{
@@ -255,6 +353,7 @@ func newTestClient(pluginID string, factory PluginFactory) *Client {
 }
 
 type fakeParticipantPlugin struct {
+	mu                  sync.Mutex
 	setupCalls          int
 	shutdownCalls       int
 	newParticipantCalls int
@@ -262,11 +361,15 @@ type fakeParticipantPlugin struct {
 }
 
 func (p *fakeParticipantPlugin) Setup(ctx context.Context, e PluginEnv) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.setupCalls++
 	return nil
 }
 
 func (p *fakeParticipantPlugin) Shutdown(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.shutdownCalls++
 	return nil
 }
@@ -276,6 +379,8 @@ func (p *fakeParticipantPlugin) JoinRoom(ctx context.Context, role UserRole, roo
 }
 
 func (p *fakeParticipantPlugin) NewParticipant(ctx context.Context, cfg *UserConfig) (Participant, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.newParticipantCalls++
 	part := &fakeParticipant{userID: cfg.UserID}
 	p.participants = append(p.participants, part)
