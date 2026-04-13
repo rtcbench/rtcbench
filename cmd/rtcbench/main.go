@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/goccy/go-yaml"
+	"github.com/joho/godotenv"
 	"github.com/rtcbench/rtcbench"
 	"github.com/rtcbench/rtcbench/internal/netutil"
 	"github.com/rtcbench/rtcbench/pkg/log"
@@ -21,8 +23,6 @@ import (
 	"github.com/rtcbench/rtcbench/plugin/jitsi"
 	"github.com/rtcbench/rtcbench/plugin/livekit"
 	"github.com/rtcbench/rtcbench/plugin/mediasoup"
-	"github.com/goccy/go-yaml"
-	"github.com/joho/godotenv"
 )
 
 var version = "dev"
@@ -136,15 +136,20 @@ func main() {
 		}
 	}
 
-	err = client.JoinAllRooms(context.Background())
+	scenarioID := cfg.Spec.Scenario
+	if scenarioID == "" {
+		scenarioID = rtcbench.DefaultScenarioID
+	}
+
+	err = client.RunScenario(context.Background(), scenarioID)
 	if err != nil {
-		mainLog.Errorf("error joining all rooms: %v", err)
-		if errors.Is(err, rtcbench.ErrUnknownPlugin) {
+		mainLog.Errorf("scenario %q failed: %v", scenarioID, err)
+		if errors.Is(err, rtcbench.ErrUnknownPlugin) || errors.Is(err, rtcbench.ErrUnknownScenario) {
 			os.Exit(1)
 		}
 	}
 
-	mainLog.Infof("finished joining rooms")
+	mainLog.Infof("finished scenario %q", scenarioID)
 
 	sigtermCtx, sigtermCancel = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer sigtermCancel()
