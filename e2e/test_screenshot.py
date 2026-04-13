@@ -262,13 +262,16 @@ main().catch(e => { console.error(e); document.title = "ERROR: " + e.message; })
 </script>
 </body></html>"""
 
+_LIVEKIT_CLIENT_VERSION = "1.15.13"
+_LIVEKIT_CLIENT_URL = f"https://cdn.jsdelivr.net/npm/livekit-client@{_LIVEKIT_CLIENT_VERSION}/dist/livekit-client.umd.min.js"
+
 _LIVEKIT_HTML = """<!DOCTYPE html>
 <html><head><title>LiveKit Viewer</title></head>
 <body style="margin:0;background:#222;">
 <div style="background:#E65100;color:#fff;font:bold 20px sans-serif;padding:8px 16px;">livekit</div>
 <div id="grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
      padding:8px;min-height:calc(100vh - 40px);box-sizing:border-box;"></div>
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+<script src="LIVEKIT_CLIENT_URL"></script>
 <script>
 const WS_URL = "LIVEKIT_WS_URL";
 const TOKEN  = "LIVEKIT_TOKEN";
@@ -303,18 +306,23 @@ function getOrCreateTile(identity) {
     return t;
 }
 
+function attachVideo(tile, track) {
+    if (!track) return;
+    const ph = tile.querySelector(".ph");
+    if (ph) ph.style.display = "none";
+    const el = track.attach();
+    el.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;" +
+        "object-fit:cover;";
+    tile.insertBefore(el, tile.firstChild);
+}
+
 (async () => {
     const room = new LivekitClient.Room({adaptiveStream: false, dynacast: false});
 
     room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
         if (track.kind === "video") {
             const tile = getOrCreateTile(participant.identity);
-            const ph = tile.querySelector(".ph");
-            if (ph) ph.style.display = "none";
-            const el = track.attach();
-            el.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;" +
-                "object-fit:cover;";
-            tile.insertBefore(el, tile.firstChild);
+            attachVideo(tile, track);
         }
     });
 
@@ -325,16 +333,15 @@ function getOrCreateTile(identity) {
     await room.connect(WS_URL, TOKEN);
 
     // Create tiles for all participants already in the room.
-    room.remoteParticipants.forEach((p) => {
+    const participants = room.remoteParticipants || room.participants || new Map();
+    participants.forEach((p) => {
         const tile = getOrCreateTile(p.identity);
-        p.videoTrackPublications.forEach((pub) => {
-            if (pub.track && pub.isSubscribed) {
-                const ph = tile.querySelector(".ph");
-                if (ph) ph.style.display = "none";
-                const el = pub.track.attach();
-                el.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;" +
-                    "object-fit:cover;";
-                tile.insertBefore(el, tile.firstChild);
+        const publications = p.videoTrackPublications || p.tracks || new Map();
+        publications.forEach((pub) => {
+            const track = pub && (pub.track || pub.videoTrack);
+            const kind = pub && (pub.kind || (track && track.kind));
+            if (kind === "video" && track && pub.isSubscribed !== false) {
+                attachVideo(tile, track);
             }
         });
     });
@@ -426,6 +433,7 @@ def _join_livekit(page, room_name: str):
     token = _generate_livekit_token(room_name)
     html = (
         _LIVEKIT_HTML
+        .replace("LIVEKIT_CLIENT_URL", _LIVEKIT_CLIENT_URL)
         .replace("LIVEKIT_WS_URL", "ws://172.22.0.10:7880")
         .replace("LIVEKIT_TOKEN", token)
     )
@@ -707,8 +715,6 @@ main().catch(e => { console.error(e); document.title = "ERROR: " + e.message; })
 
 
 _CDN_CACHE: dict[str, str] = {}
-
-_LIVEKIT_CLIENT_URL = "https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"
 
 
 def _prefetch_livekit_client():

@@ -6,14 +6,14 @@ import (
 	"sync"
 	"sync/atomic"
 
+	lkproto "github.com/livekit/protocol/livekit"
+	lksdk "github.com/livekit/server-sdk-go/v2"
+	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench"
 	"github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
 	lkinternal "github.com/rtcbench/rtcbench/plugin/livekit/internal"
-	lkproto "github.com/livekit/protocol/livekit"
-	lksdk "github.com/livekit/server-sdk-go/v2"
-	"github.com/pion/webrtc/v4"
 )
 
 const (
@@ -42,8 +42,6 @@ type Plugin struct {
 	pipeline           *rtcbench.StatsPipeline
 	maxSubscriptions   int // 0 = unlimited
 
-	mu                sync.Mutex
-	rooms             []*lksdk.Room
 	subscriptionCount int32 // atomic
 }
 
@@ -94,35 +92,91 @@ func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 }
 
 func (p *Plugin) Shutdown(ctx context.Context) error {
-	p.mu.Lock()
-	rooms := p.rooms
-	p.rooms = nil
-	p.mu.Unlock()
-
-	for _, room := range rooms {
-		room.Disconnect()
-	}
-
 	p.pipeline.Stop()
 	return nil
 }
 
-func (p *Plugin) JoinRoom(ctx context.Context, role rtcbench.UserRole, roomID, userID string) error {
-	l := p.logRegistry.NewLogger("livekit", fmt.Sprintf("[%s][%s]", role, userID))
+func (p *Plugin) NewParticipant(ctx context.Context, cfg *rtcbench.UserConfig) (rtcbench.Participant, error) {
+	return &participant{
+		plugin: p,
+		userID: cfg.UserID,
+		role:   cfg.Role,
+		log:    p.logRegistry.NewLogger("livekit", fmt.Sprintf("[%s][%s]", cfg.Role, cfg.UserID)),
+	}, nil
+}
 
-	switch role {
+func (p *Plugin) JoinRoom(ctx context.Context, role rtcbench.UserRole, roomID, userID string) error {
+	part, err := p.NewParticipant(ctx, &rtcbench.UserConfig{
+		UserID: userID,
+		Role:   role,
+	})
+	if err != nil {
+		return err
+	}
+	return part.JoinRoom(ctx, &rtcbench.JoinRequest{RoomID: roomID, Plugin: PluginID})
+}
+
+type participant struct {
+	mu     sync.Mutex
+	plugin *Plugin
+	userID string
+	role   rtcbench.UserRole
+	log    *log.Logger
+	room   *lksdk.Room
+}
+
+func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
+	if req == nil || req.RoomID == "" {
+		return rtcbench.ErrMissingRoomID
+	}
+
+	p.mu.Lock()
+	if p.room != nil {
+		p.mu.Unlock()
+		return rtcbench.ErrConnectionExists
+	}
+	p.mu.Unlock()
+
+	var (
+		room *lksdk.Room
+		err  error
+	)
+	switch p.role {
 	case rtcbench.Sender:
-		return p.runSender(ctx, l, roomID, userID)
+		room, err = p.plugin.joinSender(ctx, p.log, req.RoomID, p.userID)
 	case rtcbench.Viewer:
-		return p.runViewer(ctx, l, roomID, userID)
+		room, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID)
 	default:
 		return rtcbench.ErrUnsupportedRole
 	}
+	if err != nil {
+		return err
+	}
+
+	p.mu.Lock()
+	p.room = room
+	p.mu.Unlock()
+	return nil
 }
 
-func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID string) error {
+func (p *participant) LeaveRoom(ctx context.Context, req *rtcbench.LeaveRequest) error {
+	return p.Close()
+}
+
+func (p *participant) Close() error {
+	p.mu.Lock()
+	room := p.room
+	p.room = nil
+	p.mu.Unlock()
+	if room != nil {
+		room.Disconnect()
+	}
+	return nil
+}
+
+func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID string) (*lksdk.Room, error) {
 	if p.cameras == nil {
-		return fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
+		return nil, fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
 	}
 
 	// Resolve SVC before connecting so we know whether to add GCC interceptors.
@@ -139,7 +193,7 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		// 1.2 Mbps matches the target total for 3-layer SVC (S0=150K+S1=350K+S2=700K).
 		interceptors, getBitrate, err := lkinternal.SenderInterceptors(initialBitrateBps)
 		if err != nil {
-			return fmt.Errorf("%w: build interceptors: %v", rtcbench.ErrCannotJoinRoom, err)
+			return nil, fmt.Errorf("%w: build interceptors: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		getTargetBitrate = getBitrate
 		connectOpts = append(connectOpts, lksdk.WithInterceptors(interceptors))
@@ -152,13 +206,9 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 		ParticipantIdentity: userID,
 	}, &lksdk.RoomCallback{}, connectOpts...)
 	if err != nil {
-		return fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("connected to room %s (SVC=%v, autoSubscribe=false)", roomID, svc.Enabled)
-
-	p.mu.Lock()
-	p.rooms = append(p.rooms, room)
-	p.mu.Unlock()
 
 	if svc.Enabled {
 		rtpTrack, err := webrtc.NewTrackLocalStaticRTP(
@@ -169,7 +219,8 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 			"video", "ivf",
 		)
 		if err != nil {
-			return fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
+			room.Disconnect()
+			return nil, fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		// Declare all SVC spatial layers to the SFU so it forwards them correctly.
 		// Without this the SFU treats the track as single-layer and strips S1/S2.
@@ -181,7 +232,8 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 			VideoLayers: svcLayers,
 		}
 		if _, err = room.LocalParticipant.PublishTrack(rtpTrack, pubOpts); err != nil {
-			return fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
+			room.Disconnect()
+			return nil, fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		l.Infof("SVC config: %d spatial x %d temporal layers (GCC target=%d bps)", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers, svc.Config.TargetBitrateBps)
 		go ivf.SVCLoopIntoTrack(l, rtpTrack, p.cameras.NewSource(), svc.Config, getTargetBitrate)
@@ -194,15 +246,17 @@ func (p *Plugin) runSender(ctx context.Context, l *log.Logger, roomID, userID st
 			"video", "ivf",
 		)
 		if err != nil {
-			return fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
+			room.Disconnect()
+			return nil, fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		if _, err = room.LocalParticipant.PublishTrack(sampleTrack, &lksdk.TrackPublicationOptions{Name: "video"}); err != nil {
-			return fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
+			room.Disconnect()
+			return nil, fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		go ivf.LoopIntoTrack(l, sampleTrack, p.cameras.NewSource())
 	}
 
-	return nil
+	return room, nil
 }
 
 // buildSVCLayers converts an SVCConfig into the VideoLayer slice needed by the
@@ -234,7 +288,7 @@ func buildSVCLayers(cfg ivf.SVCConfig) []*lkproto.VideoLayer {
 	return layers
 }
 
-func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID string) error {
+func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID string) (*lksdk.Room, error) {
 	onTrackSubscribed := func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
 		l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
 		// Request highest quality so the SFU forwards the top spatial layer.
@@ -292,13 +346,8 @@ func (p *Plugin) runViewer(ctx context.Context, l *log.Logger, roomID, userID st
 		ParticipantIdentity: userID,
 	}, cb, opts...)
 	if err != nil {
-		return fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("connected to room %s as viewer", roomID)
-
-	p.mu.Lock()
-	p.rooms = append(p.rooms, room)
-	p.mu.Unlock()
-
-	return nil
+	return room, nil
 }
