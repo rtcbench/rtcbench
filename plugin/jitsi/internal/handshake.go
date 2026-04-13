@@ -6,13 +6,13 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/google/uuid"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/httpxml"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/sdp_tmpl"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/steps"
-	"github.com/google/uuid"
 )
 
 func initialRid() int64 {
@@ -20,12 +20,14 @@ func initialRid() int64 {
 }
 
 func (c *Client) performHandshake(
+	ctx context.Context,
 	l *log.Logger,
 	room string,
 	nickname string,
 	src ivfpkg.FrameSource,
 	cameraPaths []string,
-) error {
+) (*Session, error) {
+	sessionCtx, cancel := context.WithCancel(ctx)
 	state := &model.ConnectionState{
 		Sender:      src != nil,
 		FrameSource: src,
@@ -58,14 +60,16 @@ func (c *Client) performHandshake(
 	for _, step := range stepsBeforeJingle {
 		err := step(state)
 		if err != nil {
+			cancel()
 			l.Errorf("step failed: %v", err)
-			return err
+			return nil, err
 		}
 	}
 
 	if err := steps.Step09_WaitForJingleOffer(state); err != nil {
+		cancel()
 		l.Errorf("Step09 failed: %v", err)
-		return err
+		return nil, err
 	}
 
 	sdp, err := sdp_tmpl.RenderSDP(sdp_tmpl.SDPState{
@@ -75,15 +79,17 @@ func (c *Client) performHandshake(
 		Sender:      state.Sender,
 	})
 	if err != nil {
+		cancel()
 		l.Errorf("SDP conversion failed: %v", err)
-		return err
+		return nil, err
 	}
 	state.RemoteSDP = sdp
 
 	pionConnection, err := c.startPion(state)
 	if err != nil {
+		cancel()
 		l.Errorf("startPion failed: %v", err)
-		return err
+		return nil, err
 	}
 
 	// pionConnection generates local SDP (answer) with real ICE creds.
@@ -91,22 +97,28 @@ func (c *Client) performHandshake(
 
 	if state.Sender {
 		if err := steps.Step10_Sender_SendSessionAccept(state); err != nil {
+			cancel()
+			_ = pionConnection.Close()
 			l.Errorf("Step10_Sender failed: %v", err)
-			return err
+			return nil, err
 		}
 		if err := steps.Step11_Sender_AnnounceCameraSource(state); err != nil {
+			cancel()
+			_ = pionConnection.Close()
 			l.Errorf("Step11_Sender failed: %v", err)
-			return err
+			return nil, err
 		}
 	} else {
 		if err := steps.Step10_SendSessionAccept(state); err != nil {
+			cancel()
+			_ = pionConnection.Close()
 			l.Errorf("Step10 failed: %v", err)
-			return err
+			return nil, err
 		}
 	}
 
 	if state.ColibriWebSocketURL != "" {
-		go runColibriWS(context.Background(), state.ColibriWebSocketURL, l)
+		go runColibriWS(sessionCtx, state.ColibriWebSocketURL, l)
 	}
 
 	// BOSH keepalive: send XMPP pings to keep the Prosody session alive.
@@ -137,10 +149,17 @@ func (c *Client) performHandshake(
 
 		sendPing() // fire immediately — don't wait 5s for the first one
 		for {
-			<-ticker.C
-			sendPing()
+			select {
+			case <-sessionCtx.Done():
+				return
+			case <-ticker.C:
+				sendPing()
+			}
 		}
 	}()
 
-	return nil
+	return &Session{
+		pc:     pionConnection,
+		cancel: cancel,
+	}, nil
 }

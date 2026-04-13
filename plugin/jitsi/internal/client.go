@@ -1,8 +1,10 @@
 package jitsi
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
@@ -18,6 +20,21 @@ type Client struct {
 	svcConfig          rtcbench.SVCCameraConfig
 	enableRecording    bool
 	recordingDirectory string
+}
+
+type Session struct {
+	pc     *webrtc.PeerConnection
+	cancel context.CancelFunc
+}
+
+func (s *Session) Close() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.pc != nil {
+		return s.pc.Close()
+	}
+	return nil
 }
 
 func NewClient(e rtcbench.PluginEnv) (*Client, error) {
@@ -46,9 +63,9 @@ func (c *Client) SetRecording(enabled bool, directory string) {
 	c.recordingDirectory = directory
 }
 
-func (c *Client) ConnectViewer(roomID, userID string, src ivfpkg.FrameSource, cameraPaths []string) error {
+func (c *Client) ConnectViewer(ctx context.Context, roomID, userID string, src ivfpkg.FrameSource, cameraPaths []string) (*Session, error) {
 	l := c.log.With(fmt.Sprintf("[%s]", userID))
-	return c.performHandshake(l, roomID, userID, src, cameraPaths)
+	return c.performHandshake(ctx, l, roomID, userID, src, cameraPaths)
 }
 
 func (c *Client) Shutdown() {
