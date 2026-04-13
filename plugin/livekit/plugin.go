@@ -161,16 +161,6 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	p.room = room
 	p.getTargetBitrate = getTargetBitrate
 	p.mu.Unlock()
-
-	if p.role == rtcbench.Sender {
-		if err := p.PublishVideo(ctx, &rtcbench.PublishVideoRequest{
-			Plugin: PluginID,
-			RoomID: req.RoomID,
-		}); err != nil {
-			_ = p.Close()
-			return err
-		}
-	}
 	return nil
 }
 

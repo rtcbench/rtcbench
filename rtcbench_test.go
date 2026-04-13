@@ -254,6 +254,53 @@ func TestJoinAllRoomsSupportsLegacyPlugins(t *testing.T) {
 	}
 }
 
+func TestJoinAllRoomsPublishesSenderParticipants(t *testing.T) {
+	plugin := &fakeVideoParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+	client.env.config.Spec.Conference.UsersPerRoom = 3
+	client.env.config.Spec.Conference.Cameras.PerRoom = 1
+
+	if err := client.JoinAllRooms(context.Background()); err != nil {
+		t.Fatalf("JoinAllRooms() error = %v", err)
+	}
+
+	plugin.mu.Lock()
+	defer plugin.mu.Unlock()
+	if len(plugin.participants) != 3 {
+		t.Fatalf("participants = %d, want 3", len(plugin.participants))
+	}
+
+	published := 0
+	for _, p := range plugin.participants {
+		if p.joinCalls != 1 {
+			t.Fatalf("joinCalls = %d, want 1", p.joinCalls)
+		}
+		if p.publishCalls > 0 {
+			published++
+		}
+	}
+	if published != 1 {
+		t.Fatalf("published participants = %d, want 1 sender", published)
+	}
+}
+
+func TestJoinAllRoomsIgnoresUnsupportedSenderPublish(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+	client.env.config.Spec.Conference.UsersPerRoom = 2
+	client.env.config.Spec.Conference.Cameras.PerRoom = 1
+
+	if err := client.JoinAllRooms(context.Background()); err != nil {
+		t.Fatalf("JoinAllRooms() error = %v", err)
+	}
+
+	plugin.mu.Lock()
+	defer plugin.mu.Unlock()
+	if len(plugin.participants) != 2 {
+		t.Fatalf("participants = %d, want 2", len(plugin.participants))
+	}
+}
+
 func TestClientRunScenarioUsesRegisteredScenario(t *testing.T) {
 	client := newTestClient("fake", func() Plugin { return &fakeParticipantPlugin{} })
 	scenario := &fakeScenario{}

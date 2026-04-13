@@ -460,6 +460,20 @@ func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSign
 						roomName: cfg.roomName,
 						nickname: vc.userID,
 					}
+					continue
+				}
+				if vc.role == Sender {
+					err := user.PublishVideo(ctx, &PublishVideoRequest{
+						Plugin: c.env.config.Spec.Plugin,
+						RoomID: vc.roomID,
+					})
+					if err != nil && !errors.Is(err, ErrUnsupportedCapability) {
+						errCh <- wrappedSignalingError{
+							error:    fmt.Errorf("cannot publish %q in room %q: %w", vc.userID, cfg.roomName, err),
+							roomName: cfg.roomName,
+							nickname: vc.userID,
+						}
+					}
 				}
 			}
 			c.log.Infof("[JoinRoom] worker #%d done (room=%s)", workerID, cfg.roomName)
