@@ -1,13 +1,14 @@
 package ivf
 
 import (
+	"context"
 	"time"
 
+	"github.com/pion/rtp"
+	vp9hdr "github.com/pion/rtp/codecs/vp9"
+	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/pkg/vp9"
-	vp9hdr "github.com/pion/rtp/codecs/vp9"
-	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v4"
 )
 
 // SVCConfig describes the SVC layer structure for the send loop.
@@ -61,6 +62,17 @@ func SVCLoopIntoTrack(
 	cfg SVCConfig,
 	targetBitrate func() int, // may be nil
 ) {
+	SVCLoopIntoTrackUntil(context.Background(), l, track, src, cfg, targetBitrate)
+}
+
+func SVCLoopIntoTrackUntil(
+	ctx context.Context,
+	l *log.Logger,
+	track *webrtc.TrackLocalStaticRTP,
+	src FrameSource,
+	cfg SVCConfig,
+	targetBitrate func() int, // may be nil
+) {
 	payloader := &vp9.SVCPayloader{
 		Config: vp9.SVCLayerConfig{
 			NumSpatialLayers:  cfg.NumSpatialLayers,
@@ -76,10 +88,22 @@ func SVCLoopIntoTrack(
 	nextTime := time.Now()
 
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		data, dur, err := src.NextFrame()
 		if err != nil {
 			l.Errorf("[ivf-svc] NextFrame: %v", err)
-			time.Sleep(2 * time.Second)
+			timer := time.NewTimer(2 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			nextTime = time.Now()
 			continue
 		}
@@ -105,7 +129,9 @@ func SVCLoopIntoTrack(
 		if tid > maxTID {
 			rtpTS += durToRTPTicks(dur)
 			frameIdx++
-			sleepUntil(&nextTime, dur)
+			if !sleepUntil(ctx, &nextTime, dur) {
+				return
+			}
 			continue
 		}
 
@@ -152,7 +178,13 @@ func SVCLoopIntoTrack(
 				// of the interval is consumed by sleepUntil below.
 				deadline := nextTime.Add(time.Duration(i) * dur / time.Duration(n))
 				if wait := time.Until(deadline); wait > 0 {
-					time.Sleep(wait)
+					timer := time.NewTimer(wait)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+					}
 				}
 			}
 			if err := track.WriteRTP(pkt); err != nil {
@@ -165,7 +197,9 @@ func SVCLoopIntoTrack(
 
 		rtpTS += durToRTPTicks(dur)
 		frameIdx++
-		sleepUntil(&nextTime, dur)
+		if !sleepUntil(ctx, &nextTime, dur) {
+			return
+		}
 	}
 }
 
@@ -184,11 +218,18 @@ func durToRTPTicks(d time.Duration) uint32 {
 }
 
 // sleepUntil advances nextTime by dur and sleeps until that time.
-func sleepUntil(nextTime *time.Time, dur time.Duration) {
+func sleepUntil(ctx context.Context, nextTime *time.Time, dur time.Duration) bool {
 	*nextTime = nextTime.Add(dur)
 	if wait := time.Until(*nextTime); wait > 0 {
-		time.Sleep(wait)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
 	}
+	return true
 }
 
 // layerBitrateThreshold returns the cumulative bitrate (bps) needed to send

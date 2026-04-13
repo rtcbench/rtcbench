@@ -325,6 +325,72 @@ func TestChurnScenarioRejoinsUsers(t *testing.T) {
 	}
 }
 
+func TestUserPublishVideoTargetsVideoPublisher(t *testing.T) {
+	plugin := &fakeVideoParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Sender,
+	})
+	if err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+
+	if err := user.PublishVideo(context.Background(), &PublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("PublishVideo() error = %v", err)
+	}
+	if err := user.UnpublishVideo(context.Background(), &UnpublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("UnpublishVideo() error = %v", err)
+	}
+
+	plugin.mu.Lock()
+	defer plugin.mu.Unlock()
+	if len(plugin.participants) != 1 {
+		t.Fatalf("participants = %d, want 1", len(plugin.participants))
+	}
+	p := plugin.participants[0]
+	if p.publishCalls != 1 {
+		t.Fatalf("publishCalls = %d, want 1", p.publishCalls)
+	}
+	if p.unpublishCalls != 1 {
+		t.Fatalf("unpublishCalls = %d, want 1", p.unpublishCalls)
+	}
+}
+
+func TestUserPublishVideoUnsupportedCapability(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Viewer,
+	})
+	if err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+
+	err := user.PublishVideo(context.Background(), &PublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	})
+	if !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("PublishVideo() error = %v, want ErrUnsupportedCapability", err)
+	}
+}
+
 func newTestClient(pluginID string, factory PluginFactory) *Client {
 	cfg := &Config{
 		Spec: SpecConfig{
@@ -435,6 +501,75 @@ func (p *fakeLegacyPlugin) Shutdown(ctx context.Context) error {
 
 func (p *fakeLegacyPlugin) JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error {
 	p.joinCalls++
+	return nil
+}
+
+type fakeVideoParticipantPlugin struct {
+	mu                  sync.Mutex
+	setupCalls          int
+	shutdownCalls       int
+	newParticipantCalls int
+	participants        []*fakeVideoParticipant
+}
+
+func (p *fakeVideoParticipantPlugin) Setup(ctx context.Context, e PluginEnv) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.setupCalls++
+	return nil
+}
+
+func (p *fakeVideoParticipantPlugin) Shutdown(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.shutdownCalls++
+	return nil
+}
+
+func (p *fakeVideoParticipantPlugin) JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error {
+	return errors.New("legacy JoinRoom should not be used")
+}
+
+func (p *fakeVideoParticipantPlugin) NewParticipant(ctx context.Context, cfg *UserConfig) (Participant, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.newParticipantCalls++
+	part := &fakeVideoParticipant{userID: cfg.UserID}
+	p.participants = append(p.participants, part)
+	return part, nil
+}
+
+type fakeVideoParticipant struct {
+	userID         string
+	joinCalls      int
+	leaveCalls     int
+	closeCalls     int
+	publishCalls   int
+	unpublishCalls int
+}
+
+func (p *fakeVideoParticipant) JoinRoom(ctx context.Context, req *JoinRequest) error {
+	p.joinCalls++
+	return nil
+}
+
+func (p *fakeVideoParticipant) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
+	p.leaveCalls++
+	return nil
+}
+
+func (p *fakeVideoParticipant) Close() error {
+	p.closeCalls++
+	return nil
+}
+
+func (p *fakeVideoParticipant) PublishVideo(ctx context.Context, req *PublishVideoRequest) error {
+	p.publishCalls++
+	return nil
+}
+
+func (p *fakeVideoParticipant) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) error {
+	p.unpublishCalls++
 	return nil
 }
 

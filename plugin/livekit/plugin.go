@@ -117,12 +117,15 @@ func (p *Plugin) JoinRoom(ctx context.Context, role rtcbench.UserRole, roomID, u
 }
 
 type participant struct {
-	mu     sync.Mutex
-	plugin *Plugin
-	userID string
-	role   rtcbench.UserRole
-	log    *log.Logger
-	room   *lksdk.Room
+	mu               sync.Mutex
+	plugin           *Plugin
+	userID           string
+	role             rtcbench.UserRole
+	log              *log.Logger
+	room             *lksdk.Room
+	getTargetBitrate func() int
+	publishedTrackID string
+	publishCancel    context.CancelFunc
 }
 
 func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
@@ -138,12 +141,13 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	p.mu.Unlock()
 
 	var (
-		room *lksdk.Room
-		err  error
+		room             *lksdk.Room
+		getTargetBitrate func() int
+		err              error
 	)
 	switch p.role {
 	case rtcbench.Sender:
-		room, err = p.plugin.joinSender(ctx, p.log, req.RoomID, p.userID)
+		room, getTargetBitrate, err = p.plugin.connectSenderRoom(ctx, p.log, req.RoomID, p.userID)
 	case rtcbench.Viewer:
 		room, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID)
 	default:
@@ -155,7 +159,18 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 
 	p.mu.Lock()
 	p.room = room
+	p.getTargetBitrate = getTargetBitrate
 	p.mu.Unlock()
+
+	if p.role == rtcbench.Sender {
+		if err := p.PublishVideo(ctx, &rtcbench.PublishVideoRequest{
+			Plugin: PluginID,
+			RoomID: req.RoomID,
+		}); err != nil {
+			_ = p.Close()
+			return err
+		}
+	}
 	return nil
 }
 
@@ -166,19 +181,87 @@ func (p *participant) LeaveRoom(ctx context.Context, req *rtcbench.LeaveRequest)
 func (p *participant) Close() error {
 	p.mu.Lock()
 	room := p.room
+	publishedTrackID := p.publishedTrackID
+	publishCancel := p.publishCancel
 	p.room = nil
+	p.publishedTrackID = ""
+	p.publishCancel = nil
 	p.mu.Unlock()
+	if publishCancel != nil {
+		publishCancel()
+	}
+	if room != nil && publishedTrackID != "" {
+		_ = room.LocalParticipant.UnpublishTrack(publishedTrackID)
+	}
 	if room != nil {
 		room.Disconnect()
 	}
 	return nil
 }
 
-func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID string) (*lksdk.Room, error) {
-	if p.cameras == nil {
-		return nil, fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
+func (p *participant) PublishVideo(ctx context.Context, req *rtcbench.PublishVideoRequest) error {
+	p.mu.Lock()
+	if p.role != rtcbench.Sender {
+		p.mu.Unlock()
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if p.room == nil {
+		p.mu.Unlock()
+		return fmt.Errorf("%w: participant not joined", rtcbench.ErrCannotJoinRoom)
+	}
+	if p.publishedTrackID != "" {
+		p.mu.Unlock()
+		return nil
+	}
+	room := p.room
+	getTargetBitrate := p.getTargetBitrate
+	p.mu.Unlock()
+
+	trackID, cancel, err := p.plugin.publishVideo(ctx, p.log, room, getTargetBitrate)
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+		return err
 	}
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.room != room {
+		if cancel != nil {
+			cancel()
+		}
+		_ = room.LocalParticipant.UnpublishTrack(trackID)
+		return fmt.Errorf("%w: participant closed during publish", rtcbench.ErrCannotJoinRoom)
+	}
+	p.publishedTrackID = trackID
+	p.publishCancel = cancel
+	return nil
+}
+
+func (p *participant) UnpublishVideo(ctx context.Context, req *rtcbench.UnpublishVideoRequest) error {
+	p.mu.Lock()
+	if p.role != rtcbench.Sender {
+		p.mu.Unlock()
+		return rtcbench.ErrUnsupportedCapability
+	}
+	room := p.room
+	trackID := p.publishedTrackID
+	cancel := p.publishCancel
+	p.publishedTrackID = ""
+	p.publishCancel = nil
+	p.mu.Unlock()
+
+	if room == nil || trackID == "" {
+		return nil
+	}
+	if cancel != nil {
+		cancel()
+	}
+	return room.LocalParticipant.UnpublishTrack(trackID)
+}
+
+func (p *Plugin) connectSenderRoom(ctx context.Context, l *log.Logger, roomID, userID string) (*lksdk.Room, func() int, error) {
 	// Resolve SVC before connecting so we know whether to add GCC interceptors.
 	// When SVC is off (e.g. during benchmarks) we skip GCC entirely — no TWCC
 	// header injection, no bandwidth estimation, no adaptive bitrate overhead.
@@ -193,7 +276,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 		// 1.2 Mbps matches the target total for 3-layer SVC (S0=150K+S1=350K+S2=700K).
 		interceptors, getBitrate, err := lkinternal.SenderInterceptors(initialBitrateBps)
 		if err != nil {
-			return nil, fmt.Errorf("%w: build interceptors: %v", rtcbench.ErrCannotJoinRoom, err)
+			return nil, nil, fmt.Errorf("%w: build interceptors: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		getTargetBitrate = getBitrate
 		connectOpts = append(connectOpts, lksdk.WithInterceptors(interceptors))
@@ -206,9 +289,20 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 		ParticipantIdentity: userID,
 	}, &lksdk.RoomCallback{}, connectOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("connected to room %s (SVC=%v, autoSubscribe=false)", roomID, svc.Enabled)
+	return room, getTargetBitrate, nil
+}
+
+func (p *Plugin) publishVideo(ctx context.Context, l *log.Logger, room *lksdk.Room, getTargetBitrate func() int) (string, context.CancelFunc, error) {
+	if p.cameras == nil {
+		return "", nil, fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
+	}
+
+	const initialBitrateBps = 1_200_000
+	svc := ivf.ResolveSVC(p.cameras.Paths(), p.svcConfig.Mode, p.svcConfig.SpatialLayers, p.svcConfig.TemporalLayers, initialBitrateBps)
+	loopCtx, cancel := context.WithCancel(context.Background())
 
 	if svc.Enabled {
 		rtpTrack, err := webrtc.NewTrackLocalStaticRTP(
@@ -219,8 +313,8 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 			"video", "ivf",
 		)
 		if err != nil {
-			room.Disconnect()
-			return nil, fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
+			cancel()
+			return "", nil, fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		// Declare all SVC spatial layers to the SFU so it forwards them correctly.
 		// Without this the SFU treats the track as single-layer and strips S1/S2.
@@ -231,12 +325,14 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 			VideoHeight: int(svc.Config.Heights[svc.Config.NumSpatialLayers-1]),
 			VideoLayers: svcLayers,
 		}
-		if _, err = room.LocalParticipant.PublishTrack(rtpTrack, pubOpts); err != nil {
-			room.Disconnect()
-			return nil, fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
+		publication, err := room.LocalParticipant.PublishTrack(rtpTrack, pubOpts)
+		if err != nil {
+			cancel()
+			return "", nil, fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		l.Infof("SVC config: %d spatial x %d temporal layers (GCC target=%d bps)", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers, svc.Config.TargetBitrateBps)
-		go ivf.SVCLoopIntoTrack(l, rtpTrack, p.cameras.NewSource(), svc.Config, getTargetBitrate)
+		go ivf.SVCLoopIntoTrackUntil(loopCtx, l, rtpTrack, p.cameras.NewSource(), svc.Config, getTargetBitrate)
+		return publication.SID(), cancel, nil
 	} else {
 		sampleTrack, err := webrtc.NewTrackLocalStaticSample(
 			webrtc.RTPCodecCapability{
@@ -246,17 +342,17 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 			"video", "ivf",
 		)
 		if err != nil {
-			room.Disconnect()
-			return nil, fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
+			cancel()
+			return "", nil, fmt.Errorf("%w: create track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
-		if _, err = room.LocalParticipant.PublishTrack(sampleTrack, &lksdk.TrackPublicationOptions{Name: "video"}); err != nil {
-			room.Disconnect()
-			return nil, fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
+		publication, err := room.LocalParticipant.PublishTrack(sampleTrack, &lksdk.TrackPublicationOptions{Name: "video"})
+		if err != nil {
+			cancel()
+			return "", nil, fmt.Errorf("%w: publish track: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
-		go ivf.LoopIntoTrack(l, sampleTrack, p.cameras.NewSource())
+		go ivf.LoopIntoTrackUntil(loopCtx, l, sampleTrack, p.cameras.NewSource())
+		return publication.SID(), cancel, nil
 	}
-
-	return room, nil
 }
 
 // buildSVCLayers converts an SVCConfig into the VideoLayer slice needed by the

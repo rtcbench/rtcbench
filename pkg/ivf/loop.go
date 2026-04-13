@@ -1,11 +1,12 @@
 package ivf
 
 import (
+	"context"
 	"time"
 
-	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
+	"github.com/rtcbench/rtcbench/pkg/log"
 )
 
 // LoopIntoTrack continuously reads frames from src and writes them into
@@ -17,13 +18,34 @@ func LoopIntoTrack(
 	track *webrtc.TrackLocalStaticSample,
 	src FrameSource,
 ) {
+	LoopIntoTrackUntil(context.Background(), l, track, src)
+}
+
+func LoopIntoTrackUntil(
+	ctx context.Context,
+	l *log.Logger,
+	track *webrtc.TrackLocalStaticSample,
+	src FrameSource,
+) {
 	nextTime := time.Now()
 
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		data, dur, err := src.NextFrame()
 		if err != nil {
 			l.Errorf("[ivf] NextFrame: %v", err)
-			time.Sleep(2 * time.Second)
+			timer := time.NewTimer(2 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			nextTime = time.Now()
 			continue
 		}
@@ -35,7 +57,13 @@ func LoopIntoTrack(
 
 		nextTime = nextTime.Add(dur)
 		if wait := time.Until(nextTime); wait > 0 {
-			time.Sleep(wait)
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 		}
 	}
 }
