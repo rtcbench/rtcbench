@@ -25,13 +25,14 @@ const (
 )
 
 var (
-	ErrUnsupportedRole  = errors.New("unsupported role")
-	ErrCannotJoinRoom   = errors.New("cannot join room")
-	ErrUnknownPlugin    = errors.New("unknown plugin")
-	ErrUnknownScenario  = errors.New("unknown scenario")
-	ErrConnectionExists = errors.New("connection already exists")
-	ErrUserClosed       = errors.New("user is closed")
-	ErrMissingRoomID    = errors.New("missing room id")
+	ErrUnsupportedRole       = errors.New("unsupported role")
+	ErrUnsupportedCapability = errors.New("unsupported capability")
+	ErrCannotJoinRoom        = errors.New("cannot join room")
+	ErrUnknownPlugin         = errors.New("unknown plugin")
+	ErrUnknownScenario       = errors.New("unknown scenario")
+	ErrConnectionExists      = errors.New("connection already exists")
+	ErrUserClosed            = errors.New("user is closed")
+	ErrMissingRoomID         = errors.New("missing room id")
 )
 
 type Plugin interface {

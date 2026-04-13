@@ -22,10 +22,25 @@ type LeaveRequest struct {
 	Plugin string
 }
 
+type PublishVideoRequest struct {
+	RoomID string
+	Plugin string
+}
+
+type UnpublishVideoRequest struct {
+	RoomID string
+	Plugin string
+}
+
 type Participant interface {
 	JoinRoom(ctx context.Context, req *JoinRequest) error
 	LeaveRoom(ctx context.Context, req *LeaveRequest) error
 	Close() error
+}
+
+type VideoPublisher interface {
+	PublishVideo(ctx context.Context, req *PublishVideoRequest) error
+	UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) error
 }
 
 type ConnectionState int
@@ -130,7 +145,10 @@ func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
 }
 
 func (u *User) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
-	targets := u.selectConnections(req)
+	targets := u.selectConnections(targetSelector{
+		plugin: selectorPlugin(req),
+		roomID: selectorRoomID(req),
+	})
 	var errs []error
 	for _, conn := range targets {
 		if conn.state != StateJoined {
@@ -153,6 +171,104 @@ func (u *User) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
 		u.mu.Lock()
 		conn.state = StateLeft
 		u.mu.Unlock()
+	}
+	return errors.Join(errs...)
+}
+
+func (u *User) PublishVideo(ctx context.Context, req *PublishVideoRequest) error {
+	targets := u.selectConnections(targetSelector{
+		plugin: selectorPlugin(req),
+		roomID: selectorRoomID(req),
+	})
+
+	var (
+		errs        []error
+		supported   int
+		successful  int
+		unsupported int
+	)
+	for _, conn := range targets {
+		if conn.state != StateJoined {
+			continue
+		}
+		vp, ok := conn.dp.(VideoPublisher)
+		if !ok {
+			continue
+		}
+		supported++
+		pubReq := &PublishVideoRequest{Plugin: conn.plugin, RoomID: conn.roomID}
+		if req != nil {
+			if req.Plugin != "" {
+				pubReq.Plugin = req.Plugin
+			}
+			if req.RoomID != "" {
+				pubReq.RoomID = req.RoomID
+			}
+		}
+		if err := vp.PublishVideo(ctx, pubReq); err != nil {
+			if errors.Is(err, ErrUnsupportedCapability) {
+				unsupported++
+				continue
+			}
+			errs = append(errs, fmt.Errorf("publish video %s/%s: %w", conn.plugin, conn.roomID, err))
+			continue
+		}
+		successful++
+	}
+	if supported == 0 && len(targets) > 0 {
+		errs = append(errs, ErrUnsupportedCapability)
+	}
+	if supported > 0 && successful == 0 && unsupported > 0 && len(errs) == 0 {
+		errs = append(errs, ErrUnsupportedCapability)
+	}
+	return errors.Join(errs...)
+}
+
+func (u *User) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) error {
+	targets := u.selectConnections(targetSelector{
+		plugin: selectorPlugin(req),
+		roomID: selectorRoomID(req),
+	})
+
+	var (
+		errs        []error
+		supported   int
+		successful  int
+		unsupported int
+	)
+	for _, conn := range targets {
+		if conn.state != StateJoined {
+			continue
+		}
+		vp, ok := conn.dp.(VideoPublisher)
+		if !ok {
+			continue
+		}
+		supported++
+		unpubReq := &UnpublishVideoRequest{Plugin: conn.plugin, RoomID: conn.roomID}
+		if req != nil {
+			if req.Plugin != "" {
+				unpubReq.Plugin = req.Plugin
+			}
+			if req.RoomID != "" {
+				unpubReq.RoomID = req.RoomID
+			}
+		}
+		if err := vp.UnpublishVideo(ctx, unpubReq); err != nil {
+			if errors.Is(err, ErrUnsupportedCapability) {
+				unsupported++
+				continue
+			}
+			errs = append(errs, fmt.Errorf("unpublish video %s/%s: %w", conn.plugin, conn.roomID, err))
+			continue
+		}
+		successful++
+	}
+	if supported == 0 && len(targets) > 0 {
+		errs = append(errs, ErrUnsupportedCapability)
+	}
+	if supported > 0 && successful == 0 && unsupported > 0 && len(errs) == 0 {
+		errs = append(errs, ErrUnsupportedCapability)
 	}
 	return errors.Join(errs...)
 }
@@ -197,16 +313,77 @@ func (u *User) Close() error {
 	return errors.Join(errs...)
 }
 
-func (u *User) selectConnections(req *LeaveRequest) []*connection {
+type targetSelector struct {
+	plugin string
+	roomID string
+}
+
+type pluginRoomSelector interface {
+	GetPlugin() string
+	GetRoomID() string
+}
+
+func selectorPlugin(req interface{ GetPlugin() string }) string {
+	if req == nil {
+		return ""
+	}
+	return req.GetPlugin()
+}
+
+func selectorRoomID(req interface{ GetRoomID() string }) string {
+	if req == nil {
+		return ""
+	}
+	return req.GetRoomID()
+}
+
+func (r *LeaveRequest) GetPlugin() string {
+	if r == nil {
+		return ""
+	}
+	return r.Plugin
+}
+func (r *LeaveRequest) GetRoomID() string {
+	if r == nil {
+		return ""
+	}
+	return r.RoomID
+}
+func (r *PublishVideoRequest) GetPlugin() string {
+	if r == nil {
+		return ""
+	}
+	return r.Plugin
+}
+func (r *PublishVideoRequest) GetRoomID() string {
+	if r == nil {
+		return ""
+	}
+	return r.RoomID
+}
+func (r *UnpublishVideoRequest) GetPlugin() string {
+	if r == nil {
+		return ""
+	}
+	return r.Plugin
+}
+func (r *UnpublishVideoRequest) GetRoomID() string {
+	if r == nil {
+		return ""
+	}
+	return r.RoomID
+}
+
+func (u *User) selectConnections(sel targetSelector) []*connection {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
 
 	targets := make([]*connection, 0, len(u.connections))
 	for key, conn := range u.connections {
-		if req != nil && req.Plugin != "" && req.Plugin != key.plugin {
+		if sel.plugin != "" && sel.plugin != key.plugin {
 			continue
 		}
-		if req != nil && req.RoomID != "" && req.RoomID != key.roomID {
+		if sel.roomID != "" && sel.roomID != key.roomID {
 			continue
 		}
 		targets = append(targets, conn)
