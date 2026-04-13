@@ -48,7 +48,15 @@ func (DefaultScenario) Run(ctx context.Context, env ScenarioEnv) error {
 
 type ChurnScenario struct{}
 
+type churnMode string
+
+const (
+	churnModeLeaveRejoin churnMode = "leave-rejoin"
+	churnModeMediaToggle churnMode = "media-toggle"
+)
+
 type churnConfig struct {
+	mode            churnMode
 	sessionDuration time.Duration
 	rejoinDelay     time.Duration
 }
@@ -95,29 +103,10 @@ func (ChurnScenario) Run(ctx context.Context, env ScenarioEnv) error {
 					}
 				}
 
-				for {
-					if err := runChurnSlot(runCtx, env.Client(), env.Log(), env.Config(), roomName, role, slot, cfg); err != nil {
-						select {
-						case errCh <- err:
-						case <-runCtx.Done():
-						}
-						return
-					}
-
-					if cfg.rejoinDelay > 0 {
-						timer := time.NewTimer(cfg.rejoinDelay)
-						select {
-						case <-runCtx.Done():
-							timer.Stop()
-							return
-						case <-timer.C:
-						}
-					} else {
-						select {
-						case <-runCtx.Done():
-							return
-						default:
-						}
+				if err := runChurnLoop(runCtx, env.Client(), env.Log(), env.Config(), roomName, role, slot, cfg); err != nil {
+					select {
+					case errCh <- err:
+					case <-runCtx.Done():
 					}
 				}
 			}(roomName, role, slot, initialDelay)
@@ -134,11 +123,37 @@ func (ChurnScenario) Run(ctx context.Context, env ScenarioEnv) error {
 			}
 		case <-doneCh:
 			completed++
-		case <-runCtx.Done():
-			return nil
 		}
 	}
 	return nil
+}
+
+func runChurnLoop(ctx context.Context, client *Client, l *log.Logger, cfg *Config, roomName string, role UserRole, slot int, churnCfg churnConfig) error {
+	if churnCfg.mode == churnModeMediaToggle && role == Sender {
+		return runChurnMediaSlot(ctx, client, l, cfg, roomName, role, slot, churnCfg)
+	}
+
+	for {
+		if err := runChurnSlot(ctx, client, l, cfg, roomName, role, slot, churnCfg); err != nil {
+			return err
+		}
+
+		if churnCfg.rejoinDelay > 0 {
+			timer := time.NewTimer(churnCfg.rejoinDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-timer.C:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
+		}
+	}
 }
 
 func runChurnSlot(ctx context.Context, client *Client, l *log.Logger, cfg *Config, roomName string, role UserRole, slot int, churnCfg churnConfig) error {
@@ -171,14 +186,98 @@ func runChurnSlot(ctx context.Context, client *Client, l *log.Logger, cfg *Confi
 	return nil
 }
 
+func runChurnMediaSlot(ctx context.Context, client *Client, l *log.Logger, cfg *Config, roomName string, role UserRole, slot int, churnCfg churnConfig) error {
+	user := client.CreateUser(ctx, &UserConfig{
+		UserID: fmt.Sprintf("%s-%s", string(role), uuid.NewString()),
+		Role:   role,
+	})
+	defer func() {
+		if err := user.Close(); err != nil {
+			l.Errorf("[churn] close %s slot=%d room=%s user=%s err=%v", role, slot, roomName, user.id, err)
+		}
+	}()
+
+	if err := user.JoinRoom(ctx, &JoinRequest{
+		Plugin: cfg.Spec.Plugin,
+		RoomID: roomName,
+	}); err != nil {
+		return fmt.Errorf("churn join room %q slot %d: %w", roomName, slot, err)
+	}
+	if err := user.PublishVideo(ctx, &PublishVideoRequest{
+		Plugin: cfg.Spec.Plugin,
+		RoomID: roomName,
+	}); err != nil {
+		return fmt.Errorf("churn publish room %q slot %d: %w", roomName, slot, err)
+	}
+
+	l.Infof("[churn] joined %s slot=%d room=%s user=%s", role, slot, roomName, user.id)
+
+	for {
+		timer := time.NewTimer(churnCfg.sessionDuration)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+
+		if err := user.UnpublishVideo(ctx, &UnpublishVideoRequest{
+			Plugin: cfg.Spec.Plugin,
+			RoomID: roomName,
+		}); err != nil {
+			return fmt.Errorf("churn unpublish room %q slot %d: %w", roomName, slot, err)
+		}
+
+		l.Infof("[churn] unpublished %s slot=%d room=%s user=%s", role, slot, roomName, user.id)
+
+		if churnCfg.rejoinDelay > 0 {
+			timer := time.NewTimer(churnCfg.rejoinDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-timer.C:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
+		}
+
+		if err := user.PublishVideo(ctx, &PublishVideoRequest{
+			Plugin: cfg.Spec.Plugin,
+			RoomID: roomName,
+		}); err != nil {
+			return fmt.Errorf("churn publish room %q slot %d: %w", roomName, slot, err)
+		}
+
+		l.Infof("[churn] published %s slot=%d room=%s user=%s", role, slot, roomName, user.id)
+	}
+}
+
 func loadChurnConfig(raw map[string]any) (churnConfig, error) {
 	cfg := churnConfig{
+		mode:            churnModeLeaveRejoin,
 		sessionDuration: 30 * time.Second,
 	}
 	if raw == nil {
 		return cfg, nil
 	}
 
+	if v, ok := raw["mode"]; ok {
+		mode, ok := v.(string)
+		if !ok {
+			return churnConfig{}, fmt.Errorf("scenarioConfig.mode: expected string")
+		}
+		switch churnMode(mode) {
+		case churnModeLeaveRejoin, churnModeMediaToggle:
+			cfg.mode = churnMode(mode)
+		default:
+			return churnConfig{}, fmt.Errorf("scenarioConfig.mode: must be %q or %q", churnModeLeaveRejoin, churnModeMediaToggle)
+		}
+	}
 	if v, ok := raw["sessionDuration"]; ok {
 		dur, err := durationFromAny(v)
 		if err != nil {

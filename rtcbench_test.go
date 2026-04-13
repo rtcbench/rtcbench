@@ -311,6 +311,9 @@ func TestLoadChurnConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadChurnConfig() error = %v", err)
 	}
+	if cfg.mode != churnModeLeaveRejoin {
+		t.Fatalf("mode = %q, want %q", cfg.mode, churnModeLeaveRejoin)
+	}
 	if cfg.sessionDuration != 30*time.Second {
 		t.Fatalf("sessionDuration = %s, want 30s", cfg.sessionDuration)
 	}
@@ -322,6 +325,15 @@ func TestLoadChurnConfigDefaults(t *testing.T) {
 func TestLoadChurnConfigInvalidDuration(t *testing.T) {
 	_, err := loadChurnConfig(map[string]any{
 		"sessionDuration": "nope",
+	})
+	if err == nil {
+		t.Fatal("loadChurnConfig() error = nil, want error")
+	}
+}
+
+func TestLoadChurnConfigInvalidMode(t *testing.T) {
+	_, err := loadChurnConfig(map[string]any{
+		"mode": "nope",
 	})
 	if err == nil {
 		t.Fatal("loadChurnConfig() error = nil, want error")
@@ -379,6 +391,50 @@ func TestChurnScenarioRejoinsUsers(t *testing.T) {
 	}
 	if closed == 0 {
 		t.Fatal("no churn participants were closed")
+	}
+}
+
+func TestChurnScenarioMediaToggleSenders(t *testing.T) {
+	plugin := &fakeVideoParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+	client.env.config.Spec.Conference.Cameras.PerRoom = 1
+	client.env.config.Spec.ScenarioConfig = map[string]any{
+		"mode":            string(churnModeMediaToggle),
+		"sessionDuration": "20ms",
+		"rejoinDelay":     "5ms",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 85*time.Millisecond)
+	defer cancel()
+
+	if err := client.RunScenario(ctx, ChurnScenarioID); err != nil {
+		t.Fatalf("RunScenario(churn) error = %v", err)
+	}
+
+	client.mu.Lock()
+	userCount := len(client.users)
+	client.mu.Unlock()
+	if userCount != 0 {
+		t.Fatalf("tracked users = %d, want 0 after churn shutdown", userCount)
+	}
+
+	plugin.mu.Lock()
+	defer plugin.mu.Unlock()
+	if len(plugin.participants) != 1 {
+		t.Fatalf("participants = %d, want 1 joined sender connection", len(plugin.participants))
+	}
+	p := plugin.participants[0]
+	if p.joinCalls != 1 {
+		t.Fatalf("joinCalls = %d, want 1", p.joinCalls)
+	}
+	if p.publishCalls == 0 {
+		t.Fatal("publishCalls = 0, want at least one publish")
+	}
+	if p.unpublishCalls == 0 {
+		t.Fatal("unpublishCalls = 0, want at least one unpublish")
+	}
+	if p.closeCalls != 1 {
+		t.Fatalf("closeCalls = %d, want 1", p.closeCalls)
 	}
 }
 
