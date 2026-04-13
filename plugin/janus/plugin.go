@@ -138,13 +138,15 @@ func (p *Plugin) JoinRoom(ctx context.Context, role rtcbench.UserRole, roomID, u
 }
 
 type participant struct {
-	mu      sync.Mutex
-	plugin  *Plugin
-	userID  string
-	role    rtcbench.UserRole
-	log     *log.Logger
-	session *janus.Session
-	pc      *webrtc.PeerConnection
+	mu               sync.Mutex
+	plugin           *Plugin
+	userID           string
+	role             rtcbench.UserRole
+	log              *log.Logger
+	session          *janus.Session
+	pc               *webrtc.PeerConnection
+	startPublishLoop func() context.CancelFunc
+	publishCancel    context.CancelFunc
 }
 
 func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
@@ -165,12 +167,13 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	p.mu.Unlock()
 
 	var (
-		session *janus.Session
-		pc      *webrtc.PeerConnection
+		session          *janus.Session
+		pc               *webrtc.PeerConnection
+		startPublishLoop func() context.CancelFunc
 	)
 	switch p.role {
 	case rtcbench.Sender:
-		session, pc, err = p.plugin.joinSender(ctx, p.log, roomID, p.userID)
+		session, pc, startPublishLoop, err = p.plugin.joinSender(ctx, p.log, roomID, p.userID)
 	case rtcbench.Viewer:
 		session, pc, err = p.plugin.joinViewer(ctx, p.log, roomID, p.userID)
 	default:
@@ -183,6 +186,7 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	p.mu.Lock()
 	p.session = session
 	p.pc = pc
+	p.startPublishLoop = startPublishLoop
 	p.mu.Unlock()
 	return nil
 }
@@ -195,10 +199,16 @@ func (p *participant) Close() error {
 	p.mu.Lock()
 	session := p.session
 	pc := p.pc
+	publishCancel := p.publishCancel
 	p.session = nil
 	p.pc = nil
+	p.startPublishLoop = nil
+	p.publishCancel = nil
 	p.mu.Unlock()
 
+	if publishCancel != nil {
+		publishCancel()
+	}
 	if session != nil {
 		session.Close()
 	}
@@ -208,14 +218,47 @@ func (p *participant) Close() error {
 	return nil
 }
 
-func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID int64, userID string) (*janus.Session, *webrtc.PeerConnection, error) {
+func (p *participant) PublishVideo(ctx context.Context, req *rtcbench.PublishVideoRequest) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.role != rtcbench.Sender {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if p.session == nil || p.pc == nil {
+		return fmt.Errorf("%w: participant not joined", rtcbench.ErrCannotJoinRoom)
+	}
+	if p.publishCancel != nil {
+		return nil
+	}
+	if p.startPublishLoop == nil {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	p.publishCancel = p.startPublishLoop()
+	return nil
+}
+
+func (p *participant) UnpublishVideo(ctx context.Context, req *rtcbench.UnpublishVideoRequest) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.role != rtcbench.Sender {
+		return rtcbench.ErrUnsupportedCapability
+	}
+	if p.publishCancel == nil {
+		return nil
+	}
+	p.publishCancel()
+	p.publishCancel = nil
+	return nil
+}
+
+func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID int64, userID string) (*janus.Session, *webrtc.PeerConnection, func() context.CancelFunc, error) {
 	if p.cameras == nil {
-		return nil, nil, fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
+		return nil, nil, nil, fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
 	}
 
 	sessionID, err := p.client.CreateSession()
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: create session: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: create session: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("session created: %d", sessionID)
 
@@ -224,7 +267,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID int64, us
 	handleID, err := p.client.AttachPlugin(sessionID, videoroomPlugin)
 	if err != nil {
 		session.Close()
-		return nil, nil, fmt.Errorf("%w: attach plugin: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: attach plugin: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	l.Infof("handle attached: %d", handleID)
 
@@ -236,11 +279,11 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID int64, us
 	}, nil)
 	if err != nil {
 		session.Close()
-		return nil, nil, fmt.Errorf("%w: join: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: join: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	if joined.PluginData == nil || joined.PluginData.Data["videoroom"] != "joined" {
 		session.Close()
-		return nil, nil, fmt.Errorf("%w: unexpected join response: %v", rtcbench.ErrCannotJoinRoom, joined)
+		return nil, nil, nil, fmt.Errorf("%w: unexpected join response: %v", rtcbench.ErrCannotJoinRoom, joined)
 	}
 	l.Infof("joined room %d as publisher", roomID)
 
@@ -250,7 +293,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID int64, us
 	var (
 		pc        *webrtc.PeerConnection
 		offerSDP  string
-		startLoop func()
+		startLoop func() context.CancelFunc
 	)
 
 	if svc.Enabled {
@@ -259,21 +302,25 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID int64, us
 		pc, rtpTrack, getBitrate, offerSDP, err = janus.StartPionPublisher(l, p.clientIP, initialBitrateBps)
 		if err != nil {
 			session.Close()
-			return nil, nil, fmt.Errorf("%w: pion publisher: %v", rtcbench.ErrCannotJoinRoom, err)
+			return nil, nil, nil, fmt.Errorf("%w: pion publisher: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
 		l.Infof("SVC config: %d spatial x %d temporal layers", svc.Config.NumSpatialLayers, svc.Config.NumTemporalLayers)
-		startLoop = func() {
-			go ivf.SVCLoopIntoTrack(l, rtpTrack, p.cameras.NewSource(), svc.Config, getBitrate)
+		startLoop = func() context.CancelFunc {
+			loopCtx, cancel := context.WithCancel(context.Background())
+			go ivf.SVCLoopIntoTrackUntil(loopCtx, l, rtpTrack, p.cameras.NewSource(), svc.Config, getBitrate)
+			return cancel
 		}
 	} else {
 		var sampleTrack *webrtc.TrackLocalStaticSample
 		pc, sampleTrack, offerSDP, err = janus.StartSimplePublisher(l, p.clientIP)
 		if err != nil {
 			session.Close()
-			return nil, nil, fmt.Errorf("%w: pion publisher: %v", rtcbench.ErrCannotJoinRoom, err)
+			return nil, nil, nil, fmt.Errorf("%w: pion publisher: %v", rtcbench.ErrCannotJoinRoom, err)
 		}
-		startLoop = func() {
-			go ivf.LoopIntoTrack(l, sampleTrack, p.cameras.NewSource())
+		startLoop = func() context.CancelFunc {
+			loopCtx, cancel := context.WithCancel(context.Background())
+			go ivf.LoopIntoTrackUntil(loopCtx, l, sampleTrack, p.cameras.NewSource())
+			return cancel
 		}
 	}
 
@@ -288,20 +335,20 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID int64, us
 	if err != nil {
 		session.Close()
 		_ = pc.Close()
-		return nil, nil, fmt.Errorf("%w: publish: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: publish: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 	if configured.PluginData != nil {
 		if errMsg, ok := configured.PluginData.Data["error"].(string); ok {
 			errCode, _ := configured.PluginData.Data["error_code"].(float64)
 			session.Close()
 			_ = pc.Close()
-			return nil, nil, fmt.Errorf("%w: publish: janus error %d: %s", rtcbench.ErrCannotJoinRoom, int(errCode), errMsg)
+			return nil, nil, nil, fmt.Errorf("%w: publish: janus error %d: %s", rtcbench.ErrCannotJoinRoom, int(errCode), errMsg)
 		}
 	}
 	if configured.JSEP == nil {
 		session.Close()
 		_ = pc.Close()
-		return nil, nil, fmt.Errorf("%w: publish response missing JSEP answer", rtcbench.ErrCannotJoinRoom)
+		return nil, nil, nil, fmt.Errorf("%w: publish response missing JSEP answer", rtcbench.ErrCannotJoinRoom)
 	}
 	l.Infof("configured, got JSEP answer")
 
@@ -311,12 +358,10 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID int64, us
 	}); err != nil {
 		session.Close()
 		_ = pc.Close()
-		return nil, nil, fmt.Errorf("%w: SetRemoteDescription: %v", rtcbench.ErrCannotJoinRoom, err)
+		return nil, nil, nil, fmt.Errorf("%w: SetRemoteDescription: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 
-	startLoop()
-
-	return session, pc, nil
+	return session, pc, startLoop, nil
 }
 
 func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID int64, userID string) (*janus.Session, *webrtc.PeerConnection, error) {
