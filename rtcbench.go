@@ -28,6 +28,7 @@ var (
 	ErrUnsupportedRole  = errors.New("unsupported role")
 	ErrCannotJoinRoom   = errors.New("cannot join room")
 	ErrUnknownPlugin    = errors.New("unknown plugin")
+	ErrUnknownScenario  = errors.New("unknown scenario")
 	ErrConnectionExists = errors.New("connection already exists")
 	ErrUserClosed       = errors.New("user is closed")
 	ErrMissingRoomID    = errors.New("missing room id")
@@ -113,6 +114,10 @@ type PluginFactory func() Plugin
 
 type PluginRegistry map[string]PluginFactory
 
+type ScenarioFactory func() Scenario
+
+type ScenarioRegistry map[string]ScenarioFactory
+
 type pluginEnv struct {
 	config         *Config
 	logRegistry    *log.Registry
@@ -157,25 +162,29 @@ type wrappedSignalingError struct {
 }
 
 type Client struct {
-	mu       sync.Mutex
-	env      *pluginEnv
-	registry PluginRegistry
-	plugins  map[string]Plugin
-	users    map[string]*User
-	log      *log.Logger
+	mu        sync.Mutex
+	env       *pluginEnv
+	registry  PluginRegistry
+	scenarios ScenarioRegistry
+	plugins   map[string]Plugin
+	users     map[string]*User
+	log       *log.Logger
 }
 
 func NewClient(config *Config, logRegistry *log.Registry) *Client {
-	return &Client{
+	client := &Client{
 		env: &pluginEnv{
 			config:      config,
 			logRegistry: logRegistry,
 		},
-		registry: make(PluginRegistry),
-		plugins:  make(map[string]Plugin),
-		users:    make(map[string]*User),
-		log:      logRegistry.NewLogger("general", ""),
+		registry:  make(PluginRegistry),
+		scenarios: make(ScenarioRegistry),
+		plugins:   make(map[string]Plugin),
+		users:     make(map[string]*User),
+		log:       logRegistry.NewLogger("general", ""),
 	}
+	client.RegisterScenario(DefaultScenarioID, func() Scenario { return DefaultScenario{} })
+	return client
 }
 
 func (c *Client) AddStatsConsumer(fn func(vp9_stats.Period, vp9_stats.VideoQualitySample)) {
@@ -184,6 +193,22 @@ func (c *Client) AddStatsConsumer(fn func(vp9_stats.Period, vp9_stats.VideoQuali
 
 func (c *Client) RegisterPlugin(pluginID string, factory PluginFactory) {
 	c.registry[pluginID] = factory
+}
+
+func (c *Client) RegisterScenario(scenarioID string, factory ScenarioFactory) {
+	c.scenarios[scenarioID] = factory
+}
+
+func (c *Client) RunScenario(ctx context.Context, scenarioID string) error {
+	factory, exists := c.scenarios[scenarioID]
+	if !exists {
+		return ErrUnknownScenario
+	}
+	return factory().Run(ctx, &scenarioEnv{
+		config: c.env.config,
+		client: c,
+		log:    c.log,
+	})
 }
 
 func (c *Client) SetupPlugin(ctx context.Context, pluginID string) error {
@@ -273,6 +298,10 @@ func (c *Client) ShutdownAll(ctx context.Context) error {
 }
 
 func (c *Client) JoinAllRooms(ctx context.Context) error {
+	return c.joinAllRooms(ctx)
+}
+
+func (c *Client) joinAllRooms(ctx context.Context) error {
 	if err := c.SetupPlugin(ctx, c.env.config.Spec.Plugin); err != nil {
 		return err
 	}

@@ -30,6 +30,7 @@ var (
 	ErrMissingSpec       = errors.New("missing spec section")
 	ErrMissingPlugin     = errors.New("missing spec.plugin string")
 	ErrInvalidPlugin     = errors.New("invalid spec.plugin string")
+	ErrInvalidScenario   = errors.New("invalid spec.scenario string")
 	ErrMissingConference = errors.New("missing spec.conference section")
 	ErrMissingNetwork    = errors.New("missing spec.network section")
 	ErrMissingLogging    = errors.New("missing spec.logging section")
@@ -179,6 +180,7 @@ func (yc *YAMLMetadataConfig) mustConvert() MetadataConfig {
 
 type SpecConfig struct {
 	Plugin       string
+	Scenario     string
 	Conference   ConferenceConfig
 	Network      NetworkConfig
 	PluginConfig map[string]any
@@ -188,6 +190,7 @@ type SpecConfig struct {
 
 type YAMLSpecConfig struct {
 	Plugin       *string               `yaml:"plugin,omitempty"`
+	Scenario     *string               `yaml:"scenario,omitempty"`
 	Conference   *YAMLConferenceConfig `yaml:"conference,omitempty"`
 	Network      *YAMLNetworkConfig    `yaml:"network,omitempty"`
 	PluginConfig map[string]any        `yaml:"pluginConfig,omitempty"`
@@ -220,6 +223,9 @@ func (yc *YAMLSpecConfig) validate() error {
 		// return early for invalid plugin name string
 		return ErrInvalidPlugin
 	}
+	if yc.Scenario != nil && !nameRegex.MatchString(*yc.Scenario) {
+		return ErrInvalidScenario
+	}
 	if yc.Conference == nil {
 		errs = append(errs, ErrMissingConference)
 	} else {
@@ -250,6 +256,9 @@ func (yc *YAMLSpecConfig) validate() error {
 func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 	var c SpecConfig
 	c.Plugin = *yc.Plugin
+	if yc.Scenario != nil {
+		c.Scenario = *yc.Scenario
+	}
 	c.Conference = yc.Conference.mustConvert()
 	c.Network = yc.Network.mustConvert()
 	if yc.PluginConfig != nil {

@@ -195,6 +195,38 @@ func TestJoinAllRoomsSupportsLegacyPlugins(t *testing.T) {
 	}
 }
 
+func TestClientRunScenarioUsesRegisteredScenario(t *testing.T) {
+	client := newTestClient("fake", func() Plugin { return &fakeParticipantPlugin{} })
+	scenario := &fakeScenario{}
+	client.RegisterScenario("custom", func() Scenario { return scenario })
+
+	if err := client.RunScenario(context.Background(), "custom"); err != nil {
+		t.Fatalf("RunScenario() error = %v", err)
+	}
+
+	if scenario.runCalls != 1 {
+		t.Fatalf("scenario Run() calls = %d, want 1", scenario.runCalls)
+	}
+	if scenario.env == nil {
+		t.Fatal("scenario env is nil")
+	}
+	if scenario.env.Client() != client {
+		t.Fatal("scenario env client mismatch")
+	}
+	if scenario.env.Config() != client.env.config {
+		t.Fatal("scenario env config mismatch")
+	}
+}
+
+func TestClientRunScenarioUnknownScenario(t *testing.T) {
+	client := newTestClient("fake", func() Plugin { return &fakeParticipantPlugin{} })
+
+	err := client.RunScenario(context.Background(), "missing")
+	if !errors.Is(err, ErrUnknownScenario) {
+		t.Fatalf("RunScenario() error = %v, want ErrUnknownScenario", err)
+	}
+}
+
 func newTestClient(pluginID string, factory PluginFactory) *Client {
 	cfg := &Config{
 		Spec: SpecConfig{
@@ -298,5 +330,16 @@ func (p *fakeLegacyPlugin) Shutdown(ctx context.Context) error {
 
 func (p *fakeLegacyPlugin) JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error {
 	p.joinCalls++
+	return nil
+}
+
+type fakeScenario struct {
+	runCalls int
+	env      ScenarioEnv
+}
+
+func (s *fakeScenario) Run(ctx context.Context, env ScenarioEnv) error {
+	s.runCalls++
+	s.env = env
 	return nil
 }
