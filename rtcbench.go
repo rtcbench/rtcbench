@@ -306,7 +306,7 @@ func (c *Client) ShutdownAll(ctx context.Context) error {
 }
 
 func (c *Client) JoinAllRooms(ctx context.Context) error {
-	return c.joinAllRooms(ctx)
+	return c.RunScenario(ctx, DefaultScenarioID)
 }
 
 func (c *Client) joinAllRooms(ctx context.Context) error {
