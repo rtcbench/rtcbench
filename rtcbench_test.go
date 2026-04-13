@@ -324,6 +324,20 @@ func TestClientRunScenarioUsesRegisteredScenario(t *testing.T) {
 	}
 }
 
+func TestJoinAllRoomsUsesDefaultScenario(t *testing.T) {
+	client := newTestClient("fake", func() Plugin { return &fakeParticipantPlugin{} })
+	scenario := &fakeScenario{}
+	client.RegisterScenario(DefaultScenarioID, func() Scenario { return scenario })
+
+	if err := client.JoinAllRooms(context.Background()); err != nil {
+		t.Fatalf("JoinAllRooms() error = %v", err)
+	}
+
+	if scenario.runCalls != 1 {
+		t.Fatalf("default scenario Run() calls = %d, want 1", scenario.runCalls)
+	}
+}
+
 func TestClientRunScenarioUnknownScenario(t *testing.T) {
 	client := newTestClient("fake", func() Plugin { return &fakeParticipantPlugin{} })
 
