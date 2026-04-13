@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
 	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
-	"github.com/google/uuid"
 )
 
 type UserRole string
@@ -25,15 +25,23 @@ const (
 )
 
 var (
-	ErrUnsupportedRole = errors.New("unsupported role")
-	ErrCannotJoinRoom  = errors.New("cannot join room")
-	ErrUnknownPlugin   = errors.New("unknown plugin")
+	ErrUnsupportedRole  = errors.New("unsupported role")
+	ErrCannotJoinRoom   = errors.New("cannot join room")
+	ErrUnknownPlugin    = errors.New("unknown plugin")
+	ErrConnectionExists = errors.New("connection already exists")
+	ErrUserClosed       = errors.New("user is closed")
+	ErrMissingRoomID    = errors.New("missing room id")
 )
 
 type Plugin interface {
 	Setup(ctx context.Context, e PluginEnv) error
 	Shutdown(ctx context.Context) error
 	JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error
+}
+
+type ParticipantPlugin interface {
+	Plugin
+	NewParticipant(ctx context.Context, cfg *UserConfig) (Participant, error)
 }
 
 type PluginEnv interface {
@@ -149,9 +157,11 @@ type wrappedSignalingError struct {
 }
 
 type Client struct {
+	mu       sync.Mutex
 	env      *pluginEnv
 	registry PluginRegistry
-	plugin   Plugin
+	plugins  map[string]Plugin
+	users    map[string]*User
 	log      *log.Logger
 }
 
@@ -162,6 +172,8 @@ func NewClient(config *Config, logRegistry *log.Registry) *Client {
 			logRegistry: logRegistry,
 		},
 		registry: make(PluginRegistry),
+		plugins:  make(map[string]Plugin),
+		users:    make(map[string]*User),
 		log:      logRegistry.NewLogger("general", ""),
 	}
 }
@@ -174,36 +186,95 @@ func (c *Client) RegisterPlugin(pluginID string, factory PluginFactory) {
 	c.registry[pluginID] = factory
 }
 
-func (c *Client) Shutdown(ctx context.Context) error {
-	var shutdownErr error
-	done := make(chan struct{})
-	go func() {
-		err := c.plugin.Shutdown(ctx)
-		if err != nil {
-			shutdownErr = err
-		}
-		close(done)
-	}()
+func (c *Client) SetupPlugin(ctx context.Context, pluginID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	select {
-	case <-done:
-		return shutdownErr
-	case <-ctx.Done():
-		return ctx.Err()
+	if _, exists := c.plugins[pluginID]; exists {
+		return nil
 	}
+
+	factory, exists := c.registry[pluginID]
+	if !exists {
+		return ErrUnknownPlugin
+	}
+
+	plugin := factory()
+	if err := plugin.Setup(ctx, c.env); err != nil {
+		return err
+	}
+	c.plugins[pluginID] = plugin
+	return nil
+}
+
+func (c *Client) CreateUser(_ context.Context, cfg *UserConfig) *User {
+	user := &User{
+		client:        c,
+		id:            cfg.UserID,
+		role:          cfg.Role,
+		connections:   make(map[connectionKey]*connection),
+		log:           c.env.logRegistry.NewLogger("general", "["+cfg.UserID+"]"),
+		defaultPlugin: c.env.config.Spec.Plugin,
+	}
+
+	c.mu.Lock()
+	c.users[cfg.UserID] = user
+	c.mu.Unlock()
+
+	return user
+}
+
+func (c *Client) GetUser(userID string) *User {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.users[userID]
+}
+
+func (c *Client) Shutdown(ctx context.Context) error {
+	return c.ShutdownAll(ctx)
+}
+
+func (c *Client) ShutdownAll(ctx context.Context) error {
+	c.mu.Lock()
+	users := make([]*User, 0, len(c.users))
+	for _, user := range c.users {
+		users = append(users, user)
+	}
+	plugins := make([]Plugin, 0, len(c.plugins))
+	for _, plugin := range c.plugins {
+		plugins = append(plugins, plugin)
+	}
+	c.mu.Unlock()
+
+	var errs []error
+	for _, user := range users {
+		if err := user.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	for _, plugin := range plugins {
+		done := make(chan error, 1)
+		go func(p Plugin) {
+			done <- p.Shutdown(ctx)
+		}(plugin)
+
+		select {
+		case err := <-done:
+			if err != nil {
+				errs = append(errs, err)
+			}
+		case <-ctx.Done():
+			errs = append(errs, ctx.Err())
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (c *Client) JoinAllRooms(ctx context.Context) error {
-	if c.plugin == nil {
-		factory, exists := c.registry[c.env.config.Spec.Plugin]
-		if !exists {
-			return ErrUnknownPlugin
-		}
-		c.plugin = factory()
-		err := c.plugin.Setup(ctx, c.env)
-		if err != nil {
-			return err
-		}
+	if err := c.SetupPlugin(ctx, c.env.config.Spec.Plugin); err != nil {
+		return err
 	}
 	wg := sync.WaitGroup{}
 	for i := 0; i < c.env.config.Spec.Conference.TotalRooms; i++ {
@@ -339,7 +410,14 @@ func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSign
 		go func(workerID int) {
 			defer wg.Done()
 			for vc := range cfgCh {
-				if err := c.plugin.JoinRoom(ctx, vc.role, vc.roomID, vc.userID); err != nil {
+				user := c.CreateUser(ctx, &UserConfig{
+					UserID: vc.userID,
+					Role:   vc.role,
+				})
+				if err := user.JoinRoom(ctx, &JoinRequest{
+					Plugin: c.env.config.Spec.Plugin,
+					RoomID: vc.roomID,
+				}); err != nil {
 					errCh <- wrappedSignalingError{
 						error:    fmt.Errorf("cannot join %q to room %q: %w", vc.userID, cfg.roomName, err),
 						roomName: cfg.roomName,
@@ -361,4 +439,10 @@ func (c *Client) joinRoom(ctx context.Context, cfg joinRoomConfig) []wrappedSign
 	}
 
 	return errs
+}
+
+func (c *Client) getPlugin(pluginID string) Plugin {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.plugins[pluginID]
 }
