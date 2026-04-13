@@ -27,13 +27,14 @@ var (
 	ErrMissingName     = errors.New("missing metadata.name string")
 	ErrInvalidName     = errors.New("invalid metadata.name string")
 
-	ErrMissingSpec       = errors.New("missing spec section")
-	ErrMissingPlugin     = errors.New("missing spec.plugin string")
-	ErrInvalidPlugin     = errors.New("invalid spec.plugin string")
-	ErrInvalidScenario   = errors.New("invalid spec.scenario string")
-	ErrMissingConference = errors.New("missing spec.conference section")
-	ErrMissingNetwork    = errors.New("missing spec.network section")
-	ErrMissingLogging    = errors.New("missing spec.logging section")
+	ErrMissingSpec           = errors.New("missing spec section")
+	ErrMissingPlugin         = errors.New("missing spec.plugin string")
+	ErrInvalidPlugin         = errors.New("invalid spec.plugin string")
+	ErrInvalidScenario       = errors.New("invalid spec.scenario string")
+	ErrInvalidScenarioConfig = errors.New("invalid spec.scenarioConfig section")
+	ErrMissingConference     = errors.New("missing spec.conference section")
+	ErrMissingNetwork        = errors.New("missing spec.network section")
+	ErrMissingLogging        = errors.New("missing spec.logging section")
 
 	ErrMissingConferenceName   = errors.New("missing spec.conference.name string")
 	ErrInvalidConferenceName   = errors.New("invalid spec.conference.name string")
@@ -179,23 +180,25 @@ func (yc *YAMLMetadataConfig) mustConvert() MetadataConfig {
 }
 
 type SpecConfig struct {
-	Plugin       string
-	Scenario     string
-	Conference   ConferenceConfig
-	Network      NetworkConfig
-	PluginConfig map[string]any
-	Logging      LoggingConfig
-	Metrics      MetricsConfig
+	Plugin         string
+	Scenario       string
+	ScenarioConfig map[string]any
+	Conference     ConferenceConfig
+	Network        NetworkConfig
+	PluginConfig   map[string]any
+	Logging        LoggingConfig
+	Metrics        MetricsConfig
 }
 
 type YAMLSpecConfig struct {
-	Plugin       *string               `yaml:"plugin,omitempty"`
-	Scenario     *string               `yaml:"scenario,omitempty"`
-	Conference   *YAMLConferenceConfig `yaml:"conference,omitempty"`
-	Network      *YAMLNetworkConfig    `yaml:"network,omitempty"`
-	PluginConfig map[string]any        `yaml:"pluginConfig,omitempty"`
-	Logging      *YAMLLoggingConfig    `yaml:"logging,omitempty"`
-	Metrics      *YAMLMetricsConfig    `yaml:"metrics,omitempty"`
+	Plugin         *string               `yaml:"plugin,omitempty"`
+	Scenario       *string               `yaml:"scenario,omitempty"`
+	ScenarioConfig map[string]any        `yaml:"scenarioConfig,omitempty"`
+	Conference     *YAMLConferenceConfig `yaml:"conference,omitempty"`
+	Network        *YAMLNetworkConfig    `yaml:"network,omitempty"`
+	PluginConfig   map[string]any        `yaml:"pluginConfig,omitempty"`
+	Logging        *YAMLLoggingConfig    `yaml:"logging,omitempty"`
+	Metrics        *YAMLMetricsConfig    `yaml:"metrics,omitempty"`
 }
 
 type MetricsConfig struct {
@@ -225,6 +228,9 @@ func (yc *YAMLSpecConfig) validate() error {
 	}
 	if yc.Scenario != nil && !nameRegex.MatchString(*yc.Scenario) {
 		return ErrInvalidScenario
+	}
+	if yc.ScenarioConfig != nil && (yc.Scenario == nil || *yc.Scenario == "") {
+		errs = append(errs, ErrInvalidScenarioConfig)
 	}
 	if yc.Conference == nil {
 		errs = append(errs, ErrMissingConference)
@@ -258,6 +264,12 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 	c.Plugin = *yc.Plugin
 	if yc.Scenario != nil {
 		c.Scenario = *yc.Scenario
+	}
+	if yc.ScenarioConfig != nil {
+		c.ScenarioConfig = make(map[string]any, len(yc.ScenarioConfig))
+		for k, v := range yc.ScenarioConfig {
+			c.ScenarioConfig[k] = v
+		}
 	}
 	c.Conference = yc.Conference.mustConvert()
 	c.Network = yc.Network.mustConvert()
