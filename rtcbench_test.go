@@ -150,6 +150,63 @@ func TestUserLeaveRoomAndCloseAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestUserCanRejoinAfterLeave(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Viewer,
+	})
+
+	joinReq := &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}
+	if err := user.JoinRoom(context.Background(), joinReq); err != nil {
+		t.Fatalf("first JoinRoom() error = %v", err)
+	}
+	if err := user.LeaveRoom(context.Background(), &LeaveRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("LeaveRoom() error = %v", err)
+	}
+	if err := user.JoinRoom(context.Background(), joinReq); err != nil {
+		t.Fatalf("second JoinRoom() error = %v", err)
+	}
+
+	if plugin.newParticipantCalls != 2 {
+		t.Fatalf("NewParticipant() calls = %d, want 2", plugin.newParticipantCalls)
+	}
+	if len(plugin.participants) != 2 {
+		t.Fatalf("participants = %d, want 2", len(plugin.participants))
+	}
+
+	first := plugin.participants[0]
+	second := plugin.participants[1]
+	if first.leaveCalls != 1 {
+		t.Fatalf("first participant LeaveRoom() calls = %d, want 1", first.leaveCalls)
+	}
+	if first.closeCalls != 1 {
+		t.Fatalf("first participant Close() calls = %d, want 1", first.closeCalls)
+	}
+	if second.joinCalls != 1 {
+		t.Fatalf("second participant JoinRoom() calls = %d, want 1", second.joinCalls)
+	}
+	if got := len(user.connections); got != 1 {
+		t.Fatalf("user connections = %d, want 1", got)
+	}
+	for _, conn := range user.connections {
+		if conn.dp != second {
+			t.Fatal("active connection did not swap to rejoined participant")
+		}
+		if conn.state != StateJoined {
+			t.Fatalf("active connection state = %v, want StateJoined", conn.state)
+		}
+	}
+}
+
 func TestClientShutdownAllClosesUsersAndPlugins(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })

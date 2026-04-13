@@ -93,16 +93,31 @@ func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
 
 	key := connectionKey{plugin: pluginID, roomID: req.RoomID}
 
+	var staleConn *connection
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
 		return ErrUserClosed
 	}
-	if _, exists := u.connections[key]; exists {
-		u.mu.Unlock()
-		return ErrConnectionExists
+	if existing, exists := u.connections[key]; exists {
+		switch existing.state {
+		case StateJoined, StateNew:
+			u.mu.Unlock()
+			return ErrConnectionExists
+		case StateLeft:
+			existing.state = StateClosed
+			staleConn = existing
+		case StateClosed:
+			staleConn = existing
+		}
 	}
 	u.mu.Unlock()
+
+	if staleConn != nil {
+		if err := staleConn.dp.Close(); err != nil {
+			return fmt.Errorf("close stale %s/%s: %w", pluginID, req.RoomID, err)
+		}
+	}
 
 	if err := u.client.SetupPlugin(ctx, pluginID); err != nil {
 		return err
