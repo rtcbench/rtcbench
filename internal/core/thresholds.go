@@ -1,4 +1,4 @@
-package rtcbench
+package core
 
 import (
 	"errors"
