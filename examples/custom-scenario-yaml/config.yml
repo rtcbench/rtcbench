@@ -1,0 +1,41 @@
+apiVersion: rtcbench/v1
+kind: VideoCallStressTest
+metadata:
+  name: programmed-demo-yaml
+spec:
+  plugin: livekit
+  scenario: programmed-demo
+  conference:
+    name: room-1234
+    usersPerRoom: 1
+    totalRooms: 1
+    cameras:
+      perRoom: 1
+      fileType: ivf
+      videoCodec: vp9
+      directory: /absolute/path/to/vp9_ivf_videos
+    joinPolicy:
+      concurrency: 1
+      alwaysRetryFailedJoins: true
+      joinStartSpacing: 0s
+  network:
+    serverIP: 127.0.0.1
+  pluginConfig:
+    livekit:
+      wsURL: ws://127.0.0.1:7880
+      apiKey: devkey
+      apiSecret: secret-secret-secret-secret-secret
+  logging:
+    console: true
+    directory: /tmp/rtcbench-logs
+    streams:
+      - name: general
+        level: info
+      - name: signaling
+        level: debug
+      - name: media
+        level: info
+      - name: packets
+        level: info
+      - name: video_stats
+        level: info
