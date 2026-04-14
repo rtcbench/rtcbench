@@ -4,6 +4,7 @@ metadata:
   name: 1-camera-5-viewers
 spec:
   plugin: $env:PLUGIN_ID
+  scenario: default
   conference:
     name: $env:ROOM_ID
     usersPerRoom: 6
@@ -17,6 +18,8 @@ spec:
       concurrency: 10
       alwaysRetryFailedJoins: true
       joinStartSpacing: 2s
+    # This example uses the built-in "default" scenario:
+    # join the configured users and keep them connected until shutdown.
     # packetCapture:
     #   enabled: false
     #   directory: '/tmp/captures'
@@ -29,6 +32,12 @@ spec:
     janus:
       _serverRoot: 'https://{{spec.network.serverIP}}/janus'
       allowInsecureHttps: true
+    livekit:
+      _wsURL: 'ws://{{spec.network.serverIP}}:7880'
+      apiKey: devkey
+      apiSecret: secret-secret-secret-secret-secret
+    mediasoup:
+      _serverURL: 'wss://{{spec.network.serverIP}}:4443'
   logging:
     console: true
     directory: '/var/log/rtcbench'
