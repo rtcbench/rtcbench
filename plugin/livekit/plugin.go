@@ -105,17 +105,6 @@ func (p *Plugin) NewParticipant(ctx context.Context, cfg *rtcbench.UserConfig) (
 	}, nil
 }
 
-func (p *Plugin) JoinRoom(ctx context.Context, role rtcbench.UserRole, roomID, userID string) error {
-	part, err := p.NewParticipant(ctx, &rtcbench.UserConfig{
-		UserID: userID,
-		Role:   role,
-	})
-	if err != nil {
-		return err
-	}
-	return part.JoinRoom(ctx, &rtcbench.JoinRequest{RoomID: roomID, Plugin: PluginID})
-}
-
 type participant struct {
 	mu               sync.Mutex
 	plugin           *Plugin
