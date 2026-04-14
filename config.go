@@ -69,6 +69,7 @@ var (
 	ErrMissingLoggingDirectory = errors.New("missing spec.logging.directory pathname")
 	ErrInvalidConsoleLevel     = errors.New("invalid spec.logging.consoleLevel string, must match " + logLevelRegex.String())
 	ErrInvalidFileLevel        = errors.New("invalid spec.logging.fileLevel string, must match " + logLevelRegex.String())
+	ErrInvalidMetricsThreshold = errors.New("invalid spec.metrics.thresholds section")
 
 	ErrMissingLogStreamName  = errors.New("missing spec.logging.streams[#].name string")
 	ErrInvalidLogStreamName  = errors.New("invalid spec.logging.streams[#].name string")
@@ -204,11 +205,35 @@ type YAMLSpecConfig struct {
 type MetricsConfig struct {
 	Port           int
 	StatsJSONLPath string
+	Thresholds     []RunThresholdConfig
 }
 
 type YAMLMetricsConfig struct {
-	Port           *int    `yaml:"port,omitempty"`
-	StatsJSONLPath *string `yaml:"statsJSONLPath,omitempty"`
+	Port           *int                     `yaml:"port,omitempty"`
+	StatsJSONLPath *string                  `yaml:"statsJSONLPath,omitempty"`
+	Thresholds     []YAMLRunThresholdConfig `yaml:"thresholds,omitempty"`
+}
+
+type RunThresholdConfig struct {
+	Op             string
+	Scenario       string
+	Plugin         string
+	Role           string
+	MaxFailureRate *float64
+	MaxMean        *time.Duration
+	MaxP95         *time.Duration
+	MaxP99         *time.Duration
+}
+
+type YAMLRunThresholdConfig struct {
+	Op             *string  `yaml:"op,omitempty"`
+	Scenario       *string  `yaml:"scenario,omitempty"`
+	Plugin         *string  `yaml:"plugin,omitempty"`
+	Role           *string  `yaml:"role,omitempty"`
+	MaxFailureRate *float64 `yaml:"maxFailureRate,omitempty"`
+	MaxMean        *string  `yaml:"maxMean,omitempty"`
+	MaxP95         *string  `yaml:"maxP95,omitempty"`
+	MaxP99         *string  `yaml:"maxP99,omitempty"`
 }
 
 func (yc *YAMLSpecConfig) validate() error {
@@ -217,6 +242,7 @@ func (yc *YAMLSpecConfig) validate() error {
 		conferenceErr error
 		networkErr    error
 		loggingErr    error
+		metricsErr    error
 	)
 	if yc.Plugin == nil {
 		// return early for crucial mistake
@@ -256,6 +282,12 @@ func (yc *YAMLSpecConfig) validate() error {
 	if loggingErr != nil {
 		errs = append(errs, loggingErr)
 	}
+	if yc.Metrics != nil {
+		metricsErr = yc.Metrics.validate()
+	}
+	if metricsErr != nil {
+		errs = append(errs, metricsErr)
+	}
 	return errors.Join(errs...)
 }
 
@@ -287,8 +319,109 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 		if yc.Metrics.StatsJSONLPath != nil {
 			c.Metrics.StatsJSONLPath = *yc.Metrics.StatsJSONLPath
 		}
+		if len(yc.Metrics.Thresholds) > 0 {
+			c.Metrics.Thresholds = make([]RunThresholdConfig, 0, len(yc.Metrics.Thresholds))
+			for _, threshold := range yc.Metrics.Thresholds {
+				c.Metrics.Thresholds = append(c.Metrics.Thresholds, threshold.mustConvert())
+			}
+		}
 	}
 	return c
+}
+
+func (ym *YAMLMetricsConfig) validate() error {
+	var errs []error
+	for i, threshold := range ym.Thresholds {
+		if err := threshold.validate(i); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (yt *YAMLRunThresholdConfig) validate(index int) error {
+	if yt.Op == nil || *yt.Op == "" {
+		return fmt.Errorf("spec.metrics.thresholds[%d].op: required", index)
+	}
+	switch *yt.Op {
+	case "join", "leave", "publish_video", "unpublish_video", "close":
+	default:
+		return fmt.Errorf("spec.metrics.thresholds[%d].op: unsupported operation %q", index, *yt.Op)
+	}
+	if yt.Scenario != nil && !nameRegex.MatchString(*yt.Scenario) {
+		return fmt.Errorf("spec.metrics.thresholds[%d].scenario: invalid name %q", index, *yt.Scenario)
+	}
+	if yt.Plugin != nil && !nameRegex.MatchString(*yt.Plugin) {
+		return fmt.Errorf("spec.metrics.thresholds[%d].plugin: invalid name %q", index, *yt.Plugin)
+	}
+	if yt.Role != nil {
+		switch *yt.Role {
+		case string(Sender), string(Viewer):
+		default:
+			return fmt.Errorf("spec.metrics.thresholds[%d].role: must be %q or %q", index, Sender, Viewer)
+		}
+	}
+	if yt.MaxFailureRate != nil && (*yt.MaxFailureRate < 0 || *yt.MaxFailureRate > 1) {
+		return fmt.Errorf("spec.metrics.thresholds[%d].maxFailureRate: must be in [0,1]", index)
+	}
+	if yt.MaxMean == nil && yt.MaxP95 == nil && yt.MaxP99 == nil && yt.MaxFailureRate == nil {
+		return fmt.Errorf("spec.metrics.thresholds[%d]: at least one threshold must be set", index)
+	}
+	for field, raw := range map[string]*string{
+		"maxMean": yt.MaxMean,
+		"maxP95":  yt.MaxP95,
+		"maxP99":  yt.MaxP99,
+	} {
+		if raw == nil {
+			continue
+		}
+		duration, err := time.ParseDuration(*raw)
+		if err != nil {
+			return fmt.Errorf("spec.metrics.thresholds[%d].%s: %w", index, field, err)
+		}
+		if duration <= 0 {
+			return fmt.Errorf("spec.metrics.thresholds[%d].%s: must be > 0", index, field)
+		}
+	}
+	return nil
+}
+
+func (yt *YAMLRunThresholdConfig) mustConvert() RunThresholdConfig {
+	var cfg RunThresholdConfig
+	if yt.Op != nil {
+		cfg.Op = *yt.Op
+	}
+	if yt.Scenario != nil {
+		cfg.Scenario = *yt.Scenario
+	}
+	if yt.Plugin != nil {
+		cfg.Plugin = *yt.Plugin
+	}
+	if yt.Role != nil {
+		cfg.Role = *yt.Role
+	}
+	cfg.MaxFailureRate = yt.MaxFailureRate
+	if yt.MaxMean != nil {
+		duration := mustParseDuration(*yt.MaxMean)
+		cfg.MaxMean = &duration
+	}
+	if yt.MaxP95 != nil {
+		duration := mustParseDuration(*yt.MaxP95)
+		cfg.MaxP95 = &duration
+	}
+	if yt.MaxP99 != nil {
+		duration := mustParseDuration(*yt.MaxP99)
+		cfg.MaxP99 = &duration
+	}
+	return cfg
+}
+
+func mustParseDuration(raw string) time.Duration {
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		panic(err)
+	}
+	return duration
 }
 
 type ConferenceConfig struct {

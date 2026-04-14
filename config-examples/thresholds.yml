@@ -1,14 +1,10 @@
 apiVersion: rtcbench/v1
 kind: VideoCallStressTest
 metadata:
-  name: churn-example
+  name: thresholds-example
 spec:
   plugin: $env:PLUGIN_ID=livekit
-  scenario: churn
-  scenarioConfig:
-    mode: leave-rejoin
-    sessionDuration: 30s
-    rejoinDelay: 5s
+  scenario: default
   conference:
     name: room-1234
     usersPerRoom: 6
@@ -41,13 +37,18 @@ spec:
     port: 9090
     thresholds:
       - op: join
-        scenario: churn
+        scenario: default
         maxFailureRate: 0.01
         maxP95: 3s
-      - op: leave
-        scenario: churn
+      - op: publish_video
+        scenario: default
+        role: sender
         maxFailureRate: 0.01
         maxP95: 2s
+      - op: close
+        scenario: default
+        maxFailureRate: 0
+        maxP99: 2s
   logging:
     console: true
     directory: '/var/log/rtcbench'
