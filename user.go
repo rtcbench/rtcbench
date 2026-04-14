@@ -435,6 +435,10 @@ func (u *User) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) e
 }
 
 func (u *User) Close() error {
+	return u.closeWithContext(context.Background())
+}
+
+func (u *User) closeWithContext(ctx context.Context) error {
 	startedAt := time.Now()
 	opLabels := u.lifecycleLabels(u.closeOperationPluginLabel())
 	u.recordAttempt("close")
@@ -462,7 +466,7 @@ func (u *User) Close() error {
 		joinedAt := conn.joinedAt
 		u.mu.RUnlock()
 		if conn.state == StateJoined {
-			if err := conn.dp.LeaveRoom(context.Background(), &LeaveRequest{
+			if err := conn.dp.LeaveRoom(ctx, &LeaveRequest{
 				Plugin: conn.plugin,
 				RoomID: conn.roomID,
 			}); err != nil {

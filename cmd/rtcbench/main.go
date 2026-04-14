@@ -104,6 +104,9 @@ func main() {
 	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
 	client.RegisterPlugin(mediasoup.PluginID, mediasoup.NewPlugin)
 
+	sigtermCtx, sigtermCancel = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer sigtermCancel()
+
 	if cfg.Spec.Metrics.Port > 0 {
 		ms := metricsserver.New(cfg.Spec.Metrics.Port)
 		client.AddStatsConsumer(ms.Subscriber())
@@ -142,19 +145,20 @@ func main() {
 		scenarioID = rtcbench.DefaultScenarioID
 	}
 
-	err = client.RunScenario(context.Background(), scenarioID)
+	err = client.RunScenario(sigtermCtx, scenarioID)
 	if err != nil {
-		mainLog.Errorf("scenario %q failed: %v", scenarioID, err)
-		if errors.Is(err, rtcbench.ErrUnknownPlugin) || errors.Is(err, rtcbench.ErrUnknownScenario) {
+		if sigtermCtx.Err() == nil || (!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)) {
+			mainLog.Errorf("scenario %q failed: %v", scenarioID, err)
+		}
+		if errors.Is(err, rtcbench.ErrUnknownPlugin) || errors.Is(err, rtcbench.ErrUnknownScenario) || errors.Is(err, rtcbench.ErrUserExists) {
 			os.Exit(1)
 		}
 	}
 
 	mainLog.Infof("finished scenario %q", scenarioID)
-
-	sigtermCtx, sigtermCancel = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer sigtermCancel()
-	<-sigtermCtx.Done()
+	if sigtermCtx.Err() == nil {
+		<-sigtermCtx.Done()
+	}
 
 	mainLog.Infof("signal received, shutting down...")
 
@@ -167,9 +171,10 @@ func main() {
 		mainLog.Infof("shutdown complete")
 	}
 
-	logRunMetricsSummary(mainLog, client.MetricsSummary())
+	summary := client.MetricsSummary()
+	logRunMetricsSummary(mainLog, summary)
 
-	if err := rtcbench.EvaluateRunThresholds(client.MetricsSummary(), cfg.Spec.Metrics.Thresholds); err != nil {
+	if err := rtcbench.EvaluateRunThresholds(summary, cfg.Spec.Metrics.Thresholds); err != nil {
 		mainLog.Errorf("run thresholds failed: %v", err)
 		exitCode = 1
 	}

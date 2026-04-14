@@ -31,6 +31,7 @@ var (
 	ErrUnknownPlugin         = errors.New("unknown plugin")
 	ErrUnknownScenario       = errors.New("unknown scenario")
 	ErrConnectionExists      = errors.New("connection already exists")
+	ErrUserExists            = errors.New("user already exists")
 	ErrUserClosed            = errors.New("user is closed")
 	ErrMissingRoomID         = errors.New("missing room id")
 )
@@ -209,7 +210,14 @@ func (c *Client) SetupPlugin(ctx context.Context, pluginID string) error {
 	return nil
 }
 
-func (c *Client) CreateUser(_ context.Context, cfg *UserConfig) *User {
+func (c *Client) CreateUser(_ context.Context, cfg *UserConfig) (*User, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, exists := c.users[cfg.UserID]; exists {
+		return nil, ErrUserExists
+	}
+
 	user := &User{
 		client:        c,
 		id:            cfg.UserID,
@@ -218,12 +226,9 @@ func (c *Client) CreateUser(_ context.Context, cfg *UserConfig) *User {
 		log:           c.env.logRegistry.NewLogger("general", "["+cfg.UserID+"]"),
 		defaultPlugin: c.env.config.Spec.Plugin,
 	}
-
-	c.mu.Lock()
 	c.users[cfg.UserID] = user
-	c.mu.Unlock()
 
-	return user
+	return user, nil
 }
 
 func (c *Client) GetUser(userID string) *User {
@@ -284,7 +289,7 @@ func (c *Client) ShutdownAll(ctx context.Context) error {
 
 	var errs []error
 	for _, user := range users {
-		if err := user.Close(); err != nil {
+		if err := user.closeWithContext(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}

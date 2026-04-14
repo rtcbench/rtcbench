@@ -60,10 +60,7 @@ func TestUserJoinRoomUsesParticipantFactory(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Viewer,
-	})
+	user := mustCreateUser(t, client, "alice", Viewer)
 
 	err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
@@ -105,10 +102,7 @@ func TestUserLeaveRoomAndCloseAreIdempotent(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Viewer,
-	})
+	user := mustCreateUser(t, client, "alice", Viewer)
 
 	err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
@@ -155,10 +149,7 @@ func TestUserCanRejoinAfterLeave(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Viewer,
-	})
+	user := mustCreateUser(t, client, "alice", Viewer)
 
 	joinReq := &JoinRequest{
 		Plugin: "fake",
@@ -212,10 +203,7 @@ func TestUserCannotJoinSameConnectionTwice(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Viewer,
-	})
+	user := mustCreateUser(t, client, "alice", Viewer)
 
 	joinReq := &JoinRequest{
 		Plugin: "fake",
@@ -239,10 +227,7 @@ func TestClientShutdownAllClosesUsersAndPlugins(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Viewer,
-	})
+	user := mustCreateUser(t, client, "alice", Viewer)
 
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
@@ -261,6 +246,64 @@ func TestClientShutdownAllClosesUsersAndPlugins(t *testing.T) {
 	}
 	if plugin.shutdownCalls != 1 {
 		t.Fatalf("plugin Shutdown() calls = %d, want 1", plugin.shutdownCalls)
+	}
+}
+
+func TestClientCreateUserRejectsDuplicateUserID(t *testing.T) {
+	client := newTestClient("fake", func() Plugin { return &fakeParticipantPlugin{} })
+
+	first := mustCreateUser(t, client, "alice", Viewer)
+	second, err := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Viewer,
+	})
+	if !errors.Is(err, ErrUserExists) {
+		t.Fatalf("second CreateUser() error = %v, want ErrUserExists", err)
+	}
+	if second != nil {
+		t.Fatalf("second CreateUser() = %#v, want nil on duplicate", second)
+	}
+	if got := client.GetUser("alice"); got != first {
+		t.Fatalf("GetUser() = %#v, want original user %#v", got, first)
+	}
+}
+
+func TestClientShutdownAllRespectsContextDuringUserClose(t *testing.T) {
+	plugin := &blockingLeaveParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := mustCreateUser(t, client, "alice", Viewer)
+	if err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- client.ShutdownAll(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("ShutdownAll() error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("ShutdownAll() blocked past context deadline")
+	}
+
+	plugin.mu.Lock()
+	defer plugin.mu.Unlock()
+	if len(plugin.participants) != 1 {
+		t.Fatalf("participants = %d, want 1", len(plugin.participants))
+	}
+	if plugin.participants[0].closeCalls != 1 {
+		t.Fatalf("participant Close() calls = %d, want 1", plugin.participants[0].closeCalls)
 	}
 }
 
@@ -361,10 +404,7 @@ func TestUserCloseRemovesUserFromClient(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Viewer,
-	})
+	user := mustCreateUser(t, client, "alice", Viewer)
 	if client.GetUser("alice") == nil {
 		t.Fatal("GetUser() = nil, want tracked user")
 	}
@@ -513,10 +553,7 @@ func TestUserPublishVideoTargetsVideoPublisher(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -555,10 +592,7 @@ func TestUserPublishVideoUnsupportedCapability(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Viewer,
-	})
+	user := mustCreateUser(t, client, "alice", Viewer)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -579,10 +613,7 @@ func TestUserPublishVideoBeforeJoinReturnsConnectionNotJoined(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 
 	err := user.PublishVideo(context.Background(), &PublishVideoRequest{
 		Plugin: "fake",
@@ -597,10 +628,7 @@ func TestUserPublishVideoAfterLeaveReturnsConnectionNotJoined(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -627,10 +655,7 @@ func TestUserPublishVideoAfterCloseReturnsUserClosed(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -654,10 +679,7 @@ func TestUserMetricsSnapshotTracksLifecycle(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -715,10 +737,7 @@ func TestUserLifecycleLoggingIncludesPluginAndRoom(t *testing.T) {
 	client := NewClient(newTestConfig("fake"), reg)
 	client.RegisterPlugin("fake", func() Plugin { return &fakeVideoParticipantPlugin{} })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -762,10 +781,7 @@ func TestClientMetricsSnapshotTracksRunMetrics(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -839,10 +855,7 @@ func TestClientMetricsSnapshotTracksActiveStateGauges(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -939,10 +952,7 @@ func TestClientMetricsSummaryAggregatesOperationsAndGauges(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
 
-	user := client.CreateUser(context.Background(), &UserConfig{
-		UserID: "alice",
-		Role:   Sender,
-	})
+	user := mustCreateUser(t, client, "alice", Sender)
 	if err := user.JoinRoom(context.Background(), &JoinRequest{
 		Plugin: "fake",
 		RoomID: "room-1",
@@ -1110,6 +1120,18 @@ func newTestClient(pluginID string, factory PluginFactory) *Client {
 	client := NewClient(cfg, reg)
 	client.RegisterPlugin(pluginID, factory)
 	return client
+}
+
+func mustCreateUser(t *testing.T, client *Client, userID string, role UserRole) *User {
+	t.Helper()
+	user, err := client.CreateUser(context.Background(), &UserConfig{
+		UserID: userID,
+		Role:   role,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser(%q) error = %v", userID, err)
+	}
+	return user
 }
 
 func newTestConfig(pluginID string) *Config {
@@ -1287,6 +1309,50 @@ func (p *fakeVideoParticipant) PublishVideo(ctx context.Context, req *PublishVid
 
 func (p *fakeVideoParticipant) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) error {
 	p.unpublishCalls++
+	return nil
+}
+
+type blockingLeaveParticipantPlugin struct {
+	mu           sync.Mutex
+	participants []*blockingLeaveParticipant
+}
+
+func (p *blockingLeaveParticipantPlugin) Setup(ctx context.Context, e PluginEnv) error {
+	return nil
+}
+
+func (p *blockingLeaveParticipantPlugin) Shutdown(ctx context.Context) error {
+	return nil
+}
+
+func (p *blockingLeaveParticipantPlugin) NewParticipant(ctx context.Context, cfg *UserConfig) (Participant, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	part := &blockingLeaveParticipant{userID: cfg.UserID}
+	p.participants = append(p.participants, part)
+	return part, nil
+}
+
+type blockingLeaveParticipant struct {
+	userID     string
+	joinCalls  int
+	leaveCalls int
+	closeCalls int
+}
+
+func (p *blockingLeaveParticipant) JoinRoom(ctx context.Context, req *JoinRequest) error {
+	p.joinCalls++
+	return nil
+}
+
+func (p *blockingLeaveParticipant) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
+	p.leaveCalls++
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (p *blockingLeaveParticipant) Close() error {
+	p.closeCalls++
 	return nil
 }
 

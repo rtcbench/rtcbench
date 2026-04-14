@@ -183,10 +183,13 @@ func runChurnLoop(ctx context.Context, client *Client, l *log.Logger, cfg *Confi
 }
 
 func runChurnSlot(ctx context.Context, client *Client, l *log.Logger, cfg *Config, roomName string, role UserRole, slot int, churnCfg churnConfig) error {
-	user := client.CreateUser(ctx, &UserConfig{
+	user, err := client.CreateUser(ctx, &UserConfig{
 		UserID: fmt.Sprintf("%s-%s", string(role), uuid.NewString()),
 		Role:   role,
 	})
+	if err != nil {
+		return fmt.Errorf("churn create user room %q slot %d: %w", roomName, slot, err)
+	}
 	if err := user.JoinRoom(ctx, &JoinRequest{
 		Plugin: cfg.Spec.Plugin,
 		RoomID: roomName,
@@ -213,10 +216,13 @@ func runChurnSlot(ctx context.Context, client *Client, l *log.Logger, cfg *Confi
 }
 
 func runChurnMediaSlot(ctx context.Context, client *Client, l *log.Logger, cfg *Config, roomName string, role UserRole, slot int, churnCfg churnConfig) error {
-	user := client.CreateUser(ctx, &UserConfig{
+	user, err := client.CreateUser(ctx, &UserConfig{
 		UserID: fmt.Sprintf("%s-%s", string(role), uuid.NewString()),
 		Role:   role,
 	})
+	if err != nil {
+		return fmt.Errorf("churn create user room %q slot %d: %w", roomName, slot, err)
+	}
 	defer func() {
 		if err := user.Close(); err != nil {
 			l.Errorf("[churn] close %s slot=%d room=%s user=%s err=%v", role, slot, roomName, user.id, err)
@@ -464,10 +470,18 @@ func runStaticRoom(ctx context.Context, client *Client, cfg *Config, roomCfg joi
 		go func(workerID int) {
 			defer wg.Done()
 			for vc := range cfgCh {
-				user := client.CreateUser(ctx, &UserConfig{
+				user, err := client.CreateUser(ctx, &UserConfig{
 					UserID: vc.userID,
 					Role:   vc.role,
 				})
+				if err != nil {
+					errCh <- wrappedSignalingError{
+						error:    fmt.Errorf("cannot create %q for room %q: %w", vc.userID, roomCfg.roomName, err),
+						roomName: roomCfg.roomName,
+						nickname: vc.userID,
+					}
+					continue
+				}
 				if err := user.JoinRoom(ctx, &JoinRequest{
 					Plugin: cfg.Spec.Plugin,
 					RoomID: vc.roomID,
