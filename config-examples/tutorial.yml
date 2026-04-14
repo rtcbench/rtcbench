@@ -133,8 +133,45 @@ spec:
       apiKey: devkey
       apiSecret: secret-secret-secret-secret-secret
 
-  # Expose a /health HTTP endpoint reporting live VP9 bitrate and FPS per viewer.
-  # Set port: 0 or omit this section to disable.
+  # Metrics and run reporting configuration.
+  #
+  # port:
+  #   Expose a /health HTTP endpoint reporting live VP9 bitrate and FPS per viewer.
+  #   Set port: 0 or omit this section to disable.
+  #
+  # statsJSONLPath:
+  #   Optional path for newline-delimited live viewer stats snapshots.
+  #
+  # thresholds:
+  #   Optional end-of-run checks over lifecycle metrics. Supported operations:
+  #     - join
+  #     - leave
+  #     - publish_video
+  #     - unpublish_video
+  #     - close
+  #
+  #   Supported filters:
+  #     - scenario
+  #     - plugin
+  #     - role: sender | viewer
+  #
+  #   Supported checks:
+  #     - maxFailureRate: number from 0.0 to 1.0
+  #     - maxMean: Go duration string
+  #     - maxP95: Go duration string
+  #     - maxP99: Go duration string
+  #
+  #   Example:
+  #   thresholds:
+  #     - op: join
+  #       scenario: default
+  #       maxFailureRate: 0.01
+  #       maxP95: 3s
+  #     - op: publish_video
+  #       scenario: default
+  #       role: sender
+  #       maxFailureRate: 0.01
+  #       maxP95: 2s
   metrics:
     port: 9090
 

@@ -133,13 +133,15 @@ func (e *pluginEnv) StatsConsumers() []func(vp9_stats.Period, vp9_stats.VideoQua
 }
 
 type Client struct {
-	mu        sync.Mutex
-	env       *pluginEnv
-	registry  PluginRegistry
-	scenarios ScenarioRegistry
-	plugins   map[string]Plugin
-	users     map[string]*User
-	log       *log.Logger
+	mu             sync.Mutex
+	env            *pluginEnv
+	registry       PluginRegistry
+	scenarios      ScenarioRegistry
+	plugins        map[string]Plugin
+	users          map[string]*User
+	metrics        *runMetricsCollector
+	activeScenario string
+	log            *log.Logger
 }
 
 func NewClient(config *Config, logRegistry *log.Registry) *Client {
@@ -152,6 +154,7 @@ func NewClient(config *Config, logRegistry *log.Registry) *Client {
 		scenarios: make(ScenarioRegistry),
 		plugins:   make(map[string]Plugin),
 		users:     make(map[string]*User),
+		metrics:   newRunMetricsCollector(),
 		log:       logRegistry.NewLogger("general", ""),
 	}
 	client.RegisterScenario(DefaultScenarioID, func() Scenario { return DefaultScenario{} })
@@ -176,6 +179,8 @@ func (c *Client) RunScenario(ctx context.Context, scenarioID string) error {
 	if !exists {
 		return ErrUnknownScenario
 	}
+	previousScenario := c.setActiveScenario(scenarioID)
+	defer c.setActiveScenario(previousScenario)
 	return factory().Run(ctx, &scenarioEnv{
 		config: c.env.config,
 		client: c,
@@ -227,10 +232,38 @@ func (c *Client) GetUser(userID string) *User {
 	return c.users[userID]
 }
 
+func (c *Client) MetricsSnapshot() RunMetricsSnapshot {
+	return c.metrics.Snapshot()
+}
+
+func (c *Client) MetricsSummary() RunMetricsSummary {
+	return c.MetricsSnapshot().Summary()
+}
+
 func (c *Client) removeUser(userID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.users, userID)
+}
+
+func (c *Client) currentScenarioLabel() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeScenario != "" {
+		return c.activeScenario
+	}
+	if c.env != nil && c.env.config != nil && c.env.config.Spec.Scenario != "" {
+		return c.env.config.Spec.Scenario
+	}
+	return manualScenarioLabel
+}
+
+func (c *Client) setActiveScenario(scenarioID string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	previous := c.activeScenario
+	c.activeScenario = scenarioID
+	return previous
 }
 
 func (c *Client) Shutdown(ctx context.Context) error {

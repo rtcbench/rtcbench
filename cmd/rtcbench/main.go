@@ -35,6 +35,7 @@ func main() {
 		detectedClientIP              string
 		sigtermCtx, shutdownCtx       context.Context
 		sigtermCancel, shutdownCancel context.CancelFunc
+		exitCode                      int
 	)
 
 	cpuprofile := flag.String("cpuprofile", "", "Write CPU profile to file")
@@ -165,6 +166,17 @@ func main() {
 	} else {
 		mainLog.Infof("shutdown complete")
 	}
+
+	logRunMetricsSummary(mainLog, client.MetricsSummary())
+
+	if err := rtcbench.EvaluateRunThresholds(client.MetricsSummary(), cfg.Spec.Metrics.Thresholds); err != nil {
+		mainLog.Errorf("run thresholds failed: %v", err)
+		exitCode = 1
+	}
+
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
 }
 
 func buildLogRegistry(lc rtcbench.LoggingConfig) (*log.Registry, error) {
@@ -223,4 +235,58 @@ func loadYAMLConfig(yamlFile string) (*rtcbench.Config, error) {
 	}
 
 	return yamlConfig.IntoConfig()
+}
+
+func logRunMetricsSummary(l interface{ Infof(string, ...any) }, summary rtcbench.RunMetricsSummary) {
+	if len(summary.Operations) == 0 && len(summary.Sessions) == 0 && len(summary.Gauges) == 0 {
+		l.Infof("[run-metrics] no metrics recorded")
+		return
+	}
+
+	for _, op := range summary.Operations {
+		l.Infof(
+			"[run-metrics] op=%s scenario=%s plugin=%s role=%s attempts=%d successes=%d failures=%d failure_rate=%.4f mean=%.3fs p50=%.3fs p95=%.3fs p99=%.3fs",
+			op.Operation,
+			op.Scenario,
+			op.Plugin,
+			op.Role,
+			op.Attempts,
+			op.Successes,
+			op.Failures,
+			op.FailureRate,
+			op.MeanSeconds,
+			op.P50Seconds,
+			op.P95Seconds,
+			op.P99Seconds,
+		)
+	}
+
+	for _, session := range summary.Sessions {
+		l.Infof(
+			"[run-metrics] histogram=%s scenario=%s plugin=%s role=%s count=%d mean=%.3fs min=%.3fs max=%.3fs p50=%.3fs p95=%.3fs p99=%.3fs",
+			session.Name,
+			session.Scenario,
+			session.Plugin,
+			session.Role,
+			session.Count,
+			session.MeanSeconds,
+			session.MinSeconds,
+			session.MaxSeconds,
+			session.P50Seconds,
+			session.P95Seconds,
+			session.P99Seconds,
+		)
+	}
+
+	for _, gauge := range summary.Gauges {
+		l.Infof(
+			"[run-metrics] gauge=%s scenario=%s plugin=%s role=%s current=%.0f peak=%.0f",
+			gauge.Name,
+			gauge.Scenario,
+			gauge.Plugin,
+			gauge.Role,
+			gauge.Current,
+			gauge.Peak,
+		)
+	}
 }
