@@ -4,6 +4,7 @@ metadata:
   name: 250-viewer-bots
 spec:
   plugin: jitsi
+  scenario: default
   conference:
     name: test
     usersPerRoom: 10
@@ -17,6 +18,8 @@ spec:
       concurrency: 10
       alwaysRetryFailedJoins: true
       joinStartSpacing: 2s
+    # This example uses the built-in "default" scenario:
+    # join the configured users and keep them connected until shutdown.
     recording:
       enabled: false
       directory: './vp9_ivf_videos'
