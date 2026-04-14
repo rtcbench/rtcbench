@@ -3,6 +3,7 @@ package rtcbench
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -667,8 +668,124 @@ func TestUserPublishVideoAfterCloseReturnsUserClosed(t *testing.T) {
 	}
 }
 
+func TestUserMetricsSnapshotTracksLifecycle(t *testing.T) {
+	plugin := &fakeVideoParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Sender,
+	})
+	if err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+	if err := user.PublishVideo(context.Background(), &PublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("PublishVideo() error = %v", err)
+	}
+	if err := user.UnpublishVideo(context.Background(), &UnpublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("UnpublishVideo() error = %v", err)
+	}
+	if err := user.LeaveRoom(context.Background(), &LeaveRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("LeaveRoom() error = %v", err)
+	}
+	if err := user.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	metrics := user.MetricsSnapshot()
+	if metrics.JoinAttempts != 1 || metrics.JoinSuccesses != 1 || metrics.JoinFailures != 0 {
+		t.Fatalf("join metrics = %+v, want 1 success and 0 failures", metrics)
+	}
+	if metrics.PublishVideoAttempts != 1 || metrics.PublishVideoSuccesses != 1 || metrics.PublishVideoFailures != 0 {
+		t.Fatalf("publish metrics = %+v, want 1 success and 0 failures", metrics)
+	}
+	if metrics.UnpublishVideoAttempts != 1 || metrics.UnpublishVideoSuccesses != 1 || metrics.UnpublishVideoFailures != 0 {
+		t.Fatalf("unpublish metrics = %+v, want 1 success and 0 failures", metrics)
+	}
+	if metrics.LeaveAttempts != 1 || metrics.LeaveSuccesses != 1 || metrics.LeaveFailures != 0 {
+		t.Fatalf("leave metrics = %+v, want 1 success and 0 failures", metrics)
+	}
+	if metrics.CloseAttempts != 1 || metrics.CloseSuccesses != 1 || metrics.CloseFailures != 0 {
+		t.Fatalf("close metrics = %+v, want 1 success and 0 failures", metrics)
+	}
+	if metrics.JoinLatencyTotal <= 0 || metrics.PublishVideoLatencyTotal <= 0 || metrics.CloseLatencyTotal <= 0 {
+		t.Fatalf("latency totals = %+v, want positive durations", metrics)
+	}
+}
+
+func TestUserLifecycleLoggingIncludesPluginAndRoom(t *testing.T) {
+	capture := pkglog.NewCaptureHandler()
+	reg := pkglog.NewRegistry([]pkglog.Handler{capture}, map[string]pkglog.Level{
+		"general": pkglog.LevelInfo,
+	})
+	client := NewClient(newTestConfig("fake"), reg)
+	client.RegisterPlugin("fake", func() Plugin { return &fakeVideoParticipantPlugin{} })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Sender,
+	})
+	if err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+	if err := user.PublishVideo(context.Background(), &PublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("PublishVideo() error = %v", err)
+	}
+
+	records := capture.Filter("general", pkglog.LevelInfo)
+	if len(records) == 0 {
+		t.Fatal("captured records = 0, want lifecycle logs")
+	}
+
+	foundJoin := false
+	foundPublish := false
+	for _, record := range records {
+		if record.Prefix != "[alice]" {
+			continue
+		}
+		if containsAll(record.Msg, "[user] join ok", "plugin=fake", "room=room-1") {
+			foundJoin = true
+		}
+		if containsAll(record.Msg, "[user] publish-video ok", "plugin=fake", "room=room-1") {
+			foundPublish = true
+		}
+	}
+	if !foundJoin {
+		t.Fatal("did not find join lifecycle log with plugin and room")
+	}
+	if !foundPublish {
+		t.Fatal("did not find publish lifecycle log with plugin and room")
+	}
+}
+
 func newTestClient(pluginID string, factory PluginFactory) *Client {
-	cfg := &Config{
+	cfg := newTestConfig(pluginID)
+	reg := pkglog.NewRegistry(nil, nil)
+	client := NewClient(cfg, reg)
+	client.RegisterPlugin(pluginID, factory)
+	return client
+}
+
+func newTestConfig(pluginID string) *Config {
+	return &Config{
 		Spec: SpecConfig{
 			Plugin: pluginID,
 			Conference: ConferenceConfig{
@@ -688,10 +805,15 @@ func newTestClient(pluginID string, factory PluginFactory) *Client {
 			},
 		},
 	}
-	reg := pkglog.NewRegistry(nil, nil)
-	client := NewClient(cfg, reg)
-	client.RegisterPlugin(pluginID, factory)
-	return client
+}
+
+func containsAll(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if !strings.Contains(s, needle) {
+			return false
+		}
+	}
+	return true
 }
 
 type fakeParticipantPlugin struct {

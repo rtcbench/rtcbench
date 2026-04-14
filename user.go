@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type UserConfig struct {
@@ -63,7 +64,31 @@ type User struct {
 		Infof(string, ...any)
 		Errorf(string, ...any)
 	}
-	closed bool
+	metrics UserMetrics
+	closed  bool
+}
+
+type UserMetrics struct {
+	JoinAttempts               int64
+	JoinSuccesses              int64
+	JoinFailures               int64
+	JoinLatencyTotal           time.Duration
+	LeaveAttempts              int64
+	LeaveSuccesses             int64
+	LeaveFailures              int64
+	LeaveLatencyTotal          time.Duration
+	PublishVideoAttempts       int64
+	PublishVideoSuccesses      int64
+	PublishVideoFailures       int64
+	PublishVideoLatencyTotal   time.Duration
+	UnpublishVideoAttempts     int64
+	UnpublishVideoSuccesses    int64
+	UnpublishVideoFailures     int64
+	UnpublishVideoLatencyTotal time.Duration
+	CloseAttempts              int64
+	CloseSuccesses             int64
+	CloseFailures              int64
+	CloseLatencyTotal          time.Duration
 }
 
 type connectionKey struct {
@@ -79,8 +104,13 @@ type connection struct {
 }
 
 func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
+	startedAt := time.Now()
+	u.recordAttempt("join")
 	if req == nil || req.RoomID == "" {
-		return ErrMissingRoomID
+		err := ErrMissingRoomID
+		u.recordResult("join", startedAt, err)
+		u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", "", "", err)
+		return err
 	}
 
 	pluginID := req.Plugin
@@ -88,8 +118,13 @@ func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
 		pluginID = u.defaultPlugin
 	}
 	if pluginID == "" {
-		return ErrUnknownPlugin
+		err := ErrUnknownPlugin
+		u.recordResult("join", startedAt, err)
+		u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", "", req.RoomID, err)
+		return err
 	}
+
+	u.log.Infof("[user] join start plugin=%s room=%s", pluginID, req.RoomID)
 
 	key := connectionKey{plugin: pluginID, roomID: req.RoomID}
 
@@ -97,13 +132,19 @@ func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
-		return ErrUserClosed
+		err := ErrUserClosed
+		u.recordResult("join", startedAt, err)
+		u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", pluginID, req.RoomID, err)
+		return err
 	}
 	if existing, exists := u.connections[key]; exists {
 		switch existing.state {
 		case StateJoined, StateNew:
 			u.mu.Unlock()
-			return ErrConnectionExists
+			err := ErrConnectionExists
+			u.recordResult("join", startedAt, err)
+			u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", pluginID, req.RoomID, err)
+			return err
 		case StateLeft:
 			existing.state = StateClosed
 			staleConn = existing
@@ -115,17 +156,25 @@ func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
 
 	if staleConn != nil {
 		if err := staleConn.dp.Close(); err != nil {
-			return fmt.Errorf("close stale %s/%s: %w", pluginID, req.RoomID, err)
+			err = fmt.Errorf("close stale %s/%s: %w", pluginID, req.RoomID, err)
+			u.recordResult("join", startedAt, err)
+			u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", pluginID, req.RoomID, err)
+			return err
 		}
 	}
 
 	if err := u.client.SetupPlugin(ctx, pluginID); err != nil {
+		u.recordResult("join", startedAt, err)
+		u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", pluginID, req.RoomID, err)
 		return err
 	}
 
 	plugin := u.client.getPlugin(pluginID)
 	if plugin == nil {
-		return ErrUnknownPlugin
+		err := ErrUnknownPlugin
+		u.recordResult("join", startedAt, err)
+		u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", pluginID, req.RoomID, err)
+		return err
 	}
 
 	dp, err := newParticipant(ctx, plugin, &UserConfig{
@@ -133,6 +182,8 @@ func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
 		Role:   u.role,
 	})
 	if err != nil {
+		u.recordResult("join", startedAt, err)
+		u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", pluginID, req.RoomID, err)
 		return err
 	}
 
@@ -140,15 +191,20 @@ func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
 	joinReq.Plugin = pluginID
 	if err := dp.JoinRoom(ctx, &joinReq); err != nil {
 		_ = dp.Close()
+		u.recordResult("join", startedAt, err)
+		u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", pluginID, req.RoomID, err)
 		return err
 	}
 
 	u.mu.Lock()
-	defer u.mu.Unlock()
 	if u.closed {
+		u.mu.Unlock()
 		_ = dp.LeaveRoom(ctx, &LeaveRequest{Plugin: pluginID, RoomID: req.RoomID})
 		_ = dp.Close()
-		return ErrUserClosed
+		err := ErrUserClosed
+		u.recordResult("join", startedAt, err)
+		u.log.Errorf("[user] join failed plugin=%s room=%s err=%v", pluginID, req.RoomID, err)
+		return err
 	}
 	u.connections[key] = &connection{
 		plugin: pluginID,
@@ -156,19 +212,26 @@ func (u *User) JoinRoom(ctx context.Context, req *JoinRequest) error {
 		dp:     dp,
 		state:  StateJoined,
 	}
+	u.mu.Unlock()
+	u.recordResult("join", startedAt, nil)
+	u.log.Infof("[user] join ok plugin=%s room=%s latency=%s", pluginID, req.RoomID, time.Since(startedAt))
 	return nil
 }
 
 func (u *User) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
+	startedAt := time.Now()
+	u.recordAttempt("leave")
 	targets := u.selectConnections(targetSelector{
 		plugin: selectorPlugin(req),
 		roomID: selectorRoomID(req),
 	})
 	var errs []error
+	targeted := 0
 	for _, conn := range targets {
 		if conn.state != StateJoined {
 			continue
 		}
+		targeted++
 		leaveReq := &LeaveRequest{Plugin: conn.plugin, RoomID: conn.roomID}
 		if req != nil {
 			leaveReq = &LeaveRequest{Plugin: req.Plugin, RoomID: req.RoomID}
@@ -186,16 +249,28 @@ func (u *User) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
 		u.mu.Lock()
 		conn.state = StateLeft
 		u.mu.Unlock()
+		u.log.Infof("[user] leave ok plugin=%s room=%s", conn.plugin, conn.roomID)
 	}
-	return errors.Join(errs...)
+	err := errors.Join(errs...)
+	u.recordResult("leave", startedAt, err)
+	if err != nil {
+		u.log.Errorf("[user] leave failed plugin=%s room=%s err=%v", selectorPlugin(req), selectorRoomID(req), err)
+	} else if targeted == 0 {
+		u.log.Infof("[user] leave noop plugin=%s room=%s", selectorPlugin(req), selectorRoomID(req))
+	}
+	return err
 }
 
 func (u *User) PublishVideo(ctx context.Context, req *PublishVideoRequest) error {
+	startedAt := time.Now()
+	u.recordAttempt("publish_video")
 	targets, err := u.joinedConnections(targetSelector{
 		plugin: selectorPlugin(req),
 		roomID: selectorRoomID(req),
 	})
 	if err != nil {
+		u.recordResult("publish_video", startedAt, err)
+		u.log.Errorf("[user] publish-video failed plugin=%s room=%s err=%v", selectorPlugin(req), selectorRoomID(req), err)
 		return err
 	}
 
@@ -229,6 +304,7 @@ func (u *User) PublishVideo(ctx context.Context, req *PublishVideoRequest) error
 			continue
 		}
 		successful++
+		u.log.Infof("[user] publish-video ok plugin=%s room=%s", conn.plugin, conn.roomID)
 	}
 	if supported == 0 && len(targets) > 0 {
 		errs = append(errs, ErrUnsupportedCapability)
@@ -236,15 +312,24 @@ func (u *User) PublishVideo(ctx context.Context, req *PublishVideoRequest) error
 	if supported > 0 && successful == 0 && unsupported > 0 && len(errs) == 0 {
 		errs = append(errs, ErrUnsupportedCapability)
 	}
-	return errors.Join(errs...)
+	err = errors.Join(errs...)
+	u.recordResult("publish_video", startedAt, err)
+	if err != nil {
+		u.log.Errorf("[user] publish-video failed plugin=%s room=%s err=%v", selectorPlugin(req), selectorRoomID(req), err)
+	}
+	return err
 }
 
 func (u *User) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) error {
+	startedAt := time.Now()
+	u.recordAttempt("unpublish_video")
 	targets, err := u.joinedConnections(targetSelector{
 		plugin: selectorPlugin(req),
 		roomID: selectorRoomID(req),
 	})
 	if err != nil {
+		u.recordResult("unpublish_video", startedAt, err)
+		u.log.Errorf("[user] unpublish-video failed plugin=%s room=%s err=%v", selectorPlugin(req), selectorRoomID(req), err)
 		return err
 	}
 
@@ -278,6 +363,7 @@ func (u *User) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) e
 			continue
 		}
 		successful++
+		u.log.Infof("[user] unpublish-video ok plugin=%s room=%s", conn.plugin, conn.roomID)
 	}
 	if supported == 0 && len(targets) > 0 {
 		errs = append(errs, ErrUnsupportedCapability)
@@ -285,13 +371,22 @@ func (u *User) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) e
 	if supported > 0 && successful == 0 && unsupported > 0 && len(errs) == 0 {
 		errs = append(errs, ErrUnsupportedCapability)
 	}
-	return errors.Join(errs...)
+	err = errors.Join(errs...)
+	u.recordResult("unpublish_video", startedAt, err)
+	if err != nil {
+		u.log.Errorf("[user] unpublish-video failed plugin=%s room=%s err=%v", selectorPlugin(req), selectorRoomID(req), err)
+	}
+	return err
 }
 
 func (u *User) Close() error {
+	startedAt := time.Now()
+	u.recordAttempt("close")
 	u.mu.Lock()
 	if u.closed {
 		u.mu.Unlock()
+		u.recordResult("close", startedAt, nil)
+		u.log.Infof("[user] close noop")
 		return nil
 	}
 	u.closed = true
@@ -325,7 +420,80 @@ func (u *User) Close() error {
 		u.client.removeUser(u.id)
 	}
 
-	return errors.Join(errs...)
+	err := errors.Join(errs...)
+	u.recordResult("close", startedAt, err)
+	if err != nil {
+		u.log.Errorf("[user] close failed err=%v", err)
+	} else {
+		u.log.Infof("[user] close ok latency=%s", time.Since(startedAt))
+	}
+	return err
+}
+
+func (u *User) MetricsSnapshot() UserMetrics {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.metrics
+}
+
+func (u *User) recordAttempt(op string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	switch op {
+	case "join":
+		u.metrics.JoinAttempts++
+	case "leave":
+		u.metrics.LeaveAttempts++
+	case "publish_video":
+		u.metrics.PublishVideoAttempts++
+	case "unpublish_video":
+		u.metrics.UnpublishVideoAttempts++
+	case "close":
+		u.metrics.CloseAttempts++
+	}
+}
+
+func (u *User) recordResult(op string, startedAt time.Time, err error) {
+	elapsed := time.Since(startedAt)
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	switch op {
+	case "join":
+		u.metrics.JoinLatencyTotal += elapsed
+		if err == nil {
+			u.metrics.JoinSuccesses++
+		} else {
+			u.metrics.JoinFailures++
+		}
+	case "leave":
+		u.metrics.LeaveLatencyTotal += elapsed
+		if err == nil {
+			u.metrics.LeaveSuccesses++
+		} else {
+			u.metrics.LeaveFailures++
+		}
+	case "publish_video":
+		u.metrics.PublishVideoLatencyTotal += elapsed
+		if err == nil {
+			u.metrics.PublishVideoSuccesses++
+		} else {
+			u.metrics.PublishVideoFailures++
+		}
+	case "unpublish_video":
+		u.metrics.UnpublishVideoLatencyTotal += elapsed
+		if err == nil {
+			u.metrics.UnpublishVideoSuccesses++
+		} else {
+			u.metrics.UnpublishVideoFailures++
+		}
+	case "close":
+		u.metrics.CloseLatencyTotal += elapsed
+		if err == nil {
+			u.metrics.CloseSuccesses++
+		} else {
+			u.metrics.CloseFailures++
+		}
+	}
 }
 
 type targetSelector struct {
