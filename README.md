@@ -16,6 +16,11 @@ make
 
 [Go 1.25 or newer](https://go.dev) is required.
 
+### Examples
+
+- YAML-first configs live in [`config-examples/`](config-examples), including [`config-examples/churn.yml`](config-examples/churn.yml) for the built-in churn scenario.
+- Code-first programmable usage lives in [`examples/`](examples), including [`examples/custom-scenario/main.go`](examples/custom-scenario/main.go).
+
 ### Contribution
 
 Created by [Evan Ram](https://linkedin.com/in/evanram) in the [Internet Systems Lab](https://netstech.org) at the [University of Colorado Boulder](https://colorado.edu).

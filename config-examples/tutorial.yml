@@ -40,6 +40,25 @@ spec:
   # The plugin ID specifies which video conferencing platform to target (e.g. "jitsi" or "janus").
   plugin: $env:PLUGIN_ID=default-plugin-id-goes-here
 
+  # Optional scenario selection. If omitted, rtcbench runs the built-in "default" scenario,
+  # which joins the configured rooms and keeps them alive until shutdown.
+  #
+  # Supported built-ins today:
+  #   - default
+  #   - churn
+  #
+  # scenario: churn
+  #
+  # Optional scenario-specific configuration. The current built-in "churn" scenario supports:
+  #   - mode: leave-rejoin | media-toggle
+  #   - sessionDuration: Go duration string, e.g. "30s"
+  #   - rejoinDelay: Go duration string, e.g. "5s"
+  #
+  # scenarioConfig:
+  #   mode: leave-rejoin
+  #   sessionDuration: 30s
+  #   rejoinDelay: 5s
+
   # The "conference" holds cross-platform config related to joining a video conference.
   conference:
     # Name of the conference room to join. This is mostly cross-platform, but Janus will just parse the first number it
