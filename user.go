@@ -191,10 +191,13 @@ func (u *User) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
 }
 
 func (u *User) PublishVideo(ctx context.Context, req *PublishVideoRequest) error {
-	targets := u.selectConnections(targetSelector{
+	targets, err := u.joinedConnections(targetSelector{
 		plugin: selectorPlugin(req),
 		roomID: selectorRoomID(req),
 	})
+	if err != nil {
+		return err
+	}
 
 	var (
 		errs        []error
@@ -203,9 +206,6 @@ func (u *User) PublishVideo(ctx context.Context, req *PublishVideoRequest) error
 		unsupported int
 	)
 	for _, conn := range targets {
-		if conn.state != StateJoined {
-			continue
-		}
 		vp, ok := conn.dp.(VideoPublisher)
 		if !ok {
 			continue
@@ -240,10 +240,13 @@ func (u *User) PublishVideo(ctx context.Context, req *PublishVideoRequest) error
 }
 
 func (u *User) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) error {
-	targets := u.selectConnections(targetSelector{
+	targets, err := u.joinedConnections(targetSelector{
 		plugin: selectorPlugin(req),
 		roomID: selectorRoomID(req),
 	})
+	if err != nil {
+		return err
+	}
 
 	var (
 		errs        []error
@@ -252,9 +255,6 @@ func (u *User) UnpublishVideo(ctx context.Context, req *UnpublishVideoRequest) e
 		unsupported int
 	)
 	for _, conn := range targets {
-		if conn.state != StateJoined {
-			continue
-		}
 		vp, ok := conn.dp.(VideoPublisher)
 		if !ok {
 			continue
@@ -404,6 +404,32 @@ func (u *User) selectConnections(sel targetSelector) []*connection {
 		targets = append(targets, conn)
 	}
 	return targets
+}
+
+func (u *User) joinedConnections(sel targetSelector) ([]*connection, error) {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+
+	if u.closed {
+		return nil, ErrUserClosed
+	}
+
+	targets := make([]*connection, 0, len(u.connections))
+	for key, conn := range u.connections {
+		if sel.plugin != "" && sel.plugin != key.plugin {
+			continue
+		}
+		if sel.roomID != "" && sel.roomID != key.roomID {
+			continue
+		}
+		if conn.state == StateJoined {
+			targets = append(targets, conn)
+		}
+	}
+	if len(targets) == 0 {
+		return nil, ErrConnectionNotJoined
+	}
+	return targets, nil
 }
 
 func newParticipant(ctx context.Context, plugin Plugin, cfg *UserConfig) (Participant, error) {

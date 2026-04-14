@@ -207,6 +207,33 @@ func TestUserCanRejoinAfterLeave(t *testing.T) {
 	}
 }
 
+func TestUserCannotJoinSameConnectionTwice(t *testing.T) {
+	plugin := &fakeParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Viewer,
+	})
+
+	joinReq := &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}
+	if err := user.JoinRoom(context.Background(), joinReq); err != nil {
+		t.Fatalf("first JoinRoom() error = %v", err)
+	}
+
+	err := user.JoinRoom(context.Background(), joinReq)
+	if !errors.Is(err, ErrConnectionExists) {
+		t.Fatalf("second JoinRoom() error = %v, want ErrConnectionExists", err)
+	}
+
+	if plugin.newParticipantCalls != 1 {
+		t.Fatalf("NewParticipant() calls = %d, want 1", plugin.newParticipantCalls)
+	}
+}
+
 func TestClientShutdownAllClosesUsersAndPlugins(t *testing.T) {
 	plugin := &fakeParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
@@ -562,6 +589,81 @@ func TestUserPublishVideoUnsupportedCapability(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnsupportedCapability) {
 		t.Fatalf("PublishVideo() error = %v, want ErrUnsupportedCapability", err)
+	}
+}
+
+func TestUserPublishVideoBeforeJoinReturnsConnectionNotJoined(t *testing.T) {
+	plugin := &fakeVideoParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Sender,
+	})
+
+	err := user.PublishVideo(context.Background(), &PublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	})
+	if !errors.Is(err, ErrConnectionNotJoined) {
+		t.Fatalf("PublishVideo() error = %v, want ErrConnectionNotJoined", err)
+	}
+}
+
+func TestUserPublishVideoAfterLeaveReturnsConnectionNotJoined(t *testing.T) {
+	plugin := &fakeVideoParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Sender,
+	})
+	if err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+	if err := user.LeaveRoom(context.Background(), &LeaveRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("LeaveRoom() error = %v", err)
+	}
+
+	err := user.PublishVideo(context.Background(), &PublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	})
+	if !errors.Is(err, ErrConnectionNotJoined) {
+		t.Fatalf("PublishVideo() error = %v, want ErrConnectionNotJoined", err)
+	}
+}
+
+func TestUserPublishVideoAfterCloseReturnsUserClosed(t *testing.T) {
+	plugin := &fakeVideoParticipantPlugin{}
+	client := newTestClient("fake", func() Plugin { return plugin })
+
+	user := client.CreateUser(context.Background(), &UserConfig{
+		UserID: "alice",
+		Role:   Sender,
+	})
+	if err := user.JoinRoom(context.Background(), &JoinRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+	if err := user.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	err := user.PublishVideo(context.Background(), &PublishVideoRequest{
+		Plugin: "fake",
+		RoomID: "room-1",
+	})
+	if !errors.Is(err, ErrUserClosed) {
+		t.Fatalf("PublishVideo() error = %v, want ErrUserClosed", err)
 	}
 }
 

@@ -27,6 +27,7 @@ var (
 	ErrUnsupportedRole       = errors.New("unsupported role")
 	ErrUnsupportedCapability = errors.New("unsupported capability")
 	ErrCannotJoinRoom        = errors.New("cannot join room")
+	ErrConnectionNotJoined   = errors.New("connection not joined")
 	ErrUnknownPlugin         = errors.New("unknown plugin")
 	ErrUnknownScenario       = errors.New("unknown scenario")
 	ErrConnectionExists      = errors.New("connection already exists")
