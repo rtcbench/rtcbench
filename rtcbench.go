@@ -38,11 +38,6 @@ var (
 type Plugin interface {
 	Setup(ctx context.Context, e PluginEnv) error
 	Shutdown(ctx context.Context) error
-	JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error
-}
-
-type ParticipantPlugin interface {
-	Plugin
 	NewParticipant(ctx context.Context, cfg *UserConfig) (Participant, error)
 }
 

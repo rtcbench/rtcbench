@@ -264,24 +264,6 @@ func TestClientShutdownAllClosesUsersAndPlugins(t *testing.T) {
 	}
 }
 
-func TestJoinAllRoomsSupportsLegacyPlugins(t *testing.T) {
-	plugin := &fakeLegacyPlugin{}
-	client := newTestClient("legacy", func() Plugin { return plugin })
-	client.env.config.Spec.Conference.UsersPerRoom = 3
-
-	err := client.JoinAllRooms(context.Background())
-	if err != nil {
-		t.Fatalf("JoinAllRooms() error = %v", err)
-	}
-
-	if plugin.setupCalls != 1 {
-		t.Fatalf("Setup() calls = %d, want 1", plugin.setupCalls)
-	}
-	if plugin.joinCalls != 3 {
-		t.Fatalf("JoinRoom() calls = %d, want 3", plugin.joinCalls)
-	}
-}
-
 func TestJoinAllRoomsPublishesSenderParticipants(t *testing.T) {
 	plugin := &fakeVideoParticipantPlugin{}
 	client := newTestClient("fake", func() Plugin { return plugin })
@@ -838,10 +820,6 @@ func (p *fakeParticipantPlugin) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (p *fakeParticipantPlugin) JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error {
-	return errors.New("legacy JoinRoom should not be used")
-}
-
 func (p *fakeParticipantPlugin) NewParticipant(ctx context.Context, cfg *UserConfig) (Participant, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -881,27 +859,6 @@ func (p *fakeParticipant) Close() error {
 	return nil
 }
 
-type fakeLegacyPlugin struct {
-	setupCalls    int
-	shutdownCalls int
-	joinCalls     int
-}
-
-func (p *fakeLegacyPlugin) Setup(ctx context.Context, e PluginEnv) error {
-	p.setupCalls++
-	return nil
-}
-
-func (p *fakeLegacyPlugin) Shutdown(ctx context.Context) error {
-	p.shutdownCalls++
-	return nil
-}
-
-func (p *fakeLegacyPlugin) JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error {
-	p.joinCalls++
-	return nil
-}
-
 type fakeVideoParticipantPlugin struct {
 	mu                  sync.Mutex
 	setupCalls          int
@@ -922,10 +879,6 @@ func (p *fakeVideoParticipantPlugin) Shutdown(ctx context.Context) error {
 	defer p.mu.Unlock()
 	p.shutdownCalls++
 	return nil
-}
-
-func (p *fakeVideoParticipantPlugin) JoinRoom(ctx context.Context, role UserRole, roomID, userID string) error {
-	return errors.New("legacy JoinRoom should not be used")
 }
 
 func (p *fakeVideoParticipantPlugin) NewParticipant(ctx context.Context, cfg *UserConfig) (Participant, error) {

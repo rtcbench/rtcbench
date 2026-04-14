@@ -601,49 +601,5 @@ func (u *User) joinedConnections(sel targetSelector) ([]*connection, error) {
 }
 
 func newParticipant(ctx context.Context, plugin Plugin, cfg *UserConfig) (Participant, error) {
-	if pp, ok := plugin.(ParticipantPlugin); ok {
-		return pp.NewParticipant(ctx, cfg)
-	}
-	return &legacyParticipant{
-		plugin: plugin,
-		userID: cfg.UserID,
-		role:   cfg.Role,
-	}, nil
-}
-
-type legacyParticipant struct {
-	plugin Plugin
-	userID string
-	role   UserRole
-
-	mu     sync.Mutex
-	joined bool
-	left   bool
-}
-
-func (p *legacyParticipant) JoinRoom(ctx context.Context, req *JoinRequest) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.joined {
-		return ErrConnectionExists
-	}
-	if err := p.plugin.JoinRoom(ctx, p.role, req.RoomID, p.userID); err != nil {
-		return err
-	}
-	p.joined = true
-	return nil
-}
-
-func (p *legacyParticipant) LeaveRoom(ctx context.Context, req *LeaveRequest) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.joined || p.left {
-		return nil
-	}
-	p.left = true
-	return nil
-}
-
-func (p *legacyParticipant) Close() error {
-	return nil
+	return plugin.NewParticipant(ctx, cfg)
 }
