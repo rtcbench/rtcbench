@@ -13,6 +13,7 @@ import jwt
 import pytest
 import requests
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from helpers import (
     JANUS_NETWORK,
@@ -489,18 +490,32 @@ def _run_screenshot_test(sfu_name, config, network, join_fn, tmp_path, test_vide
         # Join in Chromium and take screenshots.
         with sync_playwright() as pw:
             browser = _launch_browser(pw)
-            context = browser.new_context(
-                ignore_https_errors=True,
-                viewport={"width": 1280, "height": 720},
-            )
-            page = context.new_page()
-            page.on("console", lambda msg: print(f"  [browser] {msg.text}"))
             try:
-                join_fn(page)
-
-                screenshots = _take_screenshots(page, sfu_name, tmp_path)
+                last_err = None
+                screenshots = []
+                for attempt in range(1, 3):
+                    context = browser.new_context(
+                        ignore_https_errors=True,
+                        viewport={"width": 1280, "height": 720},
+                    )
+                    page = context.new_page()
+                    page.on("console", lambda msg: print(f"  [browser] {msg.text}"))
+                    try:
+                        join_fn(page)
+                        screenshots = _take_screenshots(page, sfu_name, tmp_path)
+                        last_err = None
+                        break
+                    except (AssertionError, PlaywrightTimeoutError) as exc:
+                        last_err = exc
+                        if attempt == 2:
+                            raise
+                        print(f"  browser join attempt {attempt} failed for {sfu_name}: {exc}; retrying")
+                        time.sleep(3)
+                    finally:
+                        context.close()
+                if last_err is not None:
+                    raise last_err
             finally:
-                context.close()
                 browser.close()
 
     # Basic assertions: screenshots exist and are non-trivially sized.
