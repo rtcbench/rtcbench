@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/pion/rtp"
+	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench/pkg/pcap"
 	"github.com/rtcbench/rtcbench/pkg/vp9"
 	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
-	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v4"
 )
 
 const (
@@ -30,16 +30,16 @@ const (
 
 // Viewer connects to a conference and receives 1 VP9 video stream
 type Viewer struct {
-	track        *webrtc.TrackRemote
-	receiver     *webrtc.RTPReceiver
-	input        chan<- vp9_stats.VideoQualitySample
-	nickname     string
-	config       Config
-	ivf          *vp9.IvfSegmenter
-	pcap         *pcap.Writer
-	pub          *vp9_stats.Publisher
-	rtcpTracker  *vp9_stats.RTCPTracker
-	onFrameLost  func(nowNano int64)
+	track       *webrtc.TrackRemote
+	receiver    *webrtc.RTPReceiver
+	input       chan<- vp9_stats.VideoQualitySample
+	nickname    string
+	config      Config
+	ivf         *vp9.IvfSegmenter
+	pcap        *pcap.Writer
+	pub         *vp9_stats.Publisher
+	rtcpTracker *vp9_stats.RTCPTracker
+	onFrameLost func(nowNano int64)
 }
 
 type Config struct {
@@ -102,6 +102,12 @@ func newViewer(
 }
 
 func (v *Viewer) run(done <-chan struct{}) error {
+	if v.ivf != nil {
+		defer func() {
+			_ = v.ivf.Close()
+		}()
+	}
+
 	// Each incoming track has a unique SSRC; qualify the nickname so that a
 	// receiver bot with multiple incoming streams produces a separate metrics
 	// entry per stream rather than overwriting a single entry.
@@ -118,10 +124,10 @@ func (v *Viewer) run(done <-chan struct{}) error {
 
 		vp9RTPPayloadType = v.config.VP9RTPPayloadType
 		vp9PayloadDesc    vp9.PayloadDescriptor
-		vp9FrameStats    = vp9_stats.NewFrameStatistics(v.config.StatsBufferSize)
-		vp9QualitySample vp9_stats.VideoQualitySample
+		vp9FrameStats     = vp9_stats.NewFrameStatistics(v.config.StatsBufferSize)
+		vp9QualitySample  vp9_stats.VideoQualitySample
 
-		packetsInSample int
+		packetsInSample  int
 		packetsPerSample = v.config.PacketsPerSample
 
 		err error
