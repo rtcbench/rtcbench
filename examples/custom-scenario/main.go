@@ -20,10 +20,13 @@ func (programmedScenario) Run(ctx context.Context, env rtcbench.ScenarioEnv) err
 	roomID := env.Config().Spec.Conference.Name
 	pluginID := env.Config().Spec.Plugin
 
-	sender := env.Client().CreateUser(ctx, &rtcbench.UserConfig{
+	sender, err := env.Client().CreateUser(ctx, &rtcbench.UserConfig{
 		UserID: "sender-1",
 		Role:   rtcbench.Sender,
 	})
+	if err != nil {
+		return fmt.Errorf("create sender: %w", err)
+	}
 	defer sender.Close()
 
 	if err := sender.JoinRoom(ctx, &rtcbench.JoinRequest{
@@ -40,10 +43,13 @@ func (programmedScenario) Run(ctx context.Context, env rtcbench.ScenarioEnv) err
 		return fmt.Errorf("sender publish video: %w", err)
 	}
 
-	viewer := env.Client().CreateUser(ctx, &rtcbench.UserConfig{
+	viewer, err := env.Client().CreateUser(ctx, &rtcbench.UserConfig{
 		UserID: "viewer-1",
 		Role:   rtcbench.Viewer,
 	})
+	if err != nil {
+		return fmt.Errorf("create viewer: %w", err)
+	}
 	defer viewer.Close()
 
 	if err := viewer.JoinRoom(ctx, &rtcbench.JoinRequest{

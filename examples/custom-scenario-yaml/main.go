@@ -21,10 +21,13 @@ func (programmedScenario) Run(ctx context.Context, env rtcbench.ScenarioEnv) err
 	roomID := env.Config().Spec.Conference.Name
 	pluginID := env.Config().Spec.Plugin
 
-	user := env.Client().CreateUser(ctx, &rtcbench.UserConfig{
+	user, err := env.Client().CreateUser(ctx, &rtcbench.UserConfig{
 		UserID: "yaml-sender-1",
 		Role:   rtcbench.Sender,
 	})
+	if err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
 	defer user.Close()
 
 	if err := user.JoinRoom(ctx, &rtcbench.JoinRequest{
