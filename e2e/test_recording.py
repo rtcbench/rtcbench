@@ -205,7 +205,7 @@ def _run_recording_test(infra, test_video_dir, tmp_path, network, env, timeout=1
     try:
         with rtcbench_run(cfg, test_video_dir, network=network, recording_dir=recording_dir, env=env) as (url, _proc):
             try:
-                poll_health(url, timeout=timeout, min_active=1)
+                poll_health(url, timeout=timeout, min_active=1, consecutive_passes=2)
             except TimeoutError as e:
                 pytest.fail(str(e))
             time.sleep(10)  # accumulate recording post-warmup

@@ -483,7 +483,7 @@ def _run_screenshot_test(sfu_name, config, network, join_fn, tmp_path, test_vide
     with rtcbench_run(config, test_video_dir, network=network, env=env) as (url, _proc):
         # Wait for receivers to reach target bitrate before opening browser.
         try:
-            poll_health(url, timeout, MIN_ACTIVE)
+            poll_health(url, timeout, MIN_ACTIVE, consecutive_passes=2)
         except TimeoutError as e:
             pytest.fail(str(e))
 

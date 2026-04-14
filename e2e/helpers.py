@@ -73,6 +73,7 @@ def poll_health(
     timeout: int,
     min_active: int,
     min_bitrate_bps: int = 3_000_000,
+    consecutive_passes: int = 1,
 ) -> dict:
     """
     Poll GET url until all conditions are met:
@@ -85,6 +86,7 @@ def poll_health(
     """
     deadline = time.time() + timeout
     last_err = "no response yet"
+    consecutive_ok = 0
     while time.time() < deadline:
         try:
             r = requests.get(url, timeout=2)
@@ -96,16 +98,24 @@ def poll_health(
                 and all(v["smooth_bitrate_bps"] >= min_bitrate_bps for v in active)
                 and all(v["smooth_fps"] > 0 for v in active)
             ):
-                return data
+                consecutive_ok += 1
+                if consecutive_ok >= consecutive_passes:
+                    return data
+            else:
+                consecutive_ok = 0
             last_err = (
                 f"status={data['status']} "
                 f"active={len(active)}/{min_active} "
                 f"bitrates=[{', '.join(str(round(v['smooth_bitrate_bps'] / 1000)) + 'kbps' for v in active)}]"
             )
         except Exception as exc:
+            consecutive_ok = 0
             last_err = str(exc)
         time.sleep(2)
-    raise TimeoutError(f"health check did not pass within {timeout}s — last: {last_err}")
+    raise TimeoutError(
+        f"health check did not pass within {timeout}s — "
+        f"needed {consecutive_passes} consecutive healthy polls, last: {last_err}"
+    )
 
 
 def poll_health_svc(
