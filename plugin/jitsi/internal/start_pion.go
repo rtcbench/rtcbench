@@ -11,7 +11,7 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench/pkg/gcc"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
-	pionpkg "github.com/rtcbench/rtcbench/pkg/pion"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 )
@@ -57,14 +57,14 @@ func parseLocalVideoMSID(sdp string) (primarySSRC, msid string) {
 
 const initialBitrateBps = 3_500_000
 
-func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection, func() context.CancelFunc, error) {
+func (c *Client) startPion(state *model.ConnectionState, impairment *pionutil.ImpairmentBinding) (*webrtc.PeerConnection, func() context.CancelFunc, error) {
 	state.Log.Infof("[startPion] initializing pion PeerConnection...")
 
 	// Resolve SVC mode for senders.
 	var useSVC bool
 	var svcCfg ivfpkg.SVCConfig
 	var getTargetBitrate func() int
-	var apiOpts []pionpkg.Option
+	var apiOpts []pionutil.Option
 	if state.Sender {
 		svc := ivfpkg.ResolveSVC(state.CameraPaths, c.svcConfig.Mode, c.svcConfig.SpatialLayers, c.svcConfig.TemporalLayers, initialBitrateBps)
 		useSVC = svc.Enabled
@@ -76,12 +76,16 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 			}
 			getTargetBitrate = getBitrate
 			apiOpts = append(apiOpts,
-				pionpkg.WithAPIOption(webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories))),
+				pionutil.WithAPIOption(webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories))),
 			)
 		}
 	}
 
-	api, err := pionpkg.NewAPI(state.LANClientIP, 101, apiOpts...)
+	opts := append([]pionutil.Option{}, apiOpts...)
+	if impairment != nil {
+		opts = append(opts, pionutil.WithImpairment(impairment))
+	}
+	api, err := pionutil.NewAPI(state.LANClientIP, 101, opts...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -92,7 +96,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 	}
 
 	// Jitsi uses a superset of the standard logging callbacks.
-	pionpkg.RegisterLoggingCallbacks(state.Log, pc)
+	pionutil.RegisterLoggingCallbacks(state.Log, pc)
 	pc.OnICEGatheringStateChange(func(iceGatheringState webrtc.ICEGatheringState) {
 		state.Log.Infof("[pion] ICEGatheringState: %s", iceGatheringState.String())
 	})
@@ -108,7 +112,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 			return nil, nil, errors.New("expected a frame source for sending")
 		}
 		if useSVC {
-			svcTrack, err = pionpkg.NewVP9RTPTrack(state.Nickname)
+			svcTrack, err = pionutil.NewVP9RTPTrack(state.Nickname)
 			if err != nil {
 				return nil, nil, fmt.Errorf("NewTrackLocalStaticRTP failed: %w", err)
 			}
@@ -116,7 +120,7 @@ func (c *Client) startPion(state *model.ConnectionState) (*webrtc.PeerConnection
 				return nil, nil, fmt.Errorf("AddTrack failed: %w", err)
 			}
 		} else {
-			sampleTrack, err = pionpkg.NewVP9SampleTrack(state.Nickname)
+			sampleTrack, err = pionutil.NewVP9SampleTrack(state.Nickname)
 			if err != nil {
 				return nil, nil, fmt.Errorf("NewTrackLocalStaticSample failed: %w", err)
 			}

@@ -179,6 +179,11 @@ func main() {
 		exitCode = 1
 	}
 
+	if err := rtcbench.EvaluateReceiverThresholds(summary.Receivers, cfg.Spec.Metrics.ReceiverThresholds); err != nil {
+		mainLog.Errorf("receiver thresholds failed: %v", err)
+		exitCode = 1
+	}
+
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}

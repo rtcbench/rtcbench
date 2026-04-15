@@ -1,58 +1,129 @@
-package pion
+package pionutil
 
 import (
 	"fmt"
 	"net"
 
-	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/pion/dtls/v3"
+	"github.com/pion/logging"
+	"github.com/pion/transport/v4/vnet"
 	"github.com/pion/webrtc/v4"
+	"github.com/rtcbench/rtcbench/pkg/log"
 )
 
 type apiConfig struct {
 	forceActiveDTLS bool
 	extraOpts       []func(*webrtc.API)
+	impairment      *ImpairmentBinding
 }
 
-// Option configures NewAPI behavior.
+type ImpairmentBinding struct {
+	Router  *ImpairmentRouter
+	Profile *ImpairmentProfile
+}
+
+type ImpairmentRouter struct {
+	router     *vnet.Router
+	proxy      *vnet.UDPProxy
+	serverIP   string
+	serverPort int
+	serverAddr *net.UDPAddr
+}
+
+func NewImpairmentRouter(serverIP string, serverPort int) (*ImpairmentRouter, error) {
+	if serverPort <= 0 || serverPort > 65535 {
+		return nil, fmt.Errorf("impairment: serverPort %d out of range [1,65535]", serverPort)
+	}
+	parsedIP := net.ParseIP(serverIP)
+	if parsedIP == nil {
+		return nil, fmt.Errorf("impairment: invalid serverIP %q", serverIP)
+	}
+
+	router, err := vnet.NewRouter(&vnet.RouterConfig{
+		Name:          "rtcbench-wan",
+		CIDR:          "0.0.0.0/0",
+		LoggerFactory: logging.NewDefaultLoggerFactory(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("vnet.NewRouter: %w", err)
+	}
+
+	proxy, err := vnet.NewProxy(router)
+	if err != nil {
+		return nil, fmt.Errorf("vnet.NewProxy: %w", err)
+	}
+
+	return &ImpairmentRouter{
+		router:     router,
+		proxy:      proxy,
+		serverIP:   serverIP,
+		serverPort: serverPort,
+		serverAddr: &net.UDPAddr{IP: parsedIP, Port: serverPort},
+	}, nil
+}
+
+func (r *ImpairmentRouter) Start() error {
+	return r.router.Start()
+}
+
+func (r *ImpairmentRouter) Stop() error {
+	if r.proxy != nil {
+		_ = r.proxy.Close()
+	}
+	return r.router.Stop()
+}
+
 type Option func(*apiConfig)
 
-// WithForceActiveDTLS forces the answering DTLS role to client (active),
-// required for ICE Lite servers like mediasoup.
 func WithForceActiveDTLS() Option {
 	return func(c *apiConfig) { c.forceActiveDTLS = true }
 }
 
-// WithAPIOption appends a raw pion API option (e.g. WithInterceptorRegistry).
 func WithAPIOption(opt func(*webrtc.API)) Option {
 	return func(c *apiConfig) { c.extraOpts = append(c.extraOpts, opt) }
 }
 
-// NewAPI creates a pion WebRTC API with a single shared UDP socket and VP9
-// registered at the given payload type, including transport-cc feedback and
-// the TWCC header extension. This is the shared core used by Janus (PT=98),
-// Mediasoup (dynamic PT), and Jitsi (PT=101).
+func WithImpairment(b *ImpairmentBinding) Option {
+	return func(c *apiConfig) { c.impairment = b }
+}
+
 func NewAPI(clientIP string, vp9PT uint8, opts ...Option) (*webrtc.API, error) {
 	var cfg apiConfig
 	for _, o := range opts {
 		o(&cfg)
 	}
 
-	bindAddr := clientIP
-	if bindAddr == "" {
-		bindAddr = "0.0.0.0"
-	}
-	conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:0", bindAddr))
-	if err != nil {
-		return nil, fmt.Errorf("bind UDP: %w", err)
-	}
-
 	se := webrtc.SettingEngine{}
 	se.SetSRTPProtectionProfiles(dtls.SRTP_AEAD_AES_128_GCM)
-	se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 	if cfg.forceActiveDTLS {
 		se.SetAnsweringDTLSRole(webrtc.DTLSRoleClient)
+	}
+
+	if cfg.impairment == nil {
+		bindAddr := clientIP
+		if bindAddr == "" {
+			bindAddr = "0.0.0.0"
+		}
+		conn, err := net.ListenPacket("udp4", fmt.Sprintf("%s:0", bindAddr))
+		if err != nil {
+			return nil, fmt.Errorf("bind UDP: %w", err)
+		}
+		se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
+	} else {
+		if cfg.impairment.Router == nil || cfg.impairment.Profile == nil {
+			return nil, fmt.Errorf("impairment binding requires Router and Profile")
+		}
+		clientNet, err := buildParticipantNet(cfg.impairment.Router.router, cfg.impairment.Profile, allocateVirtualIP())
+		if err != nil {
+			return nil, fmt.Errorf("buildParticipantNet: %w", err)
+		}
+
+		if err := cfg.impairment.Router.proxy.Proxy(clientNet, cfg.impairment.Router.serverAddr); err != nil {
+			return nil, fmt.Errorf("UDPProxy.Proxy: %w", err)
+		}
+
+		se.SetNet(clientNet)
 	}
 
 	m := &webrtc.MediaEngine{}
@@ -80,9 +151,6 @@ func NewAPI(clientIP string, vp9PT uint8, opts ...Option) (*webrtc.API, error) {
 	return webrtc.NewAPI(apiOpts...), nil
 }
 
-// RegisterLoggingCallbacks adds ICE connection state and candidate logging
-// to a PeerConnection. Jitsi adds extra callbacks (gathering state, connection
-// state) beyond these two.
 func RegisterLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
 	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
 		l.Infof("[pion] ICEConnectionState: %s", s)
@@ -94,8 +162,6 @@ func RegisterLoggingCallbacks(l *log.Logger, pc *webrtc.PeerConnection) {
 	})
 }
 
-// NewVP9SampleTrack creates a VP9 sample-based track for simple (non-SVC)
-// senders. The streamID defaults to "ivf"; Jitsi uses the user nickname.
 func NewVP9SampleTrack(streamID string) (*webrtc.TrackLocalStaticSample, error) {
 	return webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{
@@ -107,8 +173,6 @@ func NewVP9SampleTrack(streamID string) (*webrtc.TrackLocalStaticSample, error) 
 	)
 }
 
-// NewVP9RTPTrack creates a VP9 RTP-based track for SVC senders that need
-// per-packet control over RTP headers.
 func NewVP9RTPTrack(streamID string) (*webrtc.TrackLocalStaticRTP, error) {
 	return webrtc.NewTrackLocalStaticRTP(
 		webrtc.RTPCodecCapability{

@@ -1,0 +1,79 @@
+apiVersion: rtcbench/v1
+kind: VideoCallStressTest
+metadata:
+  name: impairment-example
+spec:
+  plugin: $env:PLUGIN_ID=janus
+  scenario: default
+  conference:
+    name: room-1234
+    usersPerRoom: 6
+    totalRooms: 1
+    cameras:
+      perRoom: 1
+      fileType: ivf
+      videoCodec: vp9
+      directory: '~/vp9_ivf_videos'
+    joinPolicy:
+      concurrency: 6
+      alwaysRetryFailedJoins: true
+      joinStartSpacing: 2s
+  network:
+    serverIP: $env:SERVER_IP
+    serverPort: 10000
+    impairment:
+      default: clean
+      profiles:
+        clean:
+          bandwidthKbps: 50000
+          latency: 5ms
+        moderate-wan:
+          bandwidthKbps: 8000
+          latency: 50ms
+          lossPercent: 2
+          seed: 1
+        lossy-wan:
+          bandwidthKbps: 2500
+          latency: 100ms
+          lossPercent: 10
+          seed: 2
+      assignments:
+        - match:
+            role: sender
+          profile: clean
+        - match:
+            userIndexRange: [2, 3]
+          profile: moderate-wan
+        - match:
+            role: viewer
+          profile: lossy-wan
+  pluginConfig:
+    janus:
+      _serverRoot: 'http://{{spec.network.serverIP}}:8088/janus'
+      allowInsecureHttps: false
+  metrics:
+    port: 9090
+    thresholds:
+      - op: join
+        scenario: default
+        maxFailureRate: 0.01
+        maxP95: 3s
+    receiverThresholds:
+      - scenario: default
+        plugin: janus
+        profile: clean
+        minBitrateBps: 1500000
+        maxFreezeCount: 2
+      - scenario: default
+        plugin: janus
+        profile: lossy-wan
+        maxFreezeCount: 1000
+        minBitrateBps: 100000
+  logging:
+    console: true
+    directory: '/var/log/rtcbench'
+    streams:
+      - name: general
+        level: info
+      - name: video_stats
+        level: info

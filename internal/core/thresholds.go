@@ -111,3 +111,117 @@ func fallbackThresholdValue(v string) string {
 func durationString(seconds float64) string {
 	return (time.Duration(seconds * float64(time.Second))).String()
 }
+
+type ReceiverThresholdFailure struct {
+	Threshold ReceiverThresholdConfig
+	Actual    ReceiverSummary
+	Reason    string
+}
+
+func (f ReceiverThresholdFailure) Error() string {
+	scope := []string{
+		"user=" + f.Actual.UserID,
+		"scenario=" + f.Actual.Scenario,
+		"plugin=" + f.Actual.Plugin,
+		"profile=" + f.Actual.Profile,
+	}
+	return fmt.Sprintf("%s: %s", strings.Join(scope, " "), f.Reason)
+}
+
+func EvaluateReceiverThresholds(summaries []ReceiverSummary, thresholds []ReceiverThresholdConfig) error {
+	if len(thresholds) == 0 || len(summaries) == 0 {
+		return nil
+	}
+
+	var errs []error
+	for _, threshold := range thresholds {
+		matched := 0
+		for _, actual := range summaries {
+			if !receiverThresholdMatches(threshold, actual) {
+				continue
+			}
+			matched++
+			if failure := evaluateReceiverThreshold(threshold, actual); failure != nil {
+				errs = append(errs, failure)
+			}
+		}
+		if matched == 0 {
+			errs = append(errs, fmt.Errorf(
+				"scenario=%s plugin=%s profile=%s: no matching receiver series",
+				fallbackThresholdValue(threshold.Scenario),
+				fallbackThresholdValue(threshold.Plugin),
+				fallbackThresholdValue(threshold.Profile),
+			))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func receiverThresholdMatches(t ReceiverThresholdConfig, actual ReceiverSummary) bool {
+	if t.Scenario != "" && t.Scenario != actual.Scenario {
+		return false
+	}
+	if t.Plugin != "" && t.Plugin != actual.Plugin {
+		return false
+	}
+	if t.Profile != "" && t.Profile != actual.Profile {
+		return false
+	}
+	if t.UserID != "" && t.UserID != actual.UserID {
+		return false
+	}
+	return true
+}
+
+func evaluateReceiverThreshold(t ReceiverThresholdConfig, actual ReceiverSummary) error {
+	if t.MaxFreezeCount != nil && actual.FreezeCount > *t.MaxFreezeCount {
+		return ReceiverThresholdFailure{
+			Threshold: t,
+			Actual:    actual,
+			Reason:    fmt.Sprintf("freeze_count %d exceeds %d", actual.FreezeCount, *t.MaxFreezeCount),
+		}
+	}
+	if t.MaxFreezeDuration != nil && actual.FreezeDurationTotal > *t.MaxFreezeDuration {
+		return ReceiverThresholdFailure{
+			Threshold: t,
+			Actual:    actual,
+			Reason:    fmt.Sprintf("freeze_duration %.2f exceeds %.2f", actual.FreezeDurationTotal, *t.MaxFreezeDuration),
+		}
+	}
+	if t.MaxFrameLossRatio != nil && actual.FrameLossRatio > *t.MaxFrameLossRatio {
+		return ReceiverThresholdFailure{
+			Threshold: t,
+			Actual:    actual,
+			Reason:    fmt.Sprintf("frame_loss_ratio %.4f exceeds %.4f", actual.FrameLossRatio, *t.MaxFrameLossRatio),
+		}
+	}
+	if t.MinBitrateBps != nil && actual.MeanBitrateBps < *t.MinBitrateBps {
+		return ReceiverThresholdFailure{
+			Threshold: t,
+			Actual:    actual,
+			Reason:    fmt.Sprintf("mean_bitrate_bps %.0f below %.0f", actual.MeanBitrateBps, *t.MinBitrateBps),
+		}
+	}
+	if t.MinFPS != nil && actual.MeanFPS < *t.MinFPS {
+		return ReceiverThresholdFailure{
+			Threshold: t,
+			Actual:    actual,
+			Reason:    fmt.Sprintf("mean_fps %.1f below %.1f", actual.MeanFPS, *t.MinFPS),
+		}
+	}
+	if t.MaxJitterUS != nil && actual.MaxJitterUS > *t.MaxJitterUS {
+		return ReceiverThresholdFailure{
+			Threshold: t,
+			Actual:    actual,
+			Reason:    fmt.Sprintf("max_jitter_us %.0f exceeds %.0f", actual.MaxJitterUS, *t.MaxJitterUS),
+		}
+	}
+	if t.MaxPLICount != nil && actual.PliCount > *t.MaxPLICount {
+		return ReceiverThresholdFailure{
+			Threshold: t,
+			Actual:    actual,
+			Reason:    fmt.Sprintf("pli_count %d exceeds %d", actual.PliCount, *t.MaxPLICount),
+		}
+	}
+	return nil
+}

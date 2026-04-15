@@ -7,14 +7,16 @@ import (
 
 	"github.com/rtcbench/rtcbench"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	jitsi "github.com/rtcbench/rtcbench/plugin/jitsi/internal"
 )
 
 const PluginID = "jitsi"
 
 type Plugin struct {
-	client  *jitsi.Client
-	cameras *ivfpkg.Cameras
+	client           *jitsi.Client
+	cameras          *ivfpkg.Cameras
+	impairmentRouter *pionutil.ImpairmentRouter
 }
 
 func NewPlugin() rtcbench.Plugin {
@@ -27,6 +29,7 @@ func (p *Plugin) Setup(_ context.Context, e rtcbench.PluginEnv) error {
 		return err
 	}
 	p.client = client
+	p.impairmentRouter = e.ImpairmentRouter()
 	p.client.SetRecording(
 		e.Config().Spec.Conference.Recording.Enabled,
 		e.Config().Spec.Conference.Recording.Directory,
@@ -46,19 +49,42 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 }
 
 func (p *Plugin) NewParticipant(ctx context.Context, cfg *rtcbench.UserConfig) (rtcbench.Participant, error) {
+	var impairment *pionutil.ImpairmentBinding
+	if cfg.ImpairmentProfile != nil && p.impairmentRouter != nil {
+		impairment = &pionutil.ImpairmentBinding{
+			Router:  p.impairmentRouter,
+			Profile: pionProfileFromCore(cfg.ImpairmentProfile),
+		}
+	}
 	return &participant{
-		plugin: p,
-		userID: cfg.UserID,
-		role:   cfg.Role,
+		plugin:     p,
+		userID:     cfg.UserID,
+		role:       cfg.Role,
+		impairment: impairment,
 	}, nil
 }
 
+func pionProfileFromCore(c *rtcbench.ImpairmentProfile) *pionutil.ImpairmentProfile {
+	if c == nil {
+		return nil
+	}
+	return &pionutil.ImpairmentProfile{
+		Name:         c.Name,
+		BandwidthBps: c.BandwidthBps,
+		BaseLatency:  c.BaseLatency,
+		JitterStddev: c.JitterStddev,
+		LossPercent:  c.LossPercent,
+		Seed:         c.Seed,
+	}
+}
+
 type participant struct {
-	mu      sync.Mutex
-	plugin  *Plugin
-	userID  string
-	role    rtcbench.UserRole
-	session *jitsi.Session
+	mu         sync.Mutex
+	plugin     *Plugin
+	userID     string
+	role       rtcbench.UserRole
+	impairment *pionutil.ImpairmentBinding
+	session    *jitsi.Session
 }
 
 func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
@@ -83,7 +109,7 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 		cameraPaths = p.plugin.cameras.Paths()
 	}
 
-	session, err := p.plugin.client.ConnectViewer(ctx, req.RoomID, p.userID, src, cameraPaths)
+	session, err := p.plugin.client.ConnectViewer(ctx, req.RoomID, p.userID, src, cameraPaths, p.impairment)
 	if err != nil {
 		return fmt.Errorf("%w: %v", rtcbench.ErrCannotJoinRoom, err)
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/rtcbench/rtcbench"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 )
 
 type Client struct {
@@ -21,6 +22,7 @@ type Client struct {
 	svcConfig          rtcbench.SVCCameraConfig
 	enableRecording    bool
 	recordingDirectory string
+	impairmentRouter   *pionutil.ImpairmentRouter
 }
 
 type Session struct {
@@ -29,6 +31,7 @@ type Session struct {
 	cancel           context.CancelFunc
 	startPublishLoop func() context.CancelFunc
 	publishCancel    context.CancelFunc
+	impairment       *pionutil.ImpairmentBinding
 }
 
 func (s *Session) Close() error {
@@ -122,6 +125,7 @@ func NewClient(e rtcbench.PluginEnv) (*Client, error) {
 		statsBufferSize:  cfg.Spec.Conference.StatsBufferSize,
 		packetCaptureDir: pcapDir,
 		svcConfig:        cfg.Spec.Conference.Cameras.SVC,
+		impairmentRouter: e.ImpairmentRouter(),
 	}, nil
 }
 
@@ -130,11 +134,15 @@ func (c *Client) SetRecording(enabled bool, directory string) {
 	c.recordingDirectory = directory
 }
 
-func (c *Client) ConnectViewer(ctx context.Context, roomID, userID string, src ivfpkg.FrameSource, cameraPaths []string) (*Session, error) {
+func (c *Client) ConnectViewer(ctx context.Context, roomID, userID string, src ivfpkg.FrameSource, cameraPaths []string, impairment *pionutil.ImpairmentBinding) (*Session, error) {
 	l := c.log.With(fmt.Sprintf("[%s]", userID))
-	return c.performHandshake(ctx, l, roomID, userID, src, cameraPaths)
+	return c.performHandshake(ctx, l, roomID, userID, src, cameraPaths, impairment)
 }
 
 func (c *Client) Shutdown() {
 	c.pipeline.Stop()
+}
+
+func (c *Client) ServerIP() string {
+	return c.serverIP
 }

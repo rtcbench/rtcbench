@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/httpxml"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/model"
 	"github.com/rtcbench/rtcbench/plugin/jitsi/internal/sdp_tmpl"
@@ -26,6 +27,7 @@ func (c *Client) performHandshake(
 	nickname string,
 	src ivfpkg.FrameSource,
 	cameraPaths []string,
+	impairment *pionutil.ImpairmentBinding,
 ) (*Session, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	state := &model.ConnectionState{
@@ -85,7 +87,7 @@ func (c *Client) performHandshake(
 	}
 	state.RemoteSDP = sdp
 
-	pionConnection, startPublishLoop, err := c.startPion(state)
+	pionConnection, startPublishLoop, err := c.startPion(state, impairment)
 	if err != nil {
 		cancel()
 		l.Errorf("startPion failed: %v", err)
@@ -162,5 +164,6 @@ func (c *Client) performHandshake(
 		pc:               pionConnection,
 		cancel:           cancel,
 		startPublishLoop: startPublishLoop,
+		impairment:       impairment,
 	}, nil
 }

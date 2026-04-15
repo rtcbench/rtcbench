@@ -50,6 +50,10 @@ func NewPlugin() rtcbench.Plugin {
 }
 
 func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
+	if e.Config().Spec.Network.Impairment != nil {
+		return rtcbench.ErrImpairmentUnsupported
+	}
+
 	cfg := e.Config().Spec.PluginConfig[PluginID].(map[string]any)
 	p.wsURL = cfg[cfgWSURL].(string)
 	p.apiKey = cfg[cfgAPIKey].(string)

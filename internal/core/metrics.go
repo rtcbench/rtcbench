@@ -5,6 +5,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 )
 
 const (
@@ -15,17 +18,29 @@ const (
 	metricPublishersActive  = "rtcbench_publishers_active"
 	metricRoomsActive       = "rtcbench_rooms_active"
 	metricSessionDuration   = "rtcbench_session_duration_seconds"
-	metricLabelScenario     = "scenario"
-	metricLabelPlugin       = "plugin"
-	metricLabelRole         = "role"
-	metricLabelOp           = "op"
-	metricLabelOutcome      = "outcome"
-	metricOutcomeAttempt    = "attempt"
-	metricOutcomeSuccess    = "success"
-	metricOutcomeFailure    = "failure"
-	metricLabelAll          = "all"
-	metricLabelUnknown      = "unknown"
-	manualScenarioLabel     = "manual"
+
+	metricReceiverBitrateBps     = "rtcbench_receiver_bitrate_bps"
+	metricReceiverFPS            = "rtcbench_receiver_fps"
+	metricReceiverFreezeTotal    = "rtcbench_receiver_freeze_total"
+	metricReceiverFrameLossRatio = "rtcbench_receiver_frame_loss_ratio"
+	metricReceiverJitterUS       = "rtcbench_receiver_jitter_us"
+	metricRTCPPliTotal           = "rtcbench_rtcp_pli_total"
+	metricRTCPNackTotal          = "rtcbench_rtcp_nack_total"
+	metricRTCPFirTotal           = "rtcbench_rtcp_fir_total"
+
+	metricLabelScenario  = "scenario"
+	metricLabelPlugin    = "plugin"
+	metricLabelRole      = "role"
+	metricLabelOp        = "op"
+	metricLabelOutcome   = "outcome"
+	metricLabelProfile   = "profile"
+	metricLabelUser      = "user_id"
+	metricOutcomeAttempt = "attempt"
+	metricOutcomeSuccess = "success"
+	metricOutcomeFailure = "failure"
+	metricLabelAll       = "all"
+	metricLabelUnknown   = "unknown"
+	manualScenarioLabel  = "manual"
 )
 
 var histogramBucketBounds = []float64{
@@ -102,6 +117,7 @@ type RunMetricsSnapshot struct {
 	Gauges     map[string]float64
 	GaugePeaks map[string]float64
 	Histograms map[string]HistogramSnapshot
+	Receivers  []ReceiverSummary
 }
 
 func (s RunMetricsSnapshot) CounterValue(name string, labels Labels) int64 {
@@ -124,6 +140,7 @@ type RunMetricsSummary struct {
 	Operations []OperationSummary
 	Sessions   []HistogramSummary
 	Gauges     []GaugeSummary
+	Receivers  []ReceiverSummary
 }
 
 type OperationSummary struct {
@@ -160,8 +177,26 @@ type GaugeSummary struct {
 	Plugin   string
 	Role     string
 	Name     string
+	Profile  string
+	UserID   string
 	Current  float64
 	Peak     float64
+}
+
+type ReceiverSummary struct {
+	Scenario            string
+	Plugin              string
+	Role                string
+	Profile             string
+	UserID              string
+	FreezeCount         int64
+	FreezeDurationTotal float64
+	FrameLossRatio      float64
+	MeanBitrateBps      float64
+	MeanFPS             float64
+	MaxJitterUS         float64
+	PliCount            int64
+	NackCount           int64
 }
 
 func (s RunMetricsSnapshot) Summary() RunMetricsSummary {
@@ -246,6 +281,7 @@ func (s RunMetricsSnapshot) Summary() RunMetricsSummary {
 		Operations: make([]OperationSummary, 0, len(operations)),
 		Sessions:   sessions,
 		Gauges:     gauges,
+		Receivers:  s.Receivers,
 	}
 	for _, summary := range operations {
 		if summary.Attempts > 0 {
@@ -300,6 +336,9 @@ type runMetricsCollector struct {
 
 	userPluginConnections map[string]int64
 	roomMembers           map[string]int64
+
+	receivers         map[string]*receiverMetricsCollector
+	archivedReceivers []ReceiverSummary
 }
 
 func newRunMetricsCollector() *runMetricsCollector {
@@ -310,7 +349,40 @@ func newRunMetricsCollector() *runMetricsCollector {
 		histograms:            make(map[string]*histogramSeries),
 		userPluginConnections: make(map[string]int64),
 		roomMembers:           make(map[string]int64),
+		receivers:             make(map[string]*receiverMetricsCollector),
 	}
+}
+
+func (m *runMetricsCollector) RegisterReceiver(userID, plugin, scenario, profile string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.receivers[userID]; exists {
+		return
+	}
+	m.receivers[userID] = newReceiverMetrics(scenario, plugin, profile, userID)
+}
+
+func (m *runMetricsCollector) UnregisterReceiver(userID string) ReceiverSummary {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.receivers[userID]
+	if !ok {
+		return ReceiverSummary{}
+	}
+	delete(m.receivers, userID)
+	summary := r.Summary()
+	m.archivedReceivers = append(m.archivedReceivers, summary)
+	return summary
+}
+
+func (m *runMetricsCollector) ObserveReceiverSample(userID string, sample vp9_stats.VideoQualitySample) {
+	m.mu.RLock()
+	r, ok := m.receivers[userID]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	r.ObserveSample(&sample)
 }
 
 func (m *runMetricsCollector) Snapshot() RunMetricsSnapshot {
@@ -346,11 +418,21 @@ func (m *runMetricsCollector) Snapshot() RunMetricsSnapshot {
 		}
 	}
 
+	receivers := make([]ReceiverSummary, 0, len(m.receivers)+len(m.archivedReceivers))
+	receivers = append(receivers, m.archivedReceivers...)
+	for _, r := range m.receivers {
+		receivers = append(receivers, r.Summary())
+	}
+	sort.Slice(receivers, func(i, j int) bool {
+		return receivers[i].UserID < receivers[j].UserID
+	})
+
 	return RunMetricsSnapshot{
 		Counters:   counters,
 		Gauges:     gauges,
 		GaugePeaks: gaugePeaks,
 		Histograms: histograms,
+		Receivers:  receivers,
 	}
 }
 
@@ -546,6 +628,158 @@ func parseMetricSeriesKey(key string) (string, Labels) {
 		labels[name] = value
 	}
 	return parts[0], labels
+}
+
+type FreezeDetector struct {
+	mu                sync.Mutex
+	fpsThreshold      float32
+	freezeThresholdMS int
+	lastFrameTime     time.Time
+	freezeStart       time.Time
+	isFreezing        bool
+	totalFreezes      int64
+	totalDuration     time.Duration
+}
+
+func NewFreezeDetector(fpsThreshold float32, freezeThresholdMS int) *FreezeDetector {
+	return &FreezeDetector{
+		fpsThreshold:      fpsThreshold,
+		freezeThresholdMS: freezeThresholdMS,
+	}
+}
+
+func (d *FreezeDetector) Update(now time.Time, fps float32) (inFreeze bool, freezeEnded bool, duration time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if fps < d.fpsThreshold {
+		if !d.isFreezing {
+			d.isFreezing = true
+			d.freezeStart = now
+		}
+		return true, false, 0
+	}
+
+	if d.isFreezing {
+		d.isFreezing = false
+		d.totalFreezes++
+		dur := now.Sub(d.freezeStart)
+		d.totalDuration += dur
+		return false, true, dur
+	}
+
+	return false, false, 0
+}
+
+func (d *FreezeDetector) Stats() (count int64, duration time.Duration) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.totalFreezes, d.totalDuration
+}
+
+func (d *FreezeDetector) Reset() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.totalFreezes = 0
+	d.totalDuration = 0
+	d.isFreezing = false
+}
+
+type receiverMetricsCollector struct {
+	mu          sync.Mutex
+	scenario    string
+	plugin      string
+	profile     string
+	userID      string
+	freeze      *FreezeDetector
+	bitrateSum  float64
+	bitrateCnt  int64
+	fpsSum      float64
+	fpsCnt      int64
+	jitterMax   float64
+	pliCount    int64
+	nackCount   int64
+	framesTotal int64
+	framesLost  int64
+	initialized bool
+}
+
+func newReceiverMetrics(scenario, plugin, profile, userID string) *receiverMetricsCollector {
+	return &receiverMetricsCollector{
+		scenario:    scenario,
+		plugin:      plugin,
+		profile:     profile,
+		userID:      userID,
+		freeze:      NewFreezeDetector(5.0, 200),
+		initialized: true,
+	}
+}
+
+func (r *receiverMetricsCollector) ObserveSample(sample *vp9_stats.VideoQualitySample) {
+	if sample == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.bitrateSum += float64(sample.SmoothBitrate)
+	r.bitrateCnt++
+
+	fps := float64(sample.DecoderSmoothFPS)
+	r.fpsSum += fps
+	r.fpsCnt++
+
+	if sample.FrameJitterUS > r.jitterMax {
+		r.jitterMax = sample.FrameJitterUS
+	}
+
+	if sample.RTCP.PLISent > r.pliCount {
+		r.pliCount = sample.RTCP.PLISent
+	}
+	if sample.FramesComplete+sample.FramesLost > r.framesTotal {
+		r.framesTotal = sample.FramesComplete + sample.FramesLost
+	}
+	if sample.FramesLost > r.framesLost {
+		r.framesLost = sample.FramesLost
+	}
+
+	r.freeze.Update(time.Now(), float32(fps))
+}
+
+func (r *receiverMetricsCollector) Summary() ReceiverSummary {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var bitrateMean, fpsMean float64
+	if r.bitrateCnt > 0 {
+		bitrateMean = r.bitrateSum / float64(r.bitrateCnt)
+	}
+	if r.fpsCnt > 0 {
+		fpsMean = r.fpsSum / float64(r.fpsCnt)
+	}
+
+	var frameLossRatio float64
+	if r.framesTotal > 0 {
+		frameLossRatio = float64(r.framesLost) / float64(r.framesTotal)
+	}
+
+	freezeCount, freezeDur := r.freeze.Stats()
+
+	return ReceiverSummary{
+		Scenario:            r.scenario,
+		Plugin:              r.plugin,
+		Role:                string(Viewer),
+		Profile:             r.profile,
+		UserID:              r.userID,
+		FreezeCount:         freezeCount,
+		FreezeDurationTotal: freezeDur.Seconds(),
+		FrameLossRatio:      frameLossRatio,
+		MeanBitrateBps:      bitrateMean,
+		MeanFPS:             fpsMean,
+		MaxJitterUS:         r.jitterMax,
+		PliCount:            r.pliCount,
+		NackCount:           r.nackCount,
+	}
 }
 
 func operationSummarySortKey(summary OperationSummary) string {
