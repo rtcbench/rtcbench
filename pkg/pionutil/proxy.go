@@ -10,9 +10,11 @@ import (
 )
 
 type impairmentProxy struct {
-	serverIP  net.IP
-	serverNet *vnet.Net
-	listeners sync.Map
+	serverIP   net.IP
+	serverNet  *vnet.Net
+	listeners  sync.Map
+	profilesMu sync.RWMutex
+	profiles   map[string]*ImpairmentProfile
 }
 
 func newImpairmentProxy(router *vnet.Router, serverIP net.IP, initialPort int) (*impairmentProxy, error) {
@@ -29,6 +31,7 @@ func newImpairmentProxy(router *vnet.Router, serverIP net.IP, initialPort int) (
 	proxy := &impairmentProxy{
 		serverIP:  append(net.IP(nil), serverIP...),
 		serverNet: serverNet,
+		profiles:  make(map[string]*ImpairmentProfile),
 	}
 
 	router.AddChunkFilter(func(c vnet.Chunk) bool {
@@ -56,6 +59,16 @@ func (p *impairmentProxy) Close() error {
 	return errors.Join(errs...)
 }
 
+func (p *impairmentProxy) registerProfile(clientIP string, profile *ImpairmentProfile) {
+	if clientIP == "" || profile == nil {
+		return
+	}
+
+	p.profilesMu.Lock()
+	p.profiles[clientIP] = profile
+	p.profilesMu.Unlock()
+}
+
 func (p *impairmentProxy) ensureChunkDestination(c vnet.Chunk) {
 	destination, ok := c.DestinationAddr().(*net.UDPAddr)
 	if !ok || destination.Port <= 0 || !destination.IP.Equal(p.serverIP) {
@@ -72,7 +85,7 @@ func (p *impairmentProxy) ensurePort(port int) error {
 		return nil
 	}
 
-	forwarder, err := newProxyPortForwarder(p.serverNet, p.serverIP, port)
+	forwarder, err := newProxyPortForwarder(p, port)
 	if err != nil {
 		return err
 	}
@@ -86,6 +99,18 @@ func (p *impairmentProxy) ensurePort(port int) error {
 	return nil
 }
 
+func (p *impairmentProxy) profileForAddr(addr net.Addr) *ImpairmentProfile {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if !ok || udpAddr == nil {
+		return nil
+	}
+
+	p.profilesMu.RLock()
+	profile := p.profiles[udpAddr.IP.String()]
+	p.profilesMu.RUnlock()
+	return profile
+}
+
 type proxyPortForwarder struct {
 	serverIP   net.IP
 	port       int
@@ -95,18 +120,20 @@ type proxyPortForwarder struct {
 	wg         sync.WaitGroup
 	errMu      sync.Mutex
 	err        error
+	proxy      *impairmentProxy
 }
 
-func newProxyPortForwarder(serverNet *vnet.Net, serverIP net.IP, port int) (*proxyPortForwarder, error) {
-	vnetSocket, err := serverNet.ListenUDP("udp4", &net.UDPAddr{IP: serverIP, Port: port})
+func newProxyPortForwarder(proxy *impairmentProxy, port int) (*proxyPortForwarder, error) {
+	vnetSocket, err := proxy.serverNet.ListenUDP("udp4", &net.UDPAddr{IP: proxy.serverIP, Port: port})
 	if err != nil {
-		return nil, fmt.Errorf("listen on %s:%d: %w", serverIP.String(), port, err)
+		return nil, fmt.Errorf("listen on %s:%d: %w", proxy.serverIP.String(), port, err)
 	}
 
 	forwarder := &proxyPortForwarder{
-		serverIP:   append(net.IP(nil), serverIP...),
+		serverIP:   append(net.IP(nil), proxy.serverIP...),
 		port:       port,
 		vnetSocket: vnetSocket,
+		proxy:      proxy,
 	}
 	forwarder.wg.Add(1)
 	go forwarder.run()
@@ -133,17 +160,14 @@ func (f *proxyPortForwarder) run() {
 			f.recordErr(err)
 			continue
 		}
-		if _, err := endpoint.Write(buffer[:n]); err != nil {
-			f.recordErr(err)
-			continue
-		}
+		endpoint.writeToReal(buffer[:n])
 	}
 }
 
-func (f *proxyPortForwarder) endpointFor(vnetClientAddr net.Addr) (*net.UDPConn, error) {
+func (f *proxyPortForwarder) endpointFor(vnetClientAddr net.Addr) (*proxyEndpoint, error) {
 	key := vnetClientAddr.String()
 	if value, ok := f.endpoints.Load(key); ok {
-		return value.(*net.UDPConn), nil
+		return value.(*proxyEndpoint), nil
 	}
 
 	realSocket, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: f.serverIP, Port: f.port})
@@ -151,26 +175,34 @@ func (f *proxyPortForwarder) endpointFor(vnetClientAddr net.Addr) (*net.UDPConn,
 		return nil, fmt.Errorf("dial %s:%d: %w", f.serverIP.String(), f.port, err)
 	}
 
-	actual, loaded := f.endpoints.LoadOrStore(key, realSocket)
+	endpoint := newProxyEndpoint(
+		f.vnetSocket,
+		cloneUDPAddr(vnetClientAddr),
+		realSocket,
+		f.proxy.profileForAddr(vnetClientAddr),
+		func(err error) { f.recordErr(err) },
+	)
+
+	actual, loaded := f.endpoints.LoadOrStore(key, endpoint)
 	if loaded {
-		_ = realSocket.Close()
-		return actual.(*net.UDPConn), nil
+		endpoint.Close()
+		return actual.(*proxyEndpoint), nil
 	}
 
 	f.wg.Add(1)
-	go f.copyToVNet(cloneUDPAddr(vnetClientAddr), realSocket, key)
+	go f.copyToVNet(endpoint, key)
 
-	return realSocket, nil
+	return endpoint, nil
 }
 
-func (f *proxyPortForwarder) copyToVNet(vnetClientAddr net.Addr, realSocket *net.UDPConn, key string) {
+func (f *proxyPortForwarder) copyToVNet(endpoint *proxyEndpoint, key string) {
 	defer f.wg.Done()
 	defer f.endpoints.Delete(key)
-	defer realSocket.Close()
+	defer endpoint.Close()
 
 	buffer := make([]byte, 1500)
 	for {
-		n, _, err := realSocket.ReadFrom(buffer)
+		n, _, err := endpoint.realSocket.ReadFrom(buffer)
 		if err != nil {
 			f.recordErr(err)
 			return
@@ -178,10 +210,7 @@ func (f *proxyPortForwarder) copyToVNet(vnetClientAddr net.Addr, realSocket *net
 		if n <= 0 {
 			continue
 		}
-		if _, err := f.vnetSocket.WriteTo(buffer[:n], vnetClientAddr); err != nil {
-			f.recordErr(err)
-			return
-		}
+		endpoint.writeToVNet(buffer[:n])
 	}
 }
 
@@ -191,9 +220,7 @@ func (f *proxyPortForwarder) Close() error {
 			f.recordErr(err)
 		}
 		f.endpoints.Range(func(_, value any) bool {
-			if err := value.(*net.UDPConn).Close(); err != nil {
-				f.recordErr(err)
-			}
+			value.(*proxyEndpoint).Close()
 			return true
 		})
 		f.wg.Wait()
@@ -215,6 +242,55 @@ func (f *proxyPortForwarder) recordErr(err error) {
 	f.errMu.Lock()
 	defer f.errMu.Unlock()
 	f.err = errors.Join(f.err, err)
+}
+
+type proxyEndpoint struct {
+	realSocket     *net.UDPConn
+	vnetSocket     net.PacketConn
+	vnetClientAddr net.Addr
+	downlink       *packetScheduler
+	recordErr      func(error)
+	closeOnce      sync.Once
+}
+
+func newProxyEndpoint(vnetSocket net.PacketConn, vnetClientAddr net.Addr, realSocket *net.UDPConn, profile *ImpairmentProfile, recordErr func(error)) *proxyEndpoint {
+	endpoint := &proxyEndpoint{
+		realSocket:     realSocket,
+		vnetSocket:     vnetSocket,
+		vnetClientAddr: vnetClientAddr,
+		recordErr:      recordErr,
+	}
+	endpoint.downlink = newPacketScheduler(profile, vnetClientAddr.String()+"/downlink", func(data []byte) {
+		if _, err := endpoint.vnetSocket.WriteTo(data, endpoint.vnetClientAddr); err != nil {
+			recordErr(err)
+		}
+	})
+	return endpoint
+}
+
+func (e *proxyEndpoint) writeToReal(payload []byte) {
+	if _, err := e.realSocket.Write(payload); err != nil {
+		e.recordErr(err)
+	}
+}
+
+func (e *proxyEndpoint) writeToVNet(payload []byte) {
+	if e.downlink == nil {
+		if _, err := e.vnetSocket.WriteTo(payload, e.vnetClientAddr); err != nil {
+			e.recordErr(err)
+		}
+		return
+	}
+	e.downlink.Enqueue(payload)
+}
+
+func (e *proxyEndpoint) Close() {
+	e.closeOnce.Do(func() {
+		if e.downlink != nil {
+			e.downlink.Close()
+		}
+		_ = e.realSocket.Close()
+	})
 }
 
 func cloneUDPAddr(addr net.Addr) net.Addr {

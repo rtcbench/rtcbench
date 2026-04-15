@@ -39,7 +39,7 @@ func TestImpairmentConfigValidation(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "jitter rejected (not implemented)",
+			name: "jitter accepted",
 			cfg: &YAMLImpairmentConfig{
 				Profiles: map[string]*YAMLImpairmentProfile{
 					"test": {
@@ -48,7 +48,7 @@ func TestImpairmentConfigValidation(t *testing.T) {
 				},
 				Default: "test",
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "empty profiles",
