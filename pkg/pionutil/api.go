@@ -23,15 +23,13 @@ type ImpairmentBinding struct {
 }
 
 type ImpairmentRouter struct {
-	router     *vnet.Router
-	proxy      *vnet.UDPProxy
-	serverIP   string
-	serverPort int
-	serverAddr *net.UDPAddr
+	router   *vnet.Router
+	proxy    *impairmentProxy
+	serverIP string
 }
 
 func NewImpairmentRouter(serverIP string, serverPort int) (*ImpairmentRouter, error) {
-	if serverPort <= 0 || serverPort > 65535 {
+	if serverPort < 0 || serverPort > 65535 {
 		return nil, fmt.Errorf("impairment: serverPort %d out of range [1,65535]", serverPort)
 	}
 	parsedIP := net.ParseIP(serverIP)
@@ -48,17 +46,15 @@ func NewImpairmentRouter(serverIP string, serverPort int) (*ImpairmentRouter, er
 		return nil, fmt.Errorf("vnet.NewRouter: %w", err)
 	}
 
-	proxy, err := vnet.NewProxy(router)
+	proxy, err := newImpairmentProxy(router, parsedIP, serverPort)
 	if err != nil {
-		return nil, fmt.Errorf("vnet.NewProxy: %w", err)
+		return nil, err
 	}
 
 	return &ImpairmentRouter{
-		router:     router,
-		proxy:      proxy,
-		serverIP:   serverIP,
-		serverPort: serverPort,
-		serverAddr: &net.UDPAddr{IP: parsedIP, Port: serverPort},
+		router:   router,
+		proxy:    proxy,
+		serverIP: serverIP,
 	}, nil
 }
 
@@ -193,9 +189,6 @@ func buildImpairmentNet(b *ImpairmentBinding) (*vnet.Net, error) {
 	clientNet, err := buildParticipantNet(b.Router.router, b.Profile, allocateVirtualIP())
 	if err != nil {
 		return nil, fmt.Errorf("buildParticipantNet: %w", err)
-	}
-	if err := b.Router.proxy.Proxy(clientNet, b.Router.serverAddr); err != nil {
-		return nil, fmt.Errorf("UDPProxy.Proxy: %w", err)
 	}
 	return clientNet, nil
 }
