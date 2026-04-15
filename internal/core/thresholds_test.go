@@ -105,3 +105,27 @@ func TestYAMLMetricsThresholdsValidateAndConvert(t *testing.T) {
 		t.Fatalf("converted MaxP95 = %v, want 2s", converted.MaxP95)
 	}
 }
+
+func TestYAMLReceiverThresholdsValidateAndConvert(t *testing.T) {
+	metrics := &YAMLMetricsConfig{
+		ReceiverThresholds: []YAMLReceiverThresholdConfig{
+			{
+				Plugin:       stringPtr("janus"),
+				Profile:      stringPtr("lossy-wifi"),
+				MaxMeanRTTMS: float64Ptr(120.0),
+			},
+		},
+	}
+
+	if err := metrics.validate(); err != nil {
+		t.Fatalf("validate() error = %v", err)
+	}
+
+	converted := metrics.ReceiverThresholds[0].mustConvert()
+	if converted.Plugin != "janus" || converted.Profile != "lossy-wifi" {
+		t.Fatalf("converted threshold = %+v, want janus/lossy-wifi", converted)
+	}
+	if converted.MaxMeanRTTMS == nil || *converted.MaxMeanRTTMS != 120.0 {
+		t.Fatalf("converted MaxMeanRTTMS = %v, want 120", converted.MaxMeanRTTMS)
+	}
+}

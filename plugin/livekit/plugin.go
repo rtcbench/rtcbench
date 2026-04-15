@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	lkproto "github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
@@ -43,6 +44,7 @@ type Plugin struct {
 	pipeline           *rtcbench.StatsPipeline
 	impairmentRouter   *pionutil.ImpairmentRouter
 	maxSubscriptions   int // 0 = unlimited
+	observeReceiverRTT func(string, time.Duration)
 
 	subscriptionCount int32 // atomic
 }
@@ -90,6 +92,7 @@ func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 
 	p.pipeline = rtcbench.NewStatsPipeline(e)
 	p.impairmentRouter = e.ImpairmentRouter()
+	p.observeReceiverRTT = e.ObserveReceiverRTT
 
 	return nil
 }
@@ -141,6 +144,7 @@ type participant struct {
 	getTargetBitrate func() int
 	publishedTrackID string
 	publishCancel    context.CancelFunc
+	rttCancel        context.CancelFunc
 }
 
 func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
@@ -158,6 +162,7 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	var (
 		room             *lksdk.Room
 		getTargetBitrate func() int
+		rttCancel        context.CancelFunc
 		err              error
 	)
 	switch p.role {
@@ -165,16 +170,30 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 		room, getTargetBitrate, err = p.plugin.connectSenderRoom(ctx, p.log, req.RoomID, p.userID, p.impairment)
 	case rtcbench.Viewer:
 		room, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID, p.impairment)
+		if err == nil && p.plugin.observeReceiverRTT != nil {
+			rttCtx, cancel := context.WithCancel(context.Background())
+			rttCancel = cancel
+			go pionutil.PollPeerConnectionRTT(
+				rttCtx,
+				2*time.Second,
+				room.LocalParticipant.GetSubscriberPeerConnection,
+				func(rtt time.Duration) { p.plugin.observeReceiverRTT(p.userID, rtt) },
+			)
+		}
 	default:
 		return rtcbench.ErrUnsupportedRole
 	}
 	if err != nil {
+		if rttCancel != nil {
+			rttCancel()
+		}
 		return err
 	}
 
 	p.mu.Lock()
 	p.room = room
 	p.getTargetBitrate = getTargetBitrate
+	p.rttCancel = rttCancel
 	p.mu.Unlock()
 	return nil
 }
@@ -188,12 +207,17 @@ func (p *participant) Close() error {
 	room := p.room
 	publishedTrackID := p.publishedTrackID
 	publishCancel := p.publishCancel
+	rttCancel := p.rttCancel
 	p.room = nil
 	p.publishedTrackID = ""
 	p.publishCancel = nil
+	p.rttCancel = nil
 	p.mu.Unlock()
 	if publishCancel != nil {
 		publishCancel()
+	}
+	if rttCancel != nil {
+		rttCancel()
 	}
 	if room != nil && publishedTrackID != "" {
 		_ = room.LocalParticipant.UnpublishTrack(publishedTrackID)

@@ -216,6 +216,13 @@ func evaluateReceiverThreshold(t ReceiverThresholdConfig, actual ReceiverSummary
 			Reason:    fmt.Sprintf("max_jitter_us %.0f exceeds %.0f", actual.MaxJitterUS, *t.MaxJitterUS),
 		}
 	}
+	if t.MaxMeanRTTMS != nil && actual.MeanRTTMS > *t.MaxMeanRTTMS {
+		return ReceiverThresholdFailure{
+			Threshold: t,
+			Actual:    actual,
+			Reason:    fmt.Sprintf("mean_rtt_ms %.1f exceeds %.1f", actual.MeanRTTMS, *t.MaxMeanRTTMS),
+		}
+	}
 	if t.MaxPLICount != nil && actual.PliCount > *t.MaxPLICount {
 		return ReceiverThresholdFailure{
 			Threshold: t,

@@ -246,6 +246,8 @@ func TestReceiverThresholdEvaluation(t *testing.T) {
 		MeanBitrateBps:      500000,
 		MeanFPS:             15.0,
 		MaxJitterUS:         50000,
+		MeanRTTMS:           85.0,
+		MaxRTTMS:            120.0,
 		PliCount:            100,
 	}
 
@@ -310,6 +312,13 @@ func TestReceiverThresholdEvaluation(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "fail mean rtt",
+			threshold: ReceiverThresholdConfig{
+				MaxMeanRTTMS: float64Ptr(50.0),
+			},
+			wantErr: true,
+		},
+		{
 			name: "fail pli count",
 			threshold: ReceiverThresholdConfig{
 				MaxPLICount: int64Ptr(50),
@@ -362,8 +371,8 @@ func TestReceiverMetricsPipeline(t *testing.T) {
 	m.RegisterReceiver("viewer-1", "janus", "default", "lossy-wifi")
 
 	for i := 0; i < 10; i++ {
-		m.ObserveReceiverSample("viewer-1", vp9_stats.VideoQualitySample{
-			Nickname:         "viewer-1",
+		m.ObserveReceiverSample("viewer-1[101]", vp9_stats.VideoQualitySample{
+			Nickname:         "viewer-1[101]",
 			SmoothBitrate:    1_500_000,
 			DecoderSmoothFPS: 24,
 			FrameJitterUS:    1200,
@@ -372,13 +381,15 @@ func TestReceiverMetricsPipeline(t *testing.T) {
 			RTCP:             vp9_stats.RTCPData{PLISent: int64(i)},
 		})
 	}
+	m.ObserveReceiverRTT("viewer-1", 40*time.Millisecond)
+	m.ObserveReceiverRTT("viewer-1", 80*time.Millisecond)
 
 	snap := m.Snapshot()
 	if len(snap.Receivers) != 1 {
 		t.Fatalf("Snapshot.Receivers length = %d, want 1", len(snap.Receivers))
 	}
 	r := snap.Receivers[0]
-	if r.UserID != "viewer-1" || r.Profile != "lossy-wifi" || r.Plugin != "janus" {
+	if r.UserID != "viewer-1[101]" || r.Profile != "lossy-wifi" || r.Plugin != "janus" {
 		t.Errorf("unexpected labels: %+v", r)
 	}
 	if r.MeanBitrateBps < 1.4e6 || r.MeanBitrateBps > 1.6e6 {
@@ -390,18 +401,24 @@ func TestReceiverMetricsPipeline(t *testing.T) {
 	if r.PliCount != 9 {
 		t.Errorf("PliCount = %d, want 9", r.PliCount)
 	}
+	if r.MeanRTTMS != 60 {
+		t.Errorf("MeanRTTMS = %v, want 60", r.MeanRTTMS)
+	}
+	if r.MaxRTTMS != 80 {
+		t.Errorf("MaxRTTMS = %v, want 80", r.MaxRTTMS)
+	}
 }
 
 func TestReceiverMetricsUnregisterArchives(t *testing.T) {
 	m := newRunMetricsCollector()
 	m.RegisterReceiver("viewer-ephemeral", "janus", "churn", "5g")
-	m.ObserveReceiverSample("viewer-ephemeral", vp9_stats.VideoQualitySample{
-		Nickname:      "viewer-ephemeral",
+	m.ObserveReceiverSample("viewer-ephemeral[202]", vp9_stats.VideoQualitySample{
+		Nickname:      "viewer-ephemeral[202]",
 		SmoothBitrate: 800_000,
 	})
 
 	archived := m.UnregisterReceiver("viewer-ephemeral")
-	if archived.UserID != "viewer-ephemeral" {
+	if archived.UserID != "viewer-ephemeral[202]" {
 		t.Fatalf("UnregisterReceiver returned %+v", archived)
 	}
 

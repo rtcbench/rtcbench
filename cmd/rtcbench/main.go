@@ -248,7 +248,7 @@ func loadYAMLConfig(yamlFile string) (*rtcbench.Config, error) {
 }
 
 func logRunMetricsSummary(l interface{ Infof(string, ...any) }, summary rtcbench.RunMetricsSummary) {
-	if len(summary.Operations) == 0 && len(summary.Sessions) == 0 && len(summary.Gauges) == 0 {
+	if len(summary.Operations) == 0 && len(summary.Sessions) == 0 && len(summary.Gauges) == 0 && len(summary.Receivers) == 0 {
 		l.Infof("[run-metrics] no metrics recorded")
 		return
 	}
@@ -297,6 +297,26 @@ func logRunMetricsSummary(l interface{ Infof(string, ...any) }, summary rtcbench
 			gauge.Role,
 			gauge.Current,
 			gauge.Peak,
+		)
+	}
+
+	for _, receiver := range summary.Receivers {
+		l.Infof(
+			"[run-metrics] receiver scenario=%s plugin=%s profile=%s user=%s freeze_count=%d freeze_duration=%.2fs frame_loss_ratio=%.4f mean_bitrate_bps=%.0f mean_fps=%.1f max_jitter_us=%.0f mean_rtt_ms=%.1f max_rtt_ms=%.1f pli_count=%d nack_count=%d",
+			receiver.Scenario,
+			receiver.Plugin,
+			receiver.Profile,
+			receiver.UserID,
+			receiver.FreezeCount,
+			receiver.FreezeDurationTotal,
+			receiver.FrameLossRatio,
+			receiver.MeanBitrateBps,
+			receiver.MeanFPS,
+			receiver.MaxJitterUS,
+			receiver.MeanRTTMS,
+			receiver.MaxRTTMS,
+			receiver.PliCount,
+			receiver.NackCount,
 		)
 	}
 }
