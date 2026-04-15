@@ -87,6 +87,16 @@ func WithImpairment(b *ImpairmentBinding) Option {
 	return func(c *apiConfig) { c.impairment = b }
 }
 
+func NewSettingEngineMutator(b *ImpairmentBinding) (func(*webrtc.SettingEngine), error) {
+	clientNet, err := buildImpairmentNet(b)
+	if err != nil {
+		return nil, err
+	}
+	return func(se *webrtc.SettingEngine) {
+		se.SetNet(clientNet)
+	}, nil
+}
+
 func NewAPI(clientIP string, vp9PT uint8, opts ...Option) (*webrtc.API, error) {
 	var cfg apiConfig
 	for _, o := range opts {
@@ -111,18 +121,10 @@ func NewAPI(clientIP string, vp9PT uint8, opts ...Option) (*webrtc.API, error) {
 		}
 		se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, conn))
 	} else {
-		if cfg.impairment.Router == nil || cfg.impairment.Profile == nil {
-			return nil, fmt.Errorf("impairment binding requires Router and Profile")
-		}
-		clientNet, err := buildParticipantNet(cfg.impairment.Router.router, cfg.impairment.Profile, allocateVirtualIP())
+		clientNet, err := buildImpairmentNet(cfg.impairment)
 		if err != nil {
-			return nil, fmt.Errorf("buildParticipantNet: %w", err)
+			return nil, err
 		}
-
-		if err := cfg.impairment.Router.proxy.Proxy(clientNet, cfg.impairment.Router.serverAddr); err != nil {
-			return nil, fmt.Errorf("UDPProxy.Proxy: %w", err)
-		}
-
 		se.SetNet(clientNet)
 	}
 
@@ -182,4 +184,18 @@ func NewVP9RTPTrack(streamID string) (*webrtc.TrackLocalStaticRTP, error) {
 		},
 		"video", streamID,
 	)
+}
+
+func buildImpairmentNet(b *ImpairmentBinding) (*vnet.Net, error) {
+	if b == nil || b.Router == nil || b.Profile == nil {
+		return nil, fmt.Errorf("impairment binding requires Router and Profile")
+	}
+	clientNet, err := buildParticipantNet(b.Router.router, b.Profile, allocateVirtualIP())
+	if err != nil {
+		return nil, fmt.Errorf("buildParticipantNet: %w", err)
+	}
+	if err := b.Router.proxy.Proxy(clientNet, b.Router.serverAddr); err != nil {
+		return nil, fmt.Errorf("UDPProxy.Proxy: %w", err)
+	}
+	return clientNet, nil
 }
