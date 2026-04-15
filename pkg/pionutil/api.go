@@ -186,7 +186,10 @@ func buildImpairmentNet(b *ImpairmentBinding) (*vnet.Net, error) {
 	if b == nil || b.Router == nil || b.Profile == nil {
 		return nil, fmt.Errorf("impairment binding requires Router and Profile")
 	}
-	clientNet, err := buildParticipantNet(b.Router.router, b.Profile, allocateVirtualIP())
+	virtualIP := allocateVirtualIP()
+	b.Router.proxy.registerProfile(virtualIP, b.Profile)
+
+	clientNet, err := buildParticipantNet(b.Router.router, virtualIP)
 	if err != nil {
 		return nil, fmt.Errorf("buildParticipantNet: %w", err)
 	}

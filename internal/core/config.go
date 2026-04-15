@@ -73,7 +73,6 @@ var (
 	ErrImpairmentProfileBandwidthNeg      = errors.New("spec.network.impairment.profiles.*.bandwidthKbps must be >= 0")
 	ErrImpairmentProfileLatencyNeg        = errors.New("spec.network.impairment.profiles.*.latency must be >= 0")
 	ErrImpairmentProfileJitterNeg         = errors.New("spec.network.impairment.profiles.*.jitter must be >= 0")
-	ErrImpairmentProfileJitterUnsupported = errors.New("spec.network.impairment.profiles.*.jitter is not supported yet (pion vnet.DelayFilter is constant-only and vnet.NIC cannot be extended externally)")
 	ErrImpairmentProfileLossRange         = errors.New("spec.network.impairment.profiles.*.lossPercent must be in [0,100]")
 	ErrImpairmentDefaultMissing           = errors.New("spec.network.impairment.default is required")
 	ErrImpairmentDefaultUnknown           = errors.New("spec.network.impairment.default references an unknown profile")
@@ -1017,8 +1016,6 @@ func validateImpairment(c *YAMLImpairmentConfig) []error {
 				errs = append(errs, fmt.Errorf("%w: %v", ErrImpairmentProfileJitterNeg, err))
 			} else if d < 0 {
 				errs = append(errs, ErrImpairmentProfileJitterNeg)
-			} else if d > 0 {
-				errs = append(errs, fmt.Errorf("profile %q: %w", name, ErrImpairmentProfileJitterUnsupported))
 			}
 		}
 		if p.LossPercent != nil && (*p.LossPercent < 0 || *p.LossPercent > 100) {
