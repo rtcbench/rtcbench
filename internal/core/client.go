@@ -50,6 +50,7 @@ type PluginEnv interface {
 	LogRegistry() *log.Registry
 	StatsConsumers() []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
 	ImpairmentRouter() *pionutil.ImpairmentRouter
+	ObserveReceiverRTT(userID string, rtt time.Duration)
 }
 
 // StatsPipeline encapsulates the viewer manager and stats publisher that every
@@ -143,6 +144,13 @@ func (e *pluginEnv) ImpairmentRouter() *pionutil.ImpairmentRouter {
 		return nil
 	}
 	return e.client.impairmentRouter
+}
+
+func (e *pluginEnv) ObserveReceiverRTT(userID string, rtt time.Duration) {
+	if e.client == nil {
+		return
+	}
+	e.client.metrics.ObserveReceiverRTT(userID, rtt)
 }
 
 type Client struct {

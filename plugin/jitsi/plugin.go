@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rtcbench/rtcbench"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
@@ -14,9 +15,10 @@ import (
 const PluginID = "jitsi"
 
 type Plugin struct {
-	client           *jitsi.Client
-	cameras          *ivfpkg.Cameras
-	impairmentRouter *pionutil.ImpairmentRouter
+	client             *jitsi.Client
+	cameras            *ivfpkg.Cameras
+	impairmentRouter   *pionutil.ImpairmentRouter
+	observeReceiverRTT func(string, time.Duration)
 }
 
 func NewPlugin() rtcbench.Plugin {
@@ -39,6 +41,7 @@ func (p *Plugin) Setup(_ context.Context, e rtcbench.PluginEnv) error {
 		return fmt.Errorf("jitsi: %w", err)
 	}
 	p.cameras = cams
+	p.observeReceiverRTT = e.ObserveReceiverRTT
 
 	return nil
 }
@@ -85,6 +88,7 @@ type participant struct {
 	role       rtcbench.UserRole
 	impairment *pionutil.ImpairmentBinding
 	session    *jitsi.Session
+	rttCancel  context.CancelFunc
 }
 
 func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
@@ -114,8 +118,21 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 		return fmt.Errorf("%w: %v", rtcbench.ErrCannotJoinRoom, err)
 	}
 
+	var rttCancel context.CancelFunc
+	if p.role == rtcbench.Viewer && p.plugin.observeReceiverRTT != nil {
+		rttCtx, cancel := context.WithCancel(context.Background())
+		rttCancel = cancel
+		go pionutil.PollPeerConnectionRTT(
+			rttCtx,
+			2*time.Second,
+			session.PeerConnection,
+			func(rtt time.Duration) { p.plugin.observeReceiverRTT(p.userID, rtt) },
+		)
+	}
+
 	p.mu.Lock()
 	p.session = session
+	p.rttCancel = rttCancel
 	p.mu.Unlock()
 
 	return nil
@@ -158,8 +175,13 @@ func (p *participant) UnpublishVideo(ctx context.Context, req *rtcbench.Unpublis
 func (p *participant) Close() error {
 	p.mu.Lock()
 	session := p.session
+	rttCancel := p.rttCancel
 	p.session = nil
+	p.rttCancel = nil
 	p.mu.Unlock()
+	if rttCancel != nil {
+		rttCancel()
+	}
 	if session != nil {
 		return session.Close()
 	}

@@ -268,6 +268,7 @@ type ReceiverThresholdConfig struct {
 	MinBitrateBps     *float64
 	MinFPS            *float64
 	MaxJitterUS       *float64
+	MaxMeanRTTMS      *float64
 	MaxPLICount       *int64
 }
 
@@ -282,6 +283,7 @@ type YAMLReceiverThresholdConfig struct {
 	MinBitrateBps     *float64 `yaml:"minBitrateBps,omitempty"`
 	MinFPS            *float64 `yaml:"minFPS,omitempty"`
 	MaxJitterUS       *float64 `yaml:"maxJitterUS,omitempty"`
+	MaxMeanRTTMS      *float64 `yaml:"maxMeanRTTMS,omitempty"`
 	MaxPLICount       *int64   `yaml:"maxPLICount,omitempty"`
 }
 
@@ -391,6 +393,11 @@ func (ym *YAMLMetricsConfig) validate() error {
 			errs = append(errs, err)
 		}
 	}
+	for i, threshold := range ym.ReceiverThresholds {
+		if err := threshold.validate(i); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -471,6 +478,53 @@ func (yt *YAMLRunThresholdConfig) mustConvert() RunThresholdConfig {
 	return cfg
 }
 
+func (yt *YAMLReceiverThresholdConfig) validate(index int) error {
+	if yt.Scenario != nil && !nameRegex.MatchString(*yt.Scenario) {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].scenario: invalid name %q", index, *yt.Scenario)
+	}
+	if yt.Plugin != nil && !nameRegex.MatchString(*yt.Plugin) {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].plugin: invalid name %q", index, *yt.Plugin)
+	}
+	if yt.Profile != nil && !nameRegex.MatchString(*yt.Profile) {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].profile: invalid name %q", index, *yt.Profile)
+	}
+	if yt.MaxFreezeCount != nil && *yt.MaxFreezeCount < 0 {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].maxFreezeCount: must be >= 0", index)
+	}
+	if yt.MaxFreezeDuration != nil && *yt.MaxFreezeDuration < 0 {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].maxFreezeDuration: must be >= 0", index)
+	}
+	if yt.MaxFrameLossRatio != nil && (*yt.MaxFrameLossRatio < 0 || *yt.MaxFrameLossRatio > 1) {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].maxFrameLossRatio: must be in [0,1]", index)
+	}
+	if yt.MinBitrateBps != nil && *yt.MinBitrateBps < 0 {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].minBitrateBps: must be >= 0", index)
+	}
+	if yt.MinFPS != nil && *yt.MinFPS < 0 {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].minFPS: must be >= 0", index)
+	}
+	if yt.MaxJitterUS != nil && *yt.MaxJitterUS < 0 {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].maxJitterUS: must be >= 0", index)
+	}
+	if yt.MaxMeanRTTMS != nil && *yt.MaxMeanRTTMS < 0 {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].maxMeanRTTMS: must be >= 0", index)
+	}
+	if yt.MaxPLICount != nil && *yt.MaxPLICount < 0 {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d].maxPLICount: must be >= 0", index)
+	}
+	if yt.MaxFreezeCount == nil &&
+		yt.MaxFreezeDuration == nil &&
+		yt.MaxFrameLossRatio == nil &&
+		yt.MinBitrateBps == nil &&
+		yt.MinFPS == nil &&
+		yt.MaxJitterUS == nil &&
+		yt.MaxMeanRTTMS == nil &&
+		yt.MaxPLICount == nil {
+		return fmt.Errorf("spec.metrics.receiverThresholds[%d]: at least one threshold must be set", index)
+	}
+	return nil
+}
+
 func (yt *YAMLReceiverThresholdConfig) mustConvert() ReceiverThresholdConfig {
 	var cfg ReceiverThresholdConfig
 	if yt.Scenario != nil {
@@ -491,6 +545,7 @@ func (yt *YAMLReceiverThresholdConfig) mustConvert() ReceiverThresholdConfig {
 	cfg.MinBitrateBps = yt.MinBitrateBps
 	cfg.MinFPS = yt.MinFPS
 	cfg.MaxJitterUS = yt.MaxJitterUS
+	cfg.MaxMeanRTTMS = yt.MaxMeanRTTMS
 	cfg.MaxPLICount = yt.MaxPLICount
 	return cfg
 }

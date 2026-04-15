@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
@@ -37,6 +38,7 @@ type Plugin struct {
 	statsBufferSize    int
 	pipeline           *rtcbench.StatsPipeline
 	impairmentRouter   *pionutil.ImpairmentRouter
+	observeReceiverRTT func(string, time.Duration)
 
 	routerCaps ms.RtpCapabilities
 	vp9PT      uint8 // VP9 payload type from router capabilities
@@ -90,6 +92,7 @@ func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 	p.log.Infof("router supports VP9 (PT=%d), %d header extensions", p.vp9PT, len(caps.HeaderExtensions))
 
 	p.pipeline = rtcbench.NewStatsPipeline(e)
+	p.observeReceiverRTT = e.ObserveReceiverRTT
 
 	return nil
 }
@@ -171,6 +174,7 @@ type participant struct {
 	pc               *webrtc.PeerConnection
 	startPublishLoop func() context.CancelFunc
 	publishCancel    context.CancelFunc
+	rttCancel        context.CancelFunc
 }
 
 func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
@@ -189,6 +193,7 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 		protoo           *ms.Protoo
 		pc               *webrtc.PeerConnection
 		startPublishLoop func() context.CancelFunc
+		rttCancel        context.CancelFunc
 		err              error
 	)
 	switch p.role {
@@ -196,10 +201,23 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 		protoo, pc, startPublishLoop, err = p.plugin.joinSender(ctx, p.log, req.RoomID, p.userID, p.impairment)
 	case rtcbench.Viewer:
 		protoo, pc, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID, p.impairment)
+		if err == nil && p.plugin.observeReceiverRTT != nil {
+			rttCtx, cancel := context.WithCancel(context.Background())
+			rttCancel = cancel
+			go pionutil.PollPeerConnectionRTT(
+				rttCtx,
+				2*time.Second,
+				func() *webrtc.PeerConnection { return pc },
+				func(rtt time.Duration) { p.plugin.observeReceiverRTT(p.userID, rtt) },
+			)
+		}
 	default:
 		return rtcbench.ErrUnsupportedRole
 	}
 	if err != nil {
+		if rttCancel != nil {
+			rttCancel()
+		}
 		return err
 	}
 
@@ -207,6 +225,7 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	p.protoo = protoo
 	p.pc = pc
 	p.startPublishLoop = startPublishLoop
+	p.rttCancel = rttCancel
 	p.mu.Unlock()
 	return nil
 }
@@ -220,14 +239,19 @@ func (p *participant) Close() error {
 	protoo := p.protoo
 	pc := p.pc
 	publishCancel := p.publishCancel
+	rttCancel := p.rttCancel
 	p.protoo = nil
 	p.pc = nil
 	p.startPublishLoop = nil
 	p.publishCancel = nil
+	p.rttCancel = nil
 	p.mu.Unlock()
 
 	if publishCancel != nil {
 		publishCancel()
+	}
+	if rttCancel != nil {
+		rttCancel()
 	}
 	if protoo != nil {
 		protoo.Close()

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
@@ -40,6 +41,7 @@ type Plugin struct {
 	statsBufferSize    int
 	pipeline           *rtcbench.StatsPipeline
 	impairmentRouter   *pionutil.ImpairmentRouter
+	observeReceiverRTT func(string, time.Duration)
 }
 
 func NewPlugin() rtcbench.Plugin {
@@ -91,6 +93,7 @@ func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 
 	p.pipeline = rtcbench.NewStatsPipeline(e)
 	p.impairmentRouter = e.ImpairmentRouter()
+	p.observeReceiverRTT = e.ObserveReceiverRTT
 
 	return nil
 }
@@ -160,6 +163,7 @@ type participant struct {
 	pc               *webrtc.PeerConnection
 	startPublishLoop func() context.CancelFunc
 	publishCancel    context.CancelFunc
+	rttCancel        context.CancelFunc
 }
 
 func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) error {
@@ -183,16 +187,30 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 		session          *janus.Session
 		pc               *webrtc.PeerConnection
 		startPublishLoop func() context.CancelFunc
+		rttCancel        context.CancelFunc
 	)
 	switch p.role {
 	case rtcbench.Sender:
 		session, pc, startPublishLoop, err = p.plugin.joinSender(ctx, p.log, roomID, p.userID, p.impairment)
 	case rtcbench.Viewer:
 		session, pc, err = p.plugin.joinViewer(ctx, p.log, roomID, p.userID, p.impairment)
+		if err == nil && p.plugin.observeReceiverRTT != nil {
+			rttCtx, cancel := context.WithCancel(context.Background())
+			rttCancel = cancel
+			go pionutil.PollPeerConnectionRTT(
+				rttCtx,
+				2*time.Second,
+				func() *webrtc.PeerConnection { return pc },
+				func(rtt time.Duration) { p.plugin.observeReceiverRTT(p.userID, rtt) },
+			)
+		}
 	default:
 		return rtcbench.ErrUnsupportedRole
 	}
 	if err != nil {
+		if rttCancel != nil {
+			rttCancel()
+		}
 		return err
 	}
 
@@ -200,6 +218,7 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	p.session = session
 	p.pc = pc
 	p.startPublishLoop = startPublishLoop
+	p.rttCancel = rttCancel
 	p.mu.Unlock()
 	return nil
 }
@@ -213,14 +232,19 @@ func (p *participant) Close() error {
 	session := p.session
 	pc := p.pc
 	publishCancel := p.publishCancel
+	rttCancel := p.rttCancel
 	p.session = nil
 	p.pc = nil
 	p.startPublishLoop = nil
 	p.publishCancel = nil
+	p.rttCancel = nil
 	p.mu.Unlock()
 
 	if publishCancel != nil {
 		publishCancel()
+	}
+	if rttCancel != nil {
+		rttCancel()
 	}
 	if session != nil {
 		session.Close()

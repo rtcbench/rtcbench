@@ -195,6 +195,8 @@ type ReceiverSummary struct {
 	MeanBitrateBps      float64
 	MeanFPS             float64
 	MaxJitterUS         float64
+	MeanRTTMS           float64
+	MaxRTTMS            float64
 	PliCount            int64
 	NackCount           int64
 }
@@ -337,8 +339,15 @@ type runMetricsCollector struct {
 	userPluginConnections map[string]int64
 	roomMembers           map[string]int64
 
+	receiverTemplates map[string]receiverTemplate
 	receivers         map[string]*receiverMetricsCollector
 	archivedReceivers []ReceiverSummary
+}
+
+type receiverTemplate struct {
+	scenario string
+	plugin   string
+	profile  string
 }
 
 func newRunMetricsCollector() *runMetricsCollector {
@@ -349,6 +358,7 @@ func newRunMetricsCollector() *runMetricsCollector {
 		histograms:            make(map[string]*histogramSeries),
 		userPluginConnections: make(map[string]int64),
 		roomMembers:           make(map[string]int64),
+		receiverTemplates:     make(map[string]receiverTemplate),
 		receivers:             make(map[string]*receiverMetricsCollector),
 	}
 }
@@ -356,33 +366,98 @@ func newRunMetricsCollector() *runMetricsCollector {
 func (m *runMetricsCollector) RegisterReceiver(userID, plugin, scenario, profile string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, exists := m.receivers[userID]; exists {
-		return
+	m.receiverTemplates[userID] = receiverTemplate{
+		scenario: scenario,
+		plugin:   plugin,
+		profile:  profile,
 	}
-	m.receivers[userID] = newReceiverMetrics(scenario, plugin, profile, userID)
 }
 
 func (m *runMetricsCollector) UnregisterReceiver(userID string) ReceiverSummary {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	r, ok := m.receivers[userID]
-	if !ok {
+
+	delete(m.receiverTemplates, userID)
+
+	var (
+		summary ReceiverSummary
+		found   bool
+	)
+	for key, r := range m.receivers {
+		if !receiverBelongsToUser(key, userID) {
+			continue
+		}
+		delete(m.receivers, key)
+		current := r.Summary()
+		m.archivedReceivers = append(m.archivedReceivers, current)
+		if !found || key == userID {
+			summary = current
+			found = true
+		}
+	}
+	if !found {
 		return ReceiverSummary{}
 	}
-	delete(m.receivers, userID)
-	summary := r.Summary()
-	m.archivedReceivers = append(m.archivedReceivers, summary)
 	return summary
 }
 
 func (m *runMetricsCollector) ObserveReceiverSample(userID string, sample vp9_stats.VideoQualitySample) {
-	m.mu.RLock()
-	r, ok := m.receivers[userID]
-	m.mu.RUnlock()
-	if !ok {
+	m.mu.Lock()
+	r := m.ensureReceiverLocked(userID)
+	m.mu.Unlock()
+	if r == nil {
 		return
 	}
 	r.ObserveSample(&sample)
+}
+
+func (m *runMetricsCollector) ObserveReceiverRTT(userID string, rtt time.Duration) {
+	if rtt <= 0 {
+		return
+	}
+
+	m.mu.RLock()
+	receivers := make([]*receiverMetricsCollector, 0, len(m.receivers))
+	for key, r := range m.receivers {
+		if receiverBelongsToUser(key, userID) {
+			receivers = append(receivers, r)
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, r := range receivers {
+		r.ObserveRTT(rtt)
+	}
+}
+
+func (m *runMetricsCollector) ensureReceiverLocked(userID string) *receiverMetricsCollector {
+	if r, ok := m.receivers[userID]; ok {
+		return r
+	}
+
+	template, ok := m.lookupReceiverTemplateLocked(userID)
+	if !ok {
+		return nil
+	}
+
+	r := newReceiverMetrics(template.scenario, template.plugin, template.profile, userID)
+	m.receivers[userID] = r
+
+	return r
+}
+
+func (m *runMetricsCollector) lookupReceiverTemplateLocked(userID string) (receiverTemplate, bool) {
+	if template, ok := m.receiverTemplates[userID]; ok {
+		return template, true
+	}
+
+	baseUserID := baseReceiverUserID(userID)
+	if baseUserID == userID {
+		return receiverTemplate{}, false
+	}
+
+	template, ok := m.receiverTemplates[baseUserID]
+	return template, ok
 }
 
 func (m *runMetricsCollector) Snapshot() RunMetricsSnapshot {
@@ -697,6 +772,9 @@ type receiverMetricsCollector struct {
 	fpsSum      float64
 	fpsCnt      int64
 	jitterMax   float64
+	rttSumMS    float64
+	rttCnt      int64
+	rttMaxMS    float64
 	pliCount    int64
 	nackCount   int64
 	framesTotal int64
@@ -746,16 +824,35 @@ func (r *receiverMetricsCollector) ObserveSample(sample *vp9_stats.VideoQualityS
 	r.freeze.Update(time.Now(), float32(fps))
 }
 
+func (r *receiverMetricsCollector) ObserveRTT(rtt time.Duration) {
+	if rtt <= 0 {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rttMS := float64(rtt) / float64(time.Millisecond)
+	r.rttSumMS += rttMS
+	r.rttCnt++
+	if rttMS > r.rttMaxMS {
+		r.rttMaxMS = rttMS
+	}
+}
+
 func (r *receiverMetricsCollector) Summary() ReceiverSummary {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var bitrateMean, fpsMean float64
+	var bitrateMean, fpsMean, rttMeanMS float64
 	if r.bitrateCnt > 0 {
 		bitrateMean = r.bitrateSum / float64(r.bitrateCnt)
 	}
 	if r.fpsCnt > 0 {
 		fpsMean = r.fpsSum / float64(r.fpsCnt)
+	}
+	if r.rttCnt > 0 {
+		rttMeanMS = r.rttSumMS / float64(r.rttCnt)
 	}
 
 	var frameLossRatio float64
@@ -777,9 +874,23 @@ func (r *receiverMetricsCollector) Summary() ReceiverSummary {
 		MeanBitrateBps:      bitrateMean,
 		MeanFPS:             fpsMean,
 		MaxJitterUS:         r.jitterMax,
+		MeanRTTMS:           rttMeanMS,
+		MaxRTTMS:            r.rttMaxMS,
 		PliCount:            r.pliCount,
 		NackCount:           r.nackCount,
 	}
+}
+
+func baseReceiverUserID(userID string) string {
+	index := strings.LastIndexByte(userID, '[')
+	if index <= 0 || !strings.HasSuffix(userID, "]") {
+		return userID
+	}
+	return userID[:index]
+}
+
+func receiverBelongsToUser(candidate, userID string) bool {
+	return candidate == userID || baseReceiverUserID(candidate) == userID
 }
 
 func operationSummarySortKey(summary OperationSummary) string {
