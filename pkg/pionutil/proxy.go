@@ -248,6 +248,7 @@ type proxyEndpoint struct {
 	realSocket     *net.UDPConn
 	vnetSocket     net.PacketConn
 	vnetClientAddr net.Addr
+	uplink         *packetScheduler
 	downlink       *packetScheduler
 	recordErr      func(error)
 	closeOnce      sync.Once
@@ -260,6 +261,11 @@ func newProxyEndpoint(vnetSocket net.PacketConn, vnetClientAddr net.Addr, realSo
 		vnetClientAddr: vnetClientAddr,
 		recordErr:      recordErr,
 	}
+	endpoint.uplink = newPacketScheduler(profile, vnetClientAddr.String()+"/uplink", func(data []byte) {
+		if _, err := endpoint.realSocket.Write(data); err != nil {
+			recordErr(err)
+		}
+	})
 	endpoint.downlink = newPacketScheduler(profile, vnetClientAddr.String()+"/downlink", func(data []byte) {
 		if _, err := endpoint.vnetSocket.WriteTo(data, endpoint.vnetClientAddr); err != nil {
 			recordErr(err)
@@ -269,9 +275,13 @@ func newProxyEndpoint(vnetSocket net.PacketConn, vnetClientAddr net.Addr, realSo
 }
 
 func (e *proxyEndpoint) writeToReal(payload []byte) {
-	if _, err := e.realSocket.Write(payload); err != nil {
-		e.recordErr(err)
+	if e.uplink == nil {
+		if _, err := e.realSocket.Write(payload); err != nil {
+			e.recordErr(err)
+		}
+		return
 	}
+	e.uplink.Enqueue(payload)
 }
 
 func (e *proxyEndpoint) writeToVNet(payload []byte) {
@@ -286,6 +296,9 @@ func (e *proxyEndpoint) writeToVNet(payload []byte) {
 
 func (e *proxyEndpoint) Close() {
 	e.closeOnce.Do(func() {
+		if e.uplink != nil {
+			e.uplink.Close()
+		}
 		if e.downlink != nil {
 			e.downlink.Close()
 		}
