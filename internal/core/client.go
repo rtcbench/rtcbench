@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
 	"github.com/rtcbench/rtcbench/pkg/vp9_stats"
 )
@@ -34,6 +36,7 @@ var (
 	ErrUserExists            = errors.New("user already exists")
 	ErrUserClosed            = errors.New("user is closed")
 	ErrMissingRoomID         = errors.New("missing room id")
+	ErrImpairmentUnsupported = errors.New("plugin does not support network impairment")
 )
 
 type Plugin interface {
@@ -46,6 +49,7 @@ type PluginEnv interface {
 	Config() *Config
 	LogRegistry() *log.Registry
 	StatsConsumers() []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
+	ImpairmentRouter() *pionutil.ImpairmentRouter
 }
 
 // StatsPipeline encapsulates the viewer manager and stats publisher that every
@@ -116,6 +120,7 @@ type ScenarioFactory func() Scenario
 type ScenarioRegistry map[string]ScenarioFactory
 
 type pluginEnv struct {
+	client         *Client
 	config         *Config
 	logRegistry    *log.Registry
 	statsConsumers []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
@@ -133,21 +138,33 @@ func (e *pluginEnv) StatsConsumers() []func(vp9_stats.Period, vp9_stats.VideoQua
 	return e.statsConsumers
 }
 
+func (e *pluginEnv) ImpairmentRouter() *pionutil.ImpairmentRouter {
+	if e.client == nil {
+		return nil
+	}
+	return e.client.impairmentRouter
+}
+
 type Client struct {
-	mu             sync.Mutex
-	env            *pluginEnv
-	registry       PluginRegistry
-	scenarios      ScenarioRegistry
-	plugins        map[string]Plugin
-	users          map[string]*User
-	metrics        *runMetricsCollector
-	activeScenario string
-	log            *log.Logger
+	mu               sync.Mutex
+	env              *pluginEnv
+	registry         PluginRegistry
+	scenarios        ScenarioRegistry
+	plugins          map[string]Plugin
+	users            map[string]*User
+	metrics          *runMetricsCollector
+	activeScenario   string
+	log              *log.Logger
+	impairmentOnce   sync.Once
+	impairmentErr    error
+	impairmentRouter *pionutil.ImpairmentRouter
+	nextUserIndex    int64
 }
 
 func NewClient(config *Config, logRegistry *log.Registry) *Client {
 	client := &Client{
 		env: &pluginEnv{
+			client:      nil,
 			config:      config,
 			logRegistry: logRegistry,
 		},
@@ -158,9 +175,18 @@ func NewClient(config *Config, logRegistry *log.Registry) *Client {
 		metrics:   newRunMetricsCollector(),
 		log:       logRegistry.NewLogger("general", ""),
 	}
+	client.env.client = client
+	client.env.statsConsumers = append(client.env.statsConsumers, client.receiverStatsConsumer)
 	client.RegisterScenario(DefaultScenarioID, func() Scenario { return DefaultScenario{} })
 	client.RegisterScenario(ChurnScenarioID, func() Scenario { return ChurnScenario{} })
 	return client
+}
+
+func (c *Client) receiverStatsConsumer(_ vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+	if sample.Nickname == "" {
+		return
+	}
+	c.metrics.ObserveReceiverSample(sample.Nickname, sample)
 }
 
 func (c *Client) AddStatsConsumer(fn func(vp9_stats.Period, vp9_stats.VideoQualitySample)) {
@@ -191,22 +217,34 @@ func (c *Client) RunScenario(ctx context.Context, scenarioID string) error {
 
 func (c *Client) SetupPlugin(ctx context.Context, pluginID string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if _, exists := c.plugins[pluginID]; exists {
+		c.mu.Unlock()
 		return nil
 	}
-
 	factory, exists := c.registry[pluginID]
 	if !exists {
+		c.mu.Unlock()
 		return ErrUnknownPlugin
 	}
-
 	plugin := factory()
+	c.mu.Unlock()
+
+	if err := c.ensureImpairmentRouter(); err != nil {
+		return err
+	}
+
 	if err := plugin.Setup(ctx, c.env); err != nil {
 		return err
 	}
+
+	c.mu.Lock()
+	if _, exists := c.plugins[pluginID]; exists {
+		c.mu.Unlock()
+		_ = plugin.Shutdown(ctx)
+		return nil
+	}
 	c.plugins[pluginID] = plugin
+	c.mu.Unlock()
 	return nil
 }
 
@@ -216,6 +254,15 @@ func (c *Client) CreateUser(_ context.Context, cfg *UserConfig) (*User, error) {
 
 	if _, exists := c.users[cfg.UserID]; exists {
 		return nil, ErrUserExists
+	}
+
+	index := c.nextUserIndex
+	c.nextUserIndex++
+
+	if c.env.config.Spec.Network.Impairment != nil && cfg.ImpairmentProfile == nil {
+		cfg.ImpairmentProfile = resolveImpairmentProfile(
+			c.env.config.Spec.Network.Impairment, cfg, index,
+		)
 	}
 
 	user := &User{
@@ -228,7 +275,71 @@ func (c *Client) CreateUser(_ context.Context, cfg *UserConfig) (*User, error) {
 	}
 	c.users[cfg.UserID] = user
 
+	if cfg.Role == Viewer {
+		profileLabel := "none"
+		if cfg.ImpairmentProfile != nil {
+			profileLabel = cfg.ImpairmentProfile.Name
+		}
+		scenarioLabel := c.activeScenario
+		if scenarioLabel == "" {
+			scenarioLabel = c.env.config.Spec.Scenario
+		}
+		if scenarioLabel == "" {
+			scenarioLabel = manualScenarioLabel
+		}
+		c.metrics.RegisterReceiver(cfg.UserID, c.env.config.Spec.Plugin, scenarioLabel, profileLabel)
+	}
+
 	return user, nil
+}
+
+func (c *Client) ensureImpairmentRouter() error {
+	c.impairmentOnce.Do(func() {
+		if c.env.config.Spec.Network.Impairment == nil {
+			return
+		}
+		router, err := pionutil.NewImpairmentRouter(
+			c.env.config.Spec.Network.ServerIP,
+			c.env.config.Spec.Network.ServerPort,
+		)
+		if err != nil {
+			c.impairmentErr = err
+			return
+		}
+		if err := router.Start(); err != nil {
+			c.impairmentErr = fmt.Errorf("impairment router start: %w", err)
+			return
+		}
+		c.impairmentRouter = router
+	})
+	return c.impairmentErr
+}
+
+func resolveImpairmentProfile(cfg *ImpairmentConfig, uc *UserConfig, index int64) *ImpairmentProfile {
+	for _, a := range cfg.Assignments {
+		if assignmentMatches(a.Match, uc, index) {
+			return cfg.Profiles[a.Profile]
+		}
+	}
+	return cfg.Profiles[cfg.Default]
+}
+
+func assignmentMatches(sel AssignmentSelector, uc *UserConfig, index int64) bool {
+	if sel.Role != "" && sel.Role != string(uc.Role) {
+		return false
+	}
+	if sel.UserIDPattern != "" {
+		if ok, _ := path.Match(sel.UserIDPattern, uc.UserID); !ok {
+			return false
+		}
+	}
+	if sel.UserIndexMin != nil && index < int64(*sel.UserIndexMin) {
+		return false
+	}
+	if sel.UserIndexMax != nil && index > int64(*sel.UserIndexMax) {
+		return false
+	}
+	return true
 }
 
 func (c *Client) GetUser(userID string) *User {
@@ -247,8 +358,9 @@ func (c *Client) MetricsSummary() RunMetricsSummary {
 
 func (c *Client) removeUser(userID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	delete(c.users, userID)
+	c.mu.Unlock()
+	c.metrics.UnregisterReceiver(userID)
 }
 
 func (c *Client) currentScenarioLabel() string {
@@ -307,6 +419,12 @@ func (c *Client) ShutdownAll(ctx context.Context) error {
 			}
 		case <-ctx.Done():
 			errs = append(errs, ctx.Err())
+		}
+	}
+
+	if c.impairmentRouter != nil {
+		if err := c.impairmentRouter.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("impairment router stop: %w", err))
 		}
 	}
 

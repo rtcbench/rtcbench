@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -62,9 +63,27 @@ var (
 	ErrMissingRecordingDirectory     = errors.New("missing spec.conference.recording.directory pathname")
 	ErrMissingPacketCaptureDirectory = errors.New("missing spec.conference.packetCapture.directory pathname")
 
-	ErrMissingServerIP = errors.New("missing spec.network.serverIP address")
-	ErrInvalidServerIP = errors.New("invalid spec.network.serverIP address")
-	ErrInvalidClientIP = errors.New("invalid spec.network.clientIP address")
+	ErrMissingServerIP                = errors.New("missing spec.network.serverIP address")
+	ErrInvalidServerIP                = errors.New("invalid spec.network.serverIP address")
+	ErrInvalidServerPort              = errors.New("spec.network.serverPort must be in [1,65535]")
+	ErrMissingServerPortForImpairment = errors.New("spec.network.serverPort is required when spec.network.impairment is set")
+	ErrInvalidClientIP                = errors.New("invalid spec.network.clientIP address")
+
+	ErrImpairmentProfilesEmpty            = errors.New("spec.network.impairment.profiles is empty")
+	ErrImpairmentProfileNameEmpty         = errors.New("spec.network.impairment.profiles has an empty key")
+	ErrImpairmentProfileBandwidthNeg      = errors.New("spec.network.impairment.profiles.*.bandwidthKbps must be >= 0")
+	ErrImpairmentProfileLatencyNeg        = errors.New("spec.network.impairment.profiles.*.latency must be >= 0")
+	ErrImpairmentProfileJitterNeg         = errors.New("spec.network.impairment.profiles.*.jitter must be >= 0")
+	ErrImpairmentProfileJitterUnsupported = errors.New("spec.network.impairment.profiles.*.jitter is not supported yet (pion vnet.DelayFilter is constant-only and vnet.NIC cannot be extended externally)")
+	ErrImpairmentProfileLossRange         = errors.New("spec.network.impairment.profiles.*.lossPercent must be in [0,100]")
+	ErrImpairmentDefaultMissing           = errors.New("spec.network.impairment.default is required")
+	ErrImpairmentDefaultUnknown           = errors.New("spec.network.impairment.default references an unknown profile")
+	ErrImpairmentAssignmentProfileEmpty   = errors.New("spec.network.impairment.assignments[*].profile is required")
+	ErrImpairmentAssignmentProfileUnknown = errors.New("spec.network.impairment.assignments[*].profile references an unknown profile")
+	ErrImpairmentAssignmentMatchEmpty     = errors.New("spec.network.impairment.assignments[*].match must set at least one selector")
+	ErrImpairmentAssignmentRoleInvalid    = errors.New("spec.network.impairment.assignments[*].match.role must be 'sender' or 'viewer'")
+	ErrImpairmentAssignmentPatternInvalid = errors.New("spec.network.impairment.assignments[*].match.userIDPattern must be a valid glob")
+	ErrImpairmentAssignmentIndexRange     = errors.New("spec.network.impairment.assignments[*].match.userIndexRange must be [min,max] with min<=max or max=-1")
 
 	ErrMissingLoggingDirectory = errors.New("missing spec.logging.directory pathname")
 	ErrInvalidConsoleLevel     = errors.New("invalid spec.logging.consoleLevel string, must match " + logLevelRegex.String())
@@ -203,15 +222,17 @@ type YAMLSpecConfig struct {
 }
 
 type MetricsConfig struct {
-	Port           int
-	StatsJSONLPath string
-	Thresholds     []RunThresholdConfig
+	Port               int
+	StatsJSONLPath     string
+	Thresholds         []RunThresholdConfig
+	ReceiverThresholds []ReceiverThresholdConfig
 }
 
 type YAMLMetricsConfig struct {
-	Port           *int                     `yaml:"port,omitempty"`
-	StatsJSONLPath *string                  `yaml:"statsJSONLPath,omitempty"`
-	Thresholds     []YAMLRunThresholdConfig `yaml:"thresholds,omitempty"`
+	Port               *int                          `yaml:"port,omitempty"`
+	StatsJSONLPath     *string                       `yaml:"statsJSONLPath,omitempty"`
+	Thresholds         []YAMLRunThresholdConfig      `yaml:"thresholds,omitempty"`
+	ReceiverThresholds []YAMLReceiverThresholdConfig `yaml:"receiverThresholds,omitempty"`
 }
 
 type RunThresholdConfig struct {
@@ -234,6 +255,34 @@ type YAMLRunThresholdConfig struct {
 	MaxMean        *string  `yaml:"maxMean,omitempty"`
 	MaxP95         *string  `yaml:"maxP95,omitempty"`
 	MaxP99         *string  `yaml:"maxP99,omitempty"`
+}
+
+type ReceiverThresholdConfig struct {
+	Scenario          string
+	Plugin            string
+	Profile           string
+	UserID            string
+	MaxFreezeCount    *int64
+	MaxFreezeDuration *float64
+	MaxFrameLossRatio *float64
+	MinBitrateBps     *float64
+	MinFPS            *float64
+	MaxJitterUS       *float64
+	MaxPLICount       *int64
+}
+
+type YAMLReceiverThresholdConfig struct {
+	Scenario          *string  `yaml:"scenario,omitempty"`
+	Plugin            *string  `yaml:"plugin,omitempty"`
+	Profile           *string  `yaml:"profile,omitempty"`
+	UserID            *string  `yaml:"userID,omitempty"`
+	MaxFreezeCount    *int64   `yaml:"maxFreezeCount,omitempty"`
+	MaxFreezeDuration *float64 `yaml:"maxFreezeDuration,omitempty"`
+	MaxFrameLossRatio *float64 `yaml:"maxFrameLossRatio,omitempty"`
+	MinBitrateBps     *float64 `yaml:"minBitrateBps,omitempty"`
+	MinFPS            *float64 `yaml:"minFPS,omitempty"`
+	MaxJitterUS       *float64 `yaml:"maxJitterUS,omitempty"`
+	MaxPLICount       *int64   `yaml:"maxPLICount,omitempty"`
 }
 
 func (yc *YAMLSpecConfig) validate() error {
@@ -325,6 +374,12 @@ func (yc *YAMLSpecConfig) mustConvert() SpecConfig {
 				c.Metrics.Thresholds = append(c.Metrics.Thresholds, threshold.mustConvert())
 			}
 		}
+		if len(yc.Metrics.ReceiverThresholds) > 0 {
+			c.Metrics.ReceiverThresholds = make([]ReceiverThresholdConfig, 0, len(yc.Metrics.ReceiverThresholds))
+			for _, threshold := range yc.Metrics.ReceiverThresholds {
+				c.Metrics.ReceiverThresholds = append(c.Metrics.ReceiverThresholds, threshold.mustConvert())
+			}
+		}
 	}
 	return c
 }
@@ -413,6 +468,30 @@ func (yt *YAMLRunThresholdConfig) mustConvert() RunThresholdConfig {
 		duration := mustParseDuration(*yt.MaxP99)
 		cfg.MaxP99 = &duration
 	}
+	return cfg
+}
+
+func (yt *YAMLReceiverThresholdConfig) mustConvert() ReceiverThresholdConfig {
+	var cfg ReceiverThresholdConfig
+	if yt.Scenario != nil {
+		cfg.Scenario = *yt.Scenario
+	}
+	if yt.Plugin != nil {
+		cfg.Plugin = *yt.Plugin
+	}
+	if yt.Profile != nil {
+		cfg.Profile = *yt.Profile
+	}
+	if yt.UserID != nil {
+		cfg.UserID = *yt.UserID
+	}
+	cfg.MaxFreezeCount = yt.MaxFreezeCount
+	cfg.MaxFreezeDuration = yt.MaxFreezeDuration
+	cfg.MaxFrameLossRatio = yt.MaxFrameLossRatio
+	cfg.MinBitrateBps = yt.MinBitrateBps
+	cfg.MinFPS = yt.MinFPS
+	cfg.MaxJitterUS = yt.MaxJitterUS
+	cfg.MaxPLICount = yt.MaxPLICount
 	return cfg
 }
 
@@ -771,13 +850,69 @@ func (yc *YAMLPacketCaptureConfig) mustConvert() PacketCaptureConfig {
 }
 
 type NetworkConfig struct {
-	ServerIP string
-	ClientIP string
+	ServerIP   string
+	ServerPort int
+	ClientIP   string
+	Impairment *ImpairmentConfig
+}
+
+type ImpairmentConfig struct {
+	Profiles    map[string]*ImpairmentProfile
+	Assignments []ImpairmentAssignment
+	Default     string
+}
+
+type ImpairmentProfile struct {
+	Name         string
+	BandwidthBps int
+	BaseLatency  time.Duration
+	JitterStddev time.Duration
+	LossPercent  int
+	Seed         int64
+}
+
+type ImpairmentAssignment struct {
+	Match   AssignmentSelector
+	Profile string
+}
+
+type AssignmentSelector struct {
+	Role          string
+	UserIDPattern string
+	UserIndexMin  *int
+	UserIndexMax  *int
 }
 
 type YAMLNetworkConfig struct {
-	ServerIP *string `yaml:"serverIP,omitempty"`
-	ClientIP *string `yaml:"clientIP,omitempty"`
+	ServerIP   *string               `yaml:"serverIP,omitempty"`
+	ServerPort *int                  `yaml:"serverPort,omitempty"`
+	ClientIP   *string               `yaml:"clientIP,omitempty"`
+	Impairment *YAMLImpairmentConfig `yaml:"impairment,omitempty"`
+}
+
+type YAMLImpairmentConfig struct {
+	Profiles    map[string]*YAMLImpairmentProfile `yaml:"profiles"`
+	Assignments []YAMLImpairmentAssignment        `yaml:"assignments,omitempty"`
+	Default     string                            `yaml:"default"`
+}
+
+type YAMLImpairmentProfile struct {
+	BandwidthKbps *int    `yaml:"bandwidthKbps,omitempty"`
+	Latency       *string `yaml:"latency,omitempty"`
+	Jitter        *string `yaml:"jitter,omitempty"`
+	LossPercent   *int    `yaml:"lossPercent,omitempty"`
+	Seed          *int64  `yaml:"seed,omitempty"`
+}
+
+type YAMLImpairmentAssignment struct {
+	Match   YAMLAssignmentSelector `yaml:"match"`
+	Profile string                 `yaml:"profile"`
+}
+
+type YAMLAssignmentSelector struct {
+	Role           *string `yaml:"role,omitempty"`
+	UserIDPattern  *string `yaml:"userIDPattern,omitempty"`
+	UserIndexRange *[2]int `yaml:"userIndexRange,omitempty"`
 }
 
 func (yc *YAMLNetworkConfig) validate() error {
@@ -787,18 +922,163 @@ func (yc *YAMLNetworkConfig) validate() error {
 	} else if net.ParseIP(*yc.ServerIP) == nil {
 		errs = append(errs, ErrInvalidServerIP)
 	}
+	if yc.ServerPort != nil && (*yc.ServerPort < 0 || *yc.ServerPort > 65535) {
+		errs = append(errs, ErrInvalidServerPort)
+	}
 	if yc.ClientIP != nil && *yc.ClientIP != "" && net.ParseIP(*yc.ClientIP) == nil {
 		errs = append(errs, ErrInvalidClientIP)
 	}
+	if yc.Impairment != nil {
+		if yc.ServerPort == nil || *yc.ServerPort <= 0 {
+			errs = append(errs, ErrMissingServerPortForImpairment)
+		}
+		errs = append(errs, validateImpairment(yc.Impairment)...)
+	}
 	return errors.Join(errs...)
+}
+
+func validateImpairment(c *YAMLImpairmentConfig) []error {
+	var errs []error
+
+	if len(c.Profiles) == 0 {
+		errs = append(errs, ErrImpairmentProfilesEmpty)
+		return errs
+	}
+
+	for name, p := range c.Profiles {
+		if name == "" {
+			errs = append(errs, ErrImpairmentProfileNameEmpty)
+		}
+		if p.BandwidthKbps != nil && *p.BandwidthKbps < 0 {
+			errs = append(errs, ErrImpairmentProfileBandwidthNeg)
+		}
+		if p.Latency != nil {
+			d, err := time.ParseDuration(*p.Latency)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%w: %v", ErrImpairmentProfileLatencyNeg, err))
+			} else if d < 0 {
+				errs = append(errs, ErrImpairmentProfileLatencyNeg)
+			}
+		}
+		if p.Jitter != nil {
+			d, err := time.ParseDuration(*p.Jitter)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%w: %v", ErrImpairmentProfileJitterNeg, err))
+			} else if d < 0 {
+				errs = append(errs, ErrImpairmentProfileJitterNeg)
+			} else if d > 0 {
+				errs = append(errs, fmt.Errorf("profile %q: %w", name, ErrImpairmentProfileJitterUnsupported))
+			}
+		}
+		if p.LossPercent != nil && (*p.LossPercent < 0 || *p.LossPercent > 100) {
+			errs = append(errs, ErrImpairmentProfileLossRange)
+		}
+	}
+
+	if c.Default == "" {
+		errs = append(errs, ErrImpairmentDefaultMissing)
+	} else if _, ok := c.Profiles[c.Default]; !ok {
+		errs = append(errs, ErrImpairmentDefaultUnknown)
+	}
+
+	for i, a := range c.Assignments {
+		if a.Profile == "" {
+			errs = append(errs, fmt.Errorf("(@%d): %w", i, ErrImpairmentAssignmentProfileEmpty))
+		} else if _, ok := c.Profiles[a.Profile]; !ok {
+			errs = append(errs, fmt.Errorf("(@%d): %w", i, ErrImpairmentAssignmentProfileUnknown))
+		}
+
+		hasSelector := a.Match.Role != nil || a.Match.UserIDPattern != nil || a.Match.UserIndexRange != nil
+		if !hasSelector {
+			errs = append(errs, fmt.Errorf("(@%d): %w", i, ErrImpairmentAssignmentMatchEmpty))
+		}
+
+		if a.Match.Role != nil && *a.Match.Role != "sender" && *a.Match.Role != "viewer" {
+			errs = append(errs, fmt.Errorf("(@%d): %w", i, ErrImpairmentAssignmentRoleInvalid))
+		}
+
+		if a.Match.UserIDPattern != nil {
+			if _, err := path.Match(*a.Match.UserIDPattern, ""); err != nil {
+				errs = append(errs, fmt.Errorf("(@%d): %w", i, ErrImpairmentAssignmentPatternInvalid))
+			}
+		}
+
+		if a.Match.UserIndexRange != nil {
+			r := *a.Match.UserIndexRange
+			if r[0] >= 0 && r[1] >= 0 && r[0] > r[1] {
+				errs = append(errs, fmt.Errorf("(@%d): %w", i, ErrImpairmentAssignmentIndexRange))
+			}
+		}
+	}
+
+	return errs
 }
 
 func (yc *YAMLNetworkConfig) mustConvert() NetworkConfig {
 	var c NetworkConfig
 	c.ServerIP = *yc.ServerIP
+	if yc.ServerPort != nil {
+		c.ServerPort = *yc.ServerPort
+	}
 	if yc.ClientIP != nil {
 		c.ClientIP = *yc.ClientIP
 	}
+	if yc.Impairment != nil {
+		c.Impairment = mustConvertImpairment(yc.Impairment)
+	}
+	return c
+}
+
+func mustConvertImpairment(yc *YAMLImpairmentConfig) *ImpairmentConfig {
+	c := &ImpairmentConfig{
+		Profiles:    make(map[string]*ImpairmentProfile),
+		Assignments: make([]ImpairmentAssignment, len(yc.Assignments)),
+		Default:     yc.Default,
+	}
+
+	for name, yp := range yc.Profiles {
+		p := &ImpairmentProfile{Name: name}
+		if yp.BandwidthKbps != nil {
+			p.BandwidthBps = *yp.BandwidthKbps * 1000
+		}
+		if yp.Latency != nil {
+			d, _ := time.ParseDuration(*yp.Latency)
+			p.BaseLatency = d
+		}
+		if yp.Jitter != nil {
+			d, _ := time.ParseDuration(*yp.Jitter)
+			p.JitterStddev = d
+		}
+		if yp.LossPercent != nil {
+			p.LossPercent = *yp.LossPercent
+		}
+		if yp.Seed != nil {
+			p.Seed = *yp.Seed
+		}
+		c.Profiles[name] = p
+	}
+
+	for i, ya := range yc.Assignments {
+		a := ImpairmentAssignment{Profile: ya.Profile}
+		if ya.Match.Role != nil {
+			a.Match.Role = *ya.Match.Role
+		}
+		if ya.Match.UserIDPattern != nil {
+			a.Match.UserIDPattern = *ya.Match.UserIDPattern
+		}
+		if ya.Match.UserIndexRange != nil {
+			minV := (*ya.Match.UserIndexRange)[0]
+			maxV := (*ya.Match.UserIndexRange)[1]
+			if minV >= 0 {
+				a.Match.UserIndexMin = &minV
+			}
+			if maxV >= 0 {
+				a.Match.UserIndexMax = &maxV
+			}
+		}
+		c.Assignments[i] = a
+	}
+
 	return c
 }
 

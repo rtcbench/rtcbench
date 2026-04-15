@@ -9,8 +9,9 @@ import (
 )
 
 type UserConfig struct {
-	UserID string
-	Role   UserRole
+	UserID            string
+	Role              UserRole
+	ImpairmentProfile *ImpairmentProfile
 }
 
 type JoinRequest struct {

@@ -3,17 +3,25 @@ package internal
 import (
 	"fmt"
 
+	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench/pkg/gcc"
 	"github.com/rtcbench/rtcbench/pkg/log"
-	pionpkg "github.com/rtcbench/rtcbench/pkg/pion"
-	"github.com/pion/webrtc/v4"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 )
 
+func newAPI(clientIP string, vp9PT uint8, impairment *pionutil.ImpairmentBinding, extra ...pionutil.Option) (*webrtc.API, error) {
+	opts := append([]pionutil.Option{}, extra...)
+	if impairment != nil {
+		opts = append(opts, pionutil.WithImpairment(impairment))
+	}
+	return pionutil.NewAPI(clientIP, vp9PT, opts...)
+}
+
 // StartSendPCSimple creates a PeerConnection with a VP9 sample track (no SVC/GCC).
-func StartSendPCSimple(l *log.Logger, clientIP string, vp9PT uint8) (
+func StartSendPCSimple(l *log.Logger, clientIP string, vp9PT uint8, impairment *pionutil.ImpairmentBinding) (
 	*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error,
 ) {
-	api, err := pionpkg.NewAPI(clientIP, vp9PT)
+	api, err := newAPI(clientIP, vp9PT, impairment)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -21,9 +29,9 @@ func StartSendPCSimple(l *log.Logger, clientIP string, vp9PT uint8) (
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	pionpkg.RegisterLoggingCallbacks(l, pc)
+	pionutil.RegisterLoggingCallbacks(l, pc)
 
-	track, err := pionpkg.NewVP9SampleTrack("ivf")
+	track, err := pionutil.NewVP9SampleTrack("ivf")
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewTrackLocalStaticSample: %w", err)
 	}
@@ -46,7 +54,7 @@ func StartSendPCSimple(l *log.Logger, clientIP string, vp9PT uint8) (
 // StartSendPC creates a PeerConnection with a VP9 send track and GCC
 // bandwidth estimation. Returns the PC, RTP track, bandwidth getter, and
 // the offer SDP.
-func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps int) (
+func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps int, impairment *pionutil.ImpairmentBinding) (
 	*webrtc.PeerConnection, *webrtc.TrackLocalStaticRTP, func() int, string, error,
 ) {
 	factories, getBitrate, err := gcc.SenderFactories(initialBitrateBps)
@@ -54,8 +62,8 @@ func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps 
 		return nil, nil, nil, "", fmt.Errorf("build interceptors: %w", err)
 	}
 
-	api, err := pionpkg.NewAPI(clientIP, vp9PT,
-		pionpkg.WithAPIOption(webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories))),
+	api, err := newAPI(clientIP, vp9PT, impairment,
+		pionutil.WithAPIOption(webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories))),
 	)
 	if err != nil {
 		return nil, nil, nil, "", err
@@ -65,9 +73,9 @@ func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps 
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	pionpkg.RegisterLoggingCallbacks(l, pc)
+	pionutil.RegisterLoggingCallbacks(l, pc)
 
-	track, err := pionpkg.NewVP9RTPTrack("ivf")
+	track, err := pionutil.NewVP9RTPTrack("ivf")
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("NewTrackLocalStaticRTP: %w", err)
 	}
@@ -89,8 +97,8 @@ func StartSendPC(l *log.Logger, clientIP string, vp9PT uint8, initialBitrateBps 
 
 // StartRecvPC creates a PeerConnection for receiving tracks. It forces the
 // DTLS answering role to client (active) to work with mediasoup ICE Lite.
-func StartRecvPC(l *log.Logger, clientIP string, vp9PT uint8) (*webrtc.PeerConnection, error) {
-	api, err := pionpkg.NewAPI(clientIP, vp9PT, pionpkg.WithForceActiveDTLS())
+func StartRecvPC(l *log.Logger, clientIP string, vp9PT uint8, impairment *pionutil.ImpairmentBinding) (*webrtc.PeerConnection, error) {
+	api, err := newAPI(clientIP, vp9PT, impairment, pionutil.WithForceActiveDTLS())
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +107,7 @@ func StartRecvPC(l *log.Logger, clientIP string, vp9PT uint8) (*webrtc.PeerConne
 	if err != nil {
 		return nil, fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	pionpkg.RegisterLoggingCallbacks(l, pc)
+	pionutil.RegisterLoggingCallbacks(l, pc)
 
 	l.Infof("[pion] recv PeerConnection created")
 	return pc, nil

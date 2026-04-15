@@ -3,19 +3,19 @@ package rtcbench
 import "github.com/rtcbench/rtcbench/internal/core"
 
 type (
-	Client     = core.Client
-	User       = core.User
-	UserConfig = core.UserConfig
-	UserRole   = core.UserRole
+	Client      = core.Client
+	User        = core.User
+	UserConfig  = core.UserConfig
+	UserRole    = core.UserRole
 	UserMetrics = core.UserMetrics
 
-	Plugin          = core.Plugin
-	PluginEnv       = core.PluginEnv
-	PluginFactory   = core.PluginFactory
-	PluginRegistry  = core.PluginRegistry
-	Participant     = core.Participant
-	VideoPublisher  = core.VideoPublisher
-	StatsPipeline   = core.StatsPipeline
+	Plugin         = core.Plugin
+	PluginEnv      = core.PluginEnv
+	PluginFactory  = core.PluginFactory
+	PluginRegistry = core.PluginRegistry
+	Participant    = core.Participant
+	VideoPublisher = core.VideoPublisher
+	StatsPipeline  = core.StatsPipeline
 
 	Scenario         = core.Scenario
 	ScenarioEnv      = core.ScenarioEnv
@@ -46,6 +46,14 @@ type (
 	LogStreamConfig     = core.LogStreamConfig
 	MetricsConfig       = core.MetricsConfig
 	RunThresholdConfig  = core.RunThresholdConfig
+
+	ImpairmentProfile        = core.ImpairmentProfile
+	ImpairmentConfig         = core.ImpairmentConfig
+	ImpairmentAssignment     = core.ImpairmentAssignment
+	AssignmentSelector       = core.AssignmentSelector
+	ReceiverThresholdConfig  = core.ReceiverThresholdConfig
+	ReceiverSummary          = core.ReceiverSummary
+	ReceiverThresholdFailure = core.ReceiverThresholdFailure
 )
 
 type (
@@ -104,6 +112,7 @@ var (
 	ErrUserExists            = core.ErrUserExists
 	ErrUserClosed            = core.ErrUserClosed
 	ErrMissingRoomID         = core.ErrMissingRoomID
+	ErrImpairmentUnsupported = core.ErrImpairmentUnsupported
 
 	ErrMissingAPIVersion = core.ErrMissingAPIVersion
 	ErrInvalidAPIVersion = core.ErrInvalidAPIVersion
@@ -170,9 +179,10 @@ var (
 )
 
 var (
-	NewClient             = core.NewClient
-	NewStatsPipeline      = core.NewStatsPipeline
-	EvaluateRunThresholds = core.EvaluateRunThresholds
-	LoadCamerasFromConfig = core.LoadCamerasFromConfig
-	SetupPacketCaptureDir = core.SetupPacketCaptureDir
+	NewClient                  = core.NewClient
+	NewStatsPipeline           = core.NewStatsPipeline
+	EvaluateRunThresholds      = core.EvaluateRunThresholds
+	EvaluateReceiverThresholds = core.EvaluateReceiverThresholds
+	LoadCamerasFromConfig      = core.LoadCamerasFromConfig
+	SetupPacketCaptureDir      = core.SetupPacketCaptureDir
 )

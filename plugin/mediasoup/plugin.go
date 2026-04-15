@@ -12,6 +12,7 @@ import (
 	"github.com/rtcbench/rtcbench"
 	"github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
 	ms "github.com/rtcbench/rtcbench/plugin/mediasoup/internal"
 )
@@ -35,6 +36,7 @@ type Plugin struct {
 	packetCaptureDir   string
 	statsBufferSize    int
 	pipeline           *rtcbench.StatsPipeline
+	impairmentRouter   *pionutil.ImpairmentRouter
 
 	routerCaps ms.RtpCapabilities
 	vp9PT      uint8 // VP9 payload type from router capabilities
@@ -50,6 +52,7 @@ func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 	p.log = e.LogRegistry().NewLogger("mediasoup", "")
 	p.logRegistry = e.LogRegistry()
 	p.clientIP = e.Config().Spec.Network.ClientIP
+	p.impairmentRouter = e.ImpairmentRouter()
 	p.enableRecording = e.Config().Spec.Conference.Recording.Enabled
 	p.recordingDirectory = e.Config().Spec.Conference.Recording.Directory
 	p.statsBufferSize = e.Config().Spec.Conference.StatsBufferSize
@@ -127,12 +130,34 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 }
 
 func (p *Plugin) NewParticipant(ctx context.Context, cfg *rtcbench.UserConfig) (rtcbench.Participant, error) {
+	var impairment *pionutil.ImpairmentBinding
+	if cfg.ImpairmentProfile != nil && p.impairmentRouter != nil {
+		impairment = &pionutil.ImpairmentBinding{
+			Router:  p.impairmentRouter,
+			Profile: pionProfileFromCore(cfg.ImpairmentProfile),
+		}
+	}
 	return &participant{
-		plugin: p,
-		userID: cfg.UserID,
-		role:   cfg.Role,
-		log:    p.logRegistry.NewLogger("mediasoup", fmt.Sprintf("[%s][%s]", cfg.Role, cfg.UserID)),
+		plugin:     p,
+		userID:     cfg.UserID,
+		role:       cfg.Role,
+		impairment: impairment,
+		log:        p.logRegistry.NewLogger("mediasoup", fmt.Sprintf("[%s][%s]", cfg.Role, cfg.UserID)),
 	}, nil
+}
+
+func pionProfileFromCore(c *rtcbench.ImpairmentProfile) *pionutil.ImpairmentProfile {
+	if c == nil {
+		return nil
+	}
+	return &pionutil.ImpairmentProfile{
+		Name:         c.Name,
+		BandwidthBps: c.BandwidthBps,
+		BaseLatency:  c.BaseLatency,
+		JitterStddev: c.JitterStddev,
+		LossPercent:  c.LossPercent,
+		Seed:         c.Seed,
+	}
 }
 
 type participant struct {
@@ -140,6 +165,7 @@ type participant struct {
 	plugin           *Plugin
 	userID           string
 	role             rtcbench.UserRole
+	impairment       *pionutil.ImpairmentBinding
 	log              *log.Logger
 	protoo           *ms.Protoo
 	pc               *webrtc.PeerConnection
@@ -167,9 +193,9 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	)
 	switch p.role {
 	case rtcbench.Sender:
-		protoo, pc, startPublishLoop, err = p.plugin.joinSender(ctx, p.log, req.RoomID, p.userID)
+		protoo, pc, startPublishLoop, err = p.plugin.joinSender(ctx, p.log, req.RoomID, p.userID, p.impairment)
 	case rtcbench.Viewer:
-		protoo, pc, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID)
+		protoo, pc, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID, p.impairment)
 	default:
 		return rtcbench.ErrUnsupportedRole
 	}
@@ -249,7 +275,7 @@ func (p *participant) UnpublishVideo(ctx context.Context, req *rtcbench.Unpublis
 // sender
 // ---------------------------------------------------------------------------
 
-func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID string) (*ms.Protoo, *webrtc.PeerConnection, func() context.CancelFunc, error) {
+func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID string, impairment *pionutil.ImpairmentBinding) (*ms.Protoo, *webrtc.PeerConnection, func() context.CancelFunc, error) {
 	if p.cameras == nil {
 		return nil, nil, nil, fmt.Errorf("%w: no IVF files configured for sender", rtcbench.ErrCannotJoinRoom)
 	}
@@ -315,7 +341,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 	if svc.Enabled {
 		var rtpTrack *webrtc.TrackLocalStaticRTP
 		var getBitrate func() int
-		pc, rtpTrack, getBitrate, offerSDP, err = ms.StartSendPC(l, p.clientIP, p.vp9PT, initialBitrateBps)
+		pc, rtpTrack, getBitrate, offerSDP, err = ms.StartSendPC(l, p.clientIP, p.vp9PT, initialBitrateBps, impairment)
 		if err != nil {
 			protoo.Close()
 			return nil, nil, nil, fmt.Errorf("%w: pion send: %v", rtcbench.ErrCannotJoinRoom, err)
@@ -328,7 +354,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 		}
 	} else {
 		var sampleTrack *webrtc.TrackLocalStaticSample
-		pc, sampleTrack, offerSDP, err = ms.StartSendPCSimple(l, p.clientIP, p.vp9PT)
+		pc, sampleTrack, offerSDP, err = ms.StartSendPCSimple(l, p.clientIP, p.vp9PT, impairment)
 		if err != nil {
 			protoo.Close()
 			return nil, nil, nil, fmt.Errorf("%w: pion send: %v", rtcbench.ErrCannotJoinRoom, err)
@@ -396,7 +422,7 @@ func (p *Plugin) joinSender(ctx context.Context, l *log.Logger, roomID, userID s
 // viewer
 // ---------------------------------------------------------------------------
 
-func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID string) (*ms.Protoo, *webrtc.PeerConnection, error) {
+func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID string, impairment *pionutil.ImpairmentBinding) (*ms.Protoo, *webrtc.PeerConnection, error) {
 	// State for recv transport SDP renegotiation.
 	var (
 		protooClient *ms.Protoo
@@ -499,7 +525,7 @@ func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID s
 	l.Infof("recv transport created: %s", transport.ID)
 
 	// 4. Create recv PeerConnection.
-	recvPC, err = ms.StartRecvPC(l, p.clientIP, p.vp9PT)
+	recvPC, err = ms.StartRecvPC(l, p.clientIP, p.vp9PT, impairment)
 	if err != nil {
 		protooClient.Close()
 		return nil, nil, fmt.Errorf("%w: pion recv: %v", rtcbench.ErrCannotJoinRoom, err)

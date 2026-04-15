@@ -4,17 +4,25 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pion/webrtc/v4"
 	"github.com/rtcbench/rtcbench/pkg/gcc"
 	"github.com/rtcbench/rtcbench/pkg/log"
-	pionpkg "github.com/rtcbench/rtcbench/pkg/pion"
-	"github.com/pion/webrtc/v4"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 )
 
+func newAPI(clientIP string, impairment *pionutil.ImpairmentBinding, extra ...pionutil.Option) (*webrtc.API, error) {
+	opts := append([]pionutil.Option{}, extra...)
+	if impairment != nil {
+		opts = append(opts, pionutil.WithImpairment(impairment))
+	}
+	return pionutil.NewAPI(clientIP, 98, opts...)
+}
+
 // StartSimplePublisher creates a sendonly PeerConnection without SVC or GCC.
-func StartSimplePublisher(l *log.Logger, clientIP string) (
+func StartSimplePublisher(l *log.Logger, clientIP string, impairment *pionutil.ImpairmentBinding) (
 	*webrtc.PeerConnection, *webrtc.TrackLocalStaticSample, string, error,
 ) {
-	api, err := pionpkg.NewAPI(clientIP, 98)
+	api, err := newAPI(clientIP, impairment)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -22,9 +30,9 @@ func StartSimplePublisher(l *log.Logger, clientIP string) (
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	pionpkg.RegisterLoggingCallbacks(l, pc)
+	pionutil.RegisterLoggingCallbacks(l, pc)
 
-	track, err := pionpkg.NewVP9SampleTrack("ivf")
+	track, err := pionutil.NewVP9SampleTrack("ivf")
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("NewTrackLocalStaticSample: %w", err)
 	}
@@ -51,14 +59,15 @@ func StartPionPublisher(
 	l *log.Logger,
 	clientIP string,
 	initialBitrateBps int,
+	impairment *pionutil.ImpairmentBinding,
 ) (*webrtc.PeerConnection, *webrtc.TrackLocalStaticRTP, func() int, string, error) {
 	factories, getBitrate, err := gcc.SenderFactories(initialBitrateBps)
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("build interceptors: %w", err)
 	}
 
-	api, err := pionpkg.NewAPI(clientIP, 98,
-		pionpkg.WithAPIOption(webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories))),
+	api, err := newAPI(clientIP, impairment,
+		pionutil.WithAPIOption(webrtc.WithInterceptorRegistry(gcc.BuildRegistry(factories))),
 	)
 	if err != nil {
 		return nil, nil, nil, "", err
@@ -68,9 +77,9 @@ func StartPionPublisher(
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	pionpkg.RegisterLoggingCallbacks(l, pc)
+	pionutil.RegisterLoggingCallbacks(l, pc)
 
-	track, err := pionpkg.NewVP9RTPTrack("ivf")
+	track, err := pionutil.NewVP9RTPTrack("ivf")
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("NewTrackLocalStaticRTP: %w", err)
 	}
@@ -97,8 +106,9 @@ func StartPionSubscriber(
 	l *log.Logger,
 	clientIP string,
 	janusOfferSDP string,
+	impairment *pionutil.ImpairmentBinding,
 ) (*webrtc.PeerConnection, string, error) {
-	api, err := pionpkg.NewAPI(clientIP, 98)
+	api, err := newAPI(clientIP, impairment)
 	if err != nil {
 		return nil, "", err
 	}
@@ -107,7 +117,7 @@ func StartPionSubscriber(
 	if err != nil {
 		return nil, "", fmt.Errorf("NewPeerConnection: %w", err)
 	}
-	pionpkg.RegisterLoggingCallbacks(l, pc)
+	pionutil.RegisterLoggingCallbacks(l, pc)
 
 	if _, err := pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,
