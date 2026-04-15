@@ -12,6 +12,7 @@ import (
 	"github.com/rtcbench/rtcbench"
 	"github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/log"
+	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
 	lkinternal "github.com/rtcbench/rtcbench/plugin/livekit/internal"
 )
@@ -40,6 +41,7 @@ type Plugin struct {
 	packetCaptureDir   string
 	statsBufferSize    int
 	pipeline           *rtcbench.StatsPipeline
+	impairmentRouter   *pionutil.ImpairmentRouter
 	maxSubscriptions   int // 0 = unlimited
 
 	subscriptionCount int32 // atomic
@@ -50,10 +52,6 @@ func NewPlugin() rtcbench.Plugin {
 }
 
 func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
-	if e.Config().Spec.Network.Impairment != nil {
-		return rtcbench.ErrImpairmentUnsupported
-	}
-
 	cfg := e.Config().Spec.PluginConfig[PluginID].(map[string]any)
 	p.wsURL = cfg[cfgWSURL].(string)
 	p.apiKey = cfg[cfgAPIKey].(string)
@@ -91,6 +89,7 @@ func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 	p.cameras = cams
 
 	p.pipeline = rtcbench.NewStatsPipeline(e)
+	p.impairmentRouter = e.ImpairmentRouter()
 
 	return nil
 }
@@ -101,12 +100,34 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 }
 
 func (p *Plugin) NewParticipant(ctx context.Context, cfg *rtcbench.UserConfig) (rtcbench.Participant, error) {
+	var impairment *pionutil.ImpairmentBinding
+	if cfg.ImpairmentProfile != nil && p.impairmentRouter != nil {
+		impairment = &pionutil.ImpairmentBinding{
+			Router:  p.impairmentRouter,
+			Profile: pionProfileFromCore(cfg.ImpairmentProfile),
+		}
+	}
 	return &participant{
-		plugin: p,
-		userID: cfg.UserID,
-		role:   cfg.Role,
-		log:    p.logRegistry.NewLogger("livekit", fmt.Sprintf("[%s][%s]", cfg.Role, cfg.UserID)),
+		plugin:     p,
+		userID:     cfg.UserID,
+		role:       cfg.Role,
+		impairment: impairment,
+		log:        p.logRegistry.NewLogger("livekit", fmt.Sprintf("[%s][%s]", cfg.Role, cfg.UserID)),
 	}, nil
+}
+
+func pionProfileFromCore(c *rtcbench.ImpairmentProfile) *pionutil.ImpairmentProfile {
+	if c == nil {
+		return nil
+	}
+	return &pionutil.ImpairmentProfile{
+		Name:         c.Name,
+		BandwidthBps: c.BandwidthBps,
+		BaseLatency:  c.BaseLatency,
+		JitterStddev: c.JitterStddev,
+		LossPercent:  c.LossPercent,
+		Seed:         c.Seed,
+	}
 }
 
 type participant struct {
@@ -114,6 +135,7 @@ type participant struct {
 	plugin           *Plugin
 	userID           string
 	role             rtcbench.UserRole
+	impairment       *pionutil.ImpairmentBinding
 	log              *log.Logger
 	room             *lksdk.Room
 	getTargetBitrate func() int
@@ -140,9 +162,9 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 	)
 	switch p.role {
 	case rtcbench.Sender:
-		room, getTargetBitrate, err = p.plugin.connectSenderRoom(ctx, p.log, req.RoomID, p.userID)
+		room, getTargetBitrate, err = p.plugin.connectSenderRoom(ctx, p.log, req.RoomID, p.userID, p.impairment)
 	case rtcbench.Viewer:
-		room, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID)
+		room, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID, p.impairment)
 	default:
 		return rtcbench.ErrUnsupportedRole
 	}
@@ -244,7 +266,7 @@ func (p *participant) UnpublishVideo(ctx context.Context, req *rtcbench.Unpublis
 	return room.LocalParticipant.UnpublishTrack(trackID)
 }
 
-func (p *Plugin) connectSenderRoom(ctx context.Context, l *log.Logger, roomID, userID string) (*lksdk.Room, func() int, error) {
+func (p *Plugin) connectSenderRoom(ctx context.Context, l *log.Logger, roomID, userID string, impairment *pionutil.ImpairmentBinding) (*lksdk.Room, func() int, error) {
 	// Resolve SVC before connecting so we know whether to add GCC interceptors.
 	// When SVC is off (e.g. during benchmarks) we skip GCC entirely — no TWCC
 	// header injection, no bandwidth estimation, no adaptive bitrate overhead.
@@ -252,6 +274,11 @@ func (p *Plugin) connectSenderRoom(ctx context.Context, l *log.Logger, roomID, u
 	svc := ivf.ResolveSVC(p.cameras.Paths(), p.svcConfig.Mode, p.svcConfig.SpatialLayers, p.svcConfig.TemporalLayers, initialBitrateBps)
 
 	connectOpts := []lksdk.ConnectOption{lksdk.WithAutoSubscribe(false)}
+	if opt, err := impairmentConnectOption(impairment); err != nil {
+		return nil, nil, fmt.Errorf("%w: build impairment net: %v", rtcbench.ErrCannotJoinRoom, err)
+	} else if opt != nil {
+		connectOpts = append(connectOpts, opt)
+	}
 	var getTargetBitrate func() int
 
 	if svc.Enabled {
@@ -367,7 +394,7 @@ func buildSVCLayers(cfg ivf.SVCConfig) []*lkproto.VideoLayer {
 	return layers
 }
 
-func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID string) (*lksdk.Room, error) {
+func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID string, impairment *pionutil.ImpairmentBinding) (*lksdk.Room, error) {
 	onTrackSubscribed := func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
 		l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
 		// Request highest quality so the SFU forwards the top spatial layer.
@@ -398,6 +425,11 @@ func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID s
 	}
 
 	var opts []lksdk.ConnectOption
+	if opt, err := impairmentConnectOption(impairment); err != nil {
+		return nil, fmt.Errorf("%w: build impairment net: %v", rtcbench.ErrCannotJoinRoom, err)
+	} else if opt != nil {
+		opts = append(opts, opt)
+	}
 	if p.maxSubscriptions > 0 {
 		// Limit subscriptions: subscribe to first maxSubscriptions video tracks only.
 		opts = append(opts, lksdk.WithAutoSubscribe(false))
@@ -429,4 +461,15 @@ func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID s
 	}
 	l.Infof("connected to room %s as viewer", roomID)
 	return room, nil
+}
+
+func impairmentConnectOption(impairment *pionutil.ImpairmentBinding) (lksdk.ConnectOption, error) {
+	if impairment == nil {
+		return nil, nil
+	}
+	mutator, err := pionutil.NewSettingEngineMutator(impairment)
+	if err != nil {
+		return nil, err
+	}
+	return lksdk.WithSettingEngineMutator(mutator), nil
 }
