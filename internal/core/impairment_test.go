@@ -185,6 +185,23 @@ func TestImpairmentConfigValidation(t *testing.T) {
 	}
 }
 
+func TestNetworkConfigAllowsImpairmentWithoutServerPort(t *testing.T) {
+	serverIP := "127.0.0.1"
+	cfg := &YAMLNetworkConfig{
+		ServerIP: &serverIP,
+		Impairment: &YAMLImpairmentConfig{
+			Profiles: map[string]*YAMLImpairmentProfile{
+				"default": {},
+			},
+			Default: "default",
+		},
+	}
+
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate() error = %v", err)
+	}
+}
+
 func TestResolveImpairmentProfile(t *testing.T) {
 	defaultProfile := &ImpairmentProfile{Name: "default"}
 	viewerProfile := &ImpairmentProfile{Name: "viewer-specific"}

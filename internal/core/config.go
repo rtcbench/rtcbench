@@ -63,11 +63,10 @@ var (
 	ErrMissingRecordingDirectory     = errors.New("missing spec.conference.recording.directory pathname")
 	ErrMissingPacketCaptureDirectory = errors.New("missing spec.conference.packetCapture.directory pathname")
 
-	ErrMissingServerIP                = errors.New("missing spec.network.serverIP address")
-	ErrInvalidServerIP                = errors.New("invalid spec.network.serverIP address")
-	ErrInvalidServerPort              = errors.New("spec.network.serverPort must be in [1,65535]")
-	ErrMissingServerPortForImpairment = errors.New("spec.network.serverPort is required when spec.network.impairment is set")
-	ErrInvalidClientIP                = errors.New("invalid spec.network.clientIP address")
+	ErrMissingServerIP   = errors.New("missing spec.network.serverIP address")
+	ErrInvalidServerIP   = errors.New("invalid spec.network.serverIP address")
+	ErrInvalidServerPort = errors.New("spec.network.serverPort must be in [1,65535]")
+	ErrInvalidClientIP   = errors.New("invalid spec.network.clientIP address")
 
 	ErrImpairmentProfilesEmpty            = errors.New("spec.network.impairment.profiles is empty")
 	ErrImpairmentProfileNameEmpty         = errors.New("spec.network.impairment.profiles has an empty key")
@@ -984,9 +983,6 @@ func (yc *YAMLNetworkConfig) validate() error {
 		errs = append(errs, ErrInvalidClientIP)
 	}
 	if yc.Impairment != nil {
-		if yc.ServerPort == nil || *yc.ServerPort <= 0 {
-			errs = append(errs, ErrMissingServerPortForImpairment)
-		}
 		errs = append(errs, validateImpairment(yc.Impairment)...)
 	}
 	return errors.Join(errs...)
