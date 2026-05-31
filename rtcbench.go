@@ -94,6 +94,7 @@ const (
 
 	Viewer = core.Viewer
 	Sender = core.Sender
+	Both   = core.Both
 
 	StateNew    = core.StateNew
 	StateJoined = core.StateJoined

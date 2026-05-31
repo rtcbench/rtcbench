@@ -23,6 +23,11 @@ type UserRole string
 const (
 	Viewer UserRole = "viewer"
 	Sender UserRole = "sender"
+	// Both is a mixed-role participant that simultaneously publishes its own
+	// video (like Sender) and subscribes to every other participant (like
+	// Viewer), i.e. a full conference participant. Currently wired for the
+	// LiveKit plugin; other plugins return ErrUnsupportedRole.
+	Both UserRole = "both"
 )
 
 var (
@@ -283,7 +288,7 @@ func (c *Client) CreateUser(_ context.Context, cfg *UserConfig) (*User, error) {
 	}
 	c.users[cfg.UserID] = user
 
-	if cfg.Role == Viewer {
+	if cfg.Role == Viewer || cfg.Role == Both {
 		profileLabel := "none"
 		if cfg.ImpairmentProfile != nil {
 			profileLabel = cfg.ImpairmentProfile.Name

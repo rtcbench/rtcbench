@@ -1,0 +1,58 @@
+apiVersion: rtcbench/v1
+kind: VideoCallStressTest
+metadata:
+  name: smoke-3both
+spec:
+  plugin: $env:PLUGIN_ID
+  conference:
+    name: room-1234
+    usersPerRoom: 3
+    totalRooms: 1
+    cameras:
+      # Mixed-role full conference: every participant publishes AND subscribes.
+      # perRoom == usersPerRoom + mixedRole:true => all 3 users are role "both".
+      # Each both-participant receives the other 2 => 6 viewer stat streams.
+      perRoom: 3
+      mixedRole: true
+      fileType: ivf
+      videoCodec: vp9
+      directory: /test-videos
+    joinPolicy:
+      concurrency: 3
+      alwaysRetryFailedJoins: true
+      joinStartSpacing: 2s
+    recording:
+      enabled: false
+      directory: /tmp/recordings
+  metrics:
+    port: 9090
+
+  network:
+    serverIP: $env:SERVER_IP
+  pluginConfig:
+    janus:
+      _serverRoot: 'http://{{spec.network.serverIP}}:8088/janus'
+      allowInsecureHttps: false
+    jitsi:
+      _boshURL: 'https://{{spec.network.serverIP}}/http-bind'
+      _domain: '{{spec.network.serverIP}}'
+    livekit:
+      _wsURL: 'ws://{{spec.network.serverIP}}:7880'
+      apiKey: devkey
+      apiSecret: secret-secret-secret-secret-secret
+    mediasoup:
+      _serverURL: 'wss://{{spec.network.serverIP}}:4443'
+  logging:
+    console: true
+    directory: /var/log/rtcbench
+    streams:
+      - name: general
+        level: info
+      - name: signaling
+        level: debug
+      - name: media
+        level: info
+      - name: packets
+        level: info
+      - name: video_stats
+        level: info
