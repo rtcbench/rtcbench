@@ -116,6 +116,35 @@ def test_livekit_delivery(livekit_infra, test_video_dir, config, min_active, tim
         assert v["smooth_fps"] > 0, f"{v['nickname']}: fps is 0"
 
 
+@pytest.mark.xdist_group("livekit")
+def test_livekit_mixed_role(livekit_infra, test_video_dir):
+    """
+    Mixed-role full conference: every participant has role "both": it publishes
+    its own video AND subscribes to all others. 3 full participants => each
+    receives the other 2 => 6 healthy viewer stat streams. The existence of
+    those streams proves all 3 participants also published (otherwise there
+    would be nothing to receive). This is the rebuttal's "mixed-role" capability.
+    """
+    with rtcbench_run("smoke-3both.yml", test_video_dir, network=LIVEKIT_NETWORK, env=PLUGIN_ENV["livekit"]) as (url, _proc):
+        try:
+            result = poll_health(url, 180, min_active=6)
+        except TimeoutError as e:
+            pytest.fail(str(e))
+
+    record_result("livekit-mixed-3both", result)
+
+    active = [v for v in result["viewers"] if v["last_seen_ago_ms"] <= 30_000]
+    assert result["viewers_active"] >= 6, (
+        f"expected >=6 mixed-role viewer streams (3 participants x 2 peers), "
+        f"got {result['viewers_active']}"
+    )
+    for v in active:
+        assert v["smooth_bitrate_bps"] >= 3_000_000, (
+            f"{v['nickname']}: bitrate {v['smooth_bitrate_bps']/1000:.0f}kbps < 3000kbps"
+        )
+        assert v["smooth_fps"] > 0, f"{v['nickname']}: fps is 0"
+
+
 @pytest.mark.xdist_group("mediasoup")
 @pytest.mark.parametrize(
     "config,min_active,timeout",

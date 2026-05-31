@@ -689,7 +689,13 @@ type CameraConfig struct {
 	VideoCodec string
 	Directory  string
 	InMemory   bool
-	SVC        SVCCameraConfig
+	// MixedRole makes the PerRoom camera-holding participants act as full
+	// conference participants (publish AND subscribe) rather than send-only.
+	// Set PerRoom == usersPerRoom for an all-participants-send-and-receive
+	// conference. Honored by the default scenario; LiveKit-only at the plugin
+	// layer.
+	MixedRole bool
+	SVC       SVCCameraConfig
 }
 
 // SVCCameraConfig controls VP9 SVC (Scalable Video Coding) behavior for senders.
@@ -709,6 +715,7 @@ type YAMLCameraConfig struct {
 	VideoCodec *string           `yaml:"videoCodec,omitempty"`
 	Directory  *string           `yaml:"directory,omitempty"`
 	InMemory   *bool             `yaml:"inMemory,omitempty"`
+	MixedRole  *bool             `yaml:"mixedRole,omitempty"`
 	SVC        *YAMLSVCCamConfig `yaml:"svc,omitempty"`
 }
 
@@ -789,6 +796,9 @@ func (yc *YAMLCameraConfig) mustConvert() CameraConfig {
 	c.Directory = *yc.Directory
 	if yc.InMemory != nil {
 		c.InMemory = *yc.InMemory
+	}
+	if yc.MixedRole != nil {
+		c.MixedRole = *yc.MixedRole
 	}
 	c.SVC = SVCCameraConfig{Mode: "auto"}
 	if yc.SVC != nil {

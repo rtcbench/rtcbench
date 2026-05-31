@@ -170,24 +170,25 @@ func (p *participant) JoinRoom(ctx context.Context, req *rtcbench.JoinRequest) e
 		room, getTargetBitrate, err = p.plugin.connectSenderRoom(ctx, p.log, req.RoomID, p.userID, p.impairment)
 	case rtcbench.Viewer:
 		room, err = p.plugin.joinViewer(ctx, p.log, req.RoomID, p.userID, p.impairment)
-		if err == nil && p.plugin.observeReceiverRTT != nil {
-			rttCtx, cancel := context.WithCancel(context.Background())
-			rttCancel = cancel
-			go pionutil.PollPeerConnectionRTT(
-				rttCtx,
-				2*time.Second,
-				room.LocalParticipant.GetSubscriberPeerConnection,
-				func(rtt time.Duration) { p.plugin.observeReceiverRTT(p.userID, rtt) },
-			)
-		}
+	case rtcbench.Both:
+		room, getTargetBitrate, err = p.plugin.connectBothRoom(ctx, p.log, req.RoomID, p.userID, p.impairment)
 	default:
 		return rtcbench.ErrUnsupportedRole
 	}
 	if err != nil {
-		if rttCancel != nil {
-			rttCancel()
-		}
 		return err
+	}
+
+	// Receiving roles (viewer, both) poll subscriber-side RTT for QoE metrics.
+	if (p.role == rtcbench.Viewer || p.role == rtcbench.Both) && p.plugin.observeReceiverRTT != nil {
+		rttCtx, cancel := context.WithCancel(context.Background())
+		rttCancel = cancel
+		go pionutil.PollPeerConnectionRTT(
+			rttCtx,
+			2*time.Second,
+			room.LocalParticipant.GetSubscriberPeerConnection,
+			func(rtt time.Duration) { p.plugin.observeReceiverRTT(p.userID, rtt) },
+		)
 	}
 
 	p.mu.Lock()
@@ -230,7 +231,7 @@ func (p *participant) Close() error {
 
 func (p *participant) PublishVideo(ctx context.Context, req *rtcbench.PublishVideoRequest) error {
 	p.mu.Lock()
-	if p.role != rtcbench.Sender {
+	if p.role != rtcbench.Sender && p.role != rtcbench.Both {
 		p.mu.Unlock()
 		return rtcbench.ErrUnsupportedCapability
 	}
@@ -270,7 +271,7 @@ func (p *participant) PublishVideo(ctx context.Context, req *rtcbench.PublishVid
 
 func (p *participant) UnpublishVideo(ctx context.Context, req *rtcbench.UnpublishVideoRequest) error {
 	p.mu.Lock()
-	if p.role != rtcbench.Sender {
+	if p.role != rtcbench.Sender && p.role != rtcbench.Both {
 		p.mu.Unlock()
 		return rtcbench.ErrUnsupportedCapability
 	}
@@ -418,7 +419,11 @@ func buildSVCLayers(cfg ivf.SVCConfig) []*lkproto.VideoLayer {
 	return layers
 }
 
-func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID string, impairment *pionutil.ImpairmentBinding) (*lksdk.Room, error) {
+// buildSubscribeWiring constructs the RoomCallback that ingests every
+// subscribed remote track into the stats pipeline, plus any connect options
+// needed for subscription management (maxSubscriptions capping). Shared by the
+// viewer role and the mixed ("both") role so both receive identically.
+func (p *Plugin) buildSubscribeWiring(l *log.Logger, roomID, userID string) (*lksdk.RoomCallback, []lksdk.ConnectOption) {
 	onTrackSubscribed := func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
 		l.Infof("[pion] OnTrack: %s %s PT=%d", track.Kind(), track.Codec().MimeType, track.PayloadType())
 		// Request highest quality so the SFU forwards the top spatial layer.
@@ -449,11 +454,6 @@ func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID s
 	}
 
 	var opts []lksdk.ConnectOption
-	if opt, err := impairmentConnectOption(impairment); err != nil {
-		return nil, fmt.Errorf("%w: build impairment net: %v", rtcbench.ErrCannotJoinRoom, err)
-	} else if opt != nil {
-		opts = append(opts, opt)
-	}
 	if p.maxSubscriptions > 0 {
 		// Limit subscriptions: subscribe to first maxSubscriptions video tracks only.
 		opts = append(opts, lksdk.WithAutoSubscribe(false))
@@ -471,7 +471,17 @@ func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID s
 				atomic.AddInt32(&p.subscriptionCount, -1)
 			}
 		}
-		l.Infof("viewer: maxSubscriptions=%d (auto-subscribe disabled)", p.maxSubscriptions)
+		l.Infof("subscribe: maxSubscriptions=%d (auto-subscribe disabled)", p.maxSubscriptions)
+	}
+	return cb, opts
+}
+
+func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID string, impairment *pionutil.ImpairmentBinding) (*lksdk.Room, error) {
+	cb, opts := p.buildSubscribeWiring(l, roomID, userID)
+	if opt, err := impairmentConnectOption(impairment); err != nil {
+		return nil, fmt.Errorf("%w: build impairment net: %v", rtcbench.ErrCannotJoinRoom, err)
+	} else if opt != nil {
+		opts = append(opts, opt)
 	}
 
 	room, err := lksdk.ConnectToRoom(p.wsURL, lksdk.ConnectInfo{
@@ -485,6 +495,49 @@ func (p *Plugin) joinViewer(ctx context.Context, l *log.Logger, roomID, userID s
 	}
 	l.Infof("connected to room %s as viewer", roomID)
 	return room, nil
+}
+
+// connectBothRoom connects a mixed-role ("both") participant that simultaneously
+// subscribes to every other participant (receive side, identical to a viewer)
+// and is set up to publish its own video (send side, identical to a sender).
+// The actual publish happens later via PublishVideo; here we resolve SVC and,
+// when enabled, attach the GCC interceptor chain that drives adaptive bitrate.
+func (p *Plugin) connectBothRoom(ctx context.Context, l *log.Logger, roomID, userID string, impairment *pionutil.ImpairmentBinding) (*lksdk.Room, func() int, error) {
+	// Receive side: auto-subscribe stays enabled (unless maxSubscriptions caps it).
+	cb, connectOpts := p.buildSubscribeWiring(l, roomID, userID)
+
+	if opt, err := impairmentConnectOption(impairment); err != nil {
+		return nil, nil, fmt.Errorf("%w: build impairment net: %v", rtcbench.ErrCannotJoinRoom, err)
+	} else if opt != nil {
+		connectOpts = append(connectOpts, opt)
+	}
+
+	// Send side: resolve SVC and, when enabled, add the same GCC bandwidth
+	// estimation a sender uses. When SVC is off (typical for benchmarks) we add
+	// no interceptors; the publish path uses a plain sample track.
+	const initialBitrateBps = 1_200_000
+	svc := ivf.ResolveSVC(p.cameras.Paths(), p.svcConfig.Mode, p.svcConfig.SpatialLayers, p.svcConfig.TemporalLayers, initialBitrateBps)
+	var getTargetBitrate func() int
+	if svc.Enabled {
+		interceptors, getBitrate, err := lkinternal.SenderInterceptors(initialBitrateBps)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: build interceptors: %v", rtcbench.ErrCannotJoinRoom, err)
+		}
+		getTargetBitrate = getBitrate
+		connectOpts = append(connectOpts, lksdk.WithInterceptors(interceptors))
+	}
+
+	room, err := lksdk.ConnectToRoom(p.wsURL, lksdk.ConnectInfo{
+		APIKey:              p.apiKey,
+		APISecret:           p.apiSecret,
+		RoomName:            roomID,
+		ParticipantIdentity: userID,
+	}, cb, connectOpts...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: connect to room: %v", rtcbench.ErrCannotJoinRoom, err)
+	}
+	l.Infof("connected to room %s as both (publish+subscribe, SVC=%v)", roomID, svc.Enabled)
+	return room, getTargetBitrate, nil
 }
 
 func impairmentConnectOption(impairment *pionutil.ImpairmentBinding) (lksdk.ConnectOption, error) {

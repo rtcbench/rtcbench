@@ -427,6 +427,12 @@ func runStaticRoom(ctx context.Context, client *Client, cfg *Config, roomCfg joi
 
 		spacing := cfg.Spec.Conference.JoinPolicy.JoinStartSpacing
 		senders := cfg.Spec.Conference.Cameras.PerRoom
+		senderRole := Sender
+		if cfg.Spec.Conference.Cameras.MixedRole {
+			// Mixed-role: the camera-holding participants both publish and
+			// subscribe (full conference participants) instead of send-only.
+			senderRole = Both
+		}
 
 		for i := 0; i < roomCfg.usersPerRoom; i++ {
 			if i > 0 && spacing > 0 {
@@ -441,7 +447,7 @@ func runStaticRoom(ctx context.Context, client *Client, cfg *Config, roomCfg joi
 
 			role := Viewer
 			if i < senders {
-				role = Sender
+				role = senderRole
 			}
 
 			select {
@@ -493,7 +499,7 @@ func runStaticRoom(ctx context.Context, client *Client, cfg *Config, roomCfg joi
 					}
 					continue
 				}
-				if vc.role == Sender {
+				if vc.role == Sender || vc.role == Both {
 					err := user.PublishVideo(ctx, &PublishVideoRequest{
 						Plugin: cfg.Spec.Plugin,
 						RoomID: vc.roomID,
