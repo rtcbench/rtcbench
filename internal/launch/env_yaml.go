@@ -1,9 +1,8 @@
-package main
+package launch
 
 import (
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 )
+
+type LookupFunc func(string) (string, bool)
 
 type MissingEnvError struct {
 	Missing []string
@@ -24,20 +25,20 @@ func (e *MissingEnvError) Error() string {
 
 // RenderEnvYAML performs $env substitution first, then interpolates any _-prefixed keys.
 // Returns error if required env or interpolated config fields are missing.
-func RenderEnvYAML(in []byte) ([]byte, error) {
+func RenderEnvYAML(in []byte, lookup LookupFunc) ([]byte, error) {
 	var v any
 	if err := yaml.Unmarshal(in, &v); err != nil {
 		return nil, err
 	}
 
 	var missing []string
-	v = renderEnv(v, "", &missing)
+	v = renderEnv(v, "", &missing, lookup)
 	if len(missing) > 0 {
 		return nil, &MissingEnvError{Missing: missing}
 	}
 
 	// Interpolate _-prefixed keys
-	v, err := renderInterpolation(v, v)
+	v, err := renderInterpolation(v, v, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +53,7 @@ func RenderEnvYAML(in []byte) ([]byte, error) {
 	return out, nil
 }
 
-func renderEnv(v any, path string, missing *[]string) any {
+func renderEnv(v any, path string, missing *[]string, lookup LookupFunc) any {
 	switch t := v.(type) {
 	case yaml.MapSlice:
 		for i := range t {
@@ -61,7 +62,7 @@ func renderEnv(v any, path string, missing *[]string) any {
 			if path != "" {
 				childPath = path + "." + keyStr
 			}
-			t[i].Value = renderEnv(t[i].Value, childPath, missing)
+			t[i].Value = renderEnv(t[i].Value, childPath, missing, lookup)
 		}
 		return t
 
@@ -71,7 +72,7 @@ func renderEnv(v any, path string, missing *[]string) any {
 			if path != "" {
 				childPath = path + "." + k
 			}
-			t[k] = renderEnv(vv, childPath, missing)
+			t[k] = renderEnv(vv, childPath, missing, lookup)
 		}
 		return t
 
@@ -82,14 +83,14 @@ func renderEnv(v any, path string, missing *[]string) any {
 			if path != "" {
 				childPath = path + "." + keyStr
 			}
-			t[k] = renderEnv(vv, childPath, missing)
+			t[k] = renderEnv(vv, childPath, missing, lookup)
 		}
 		return t
 
 	case []any:
 		for i := range t {
 			childPath := fmt.Sprintf("%s[%d]", path, i)
-			t[i] = renderEnv(t[i], childPath, missing)
+			t[i] = renderEnv(t[i], childPath, missing, lookup)
 		}
 		return t
 
@@ -98,7 +99,7 @@ func renderEnv(v any, path string, missing *[]string) any {
 		if !ok {
 			return t
 		}
-		val, found := os.LookupEnv(varName)
+		val, found := lookup(varName)
 		if !found {
 			if def != nil {
 				return coerceScalar(*def)
@@ -113,14 +114,14 @@ func renderEnv(v any, path string, missing *[]string) any {
 	}
 }
 
-func renderInterpolation(node, root any) (any, error) {
+func renderInterpolation(node, root any, lookup LookupFunc) (any, error) {
 	switch t := node.(type) {
 	case yaml.MapSlice:
 		for i := range t {
 			keyStr := fmt.Sprint(t[i].Key)
 			if strings.HasPrefix(keyStr, "_") {
 				if s, ok := t[i].Value.(string); ok {
-					s2, err := interpolateString(s, root)
+					s2, err := interpolateString(s, root, lookup)
 					if err != nil {
 						return nil, fmt.Errorf("interpolation error for key %s: %w", keyStr, err)
 					}
@@ -128,7 +129,7 @@ func renderInterpolation(node, root any) (any, error) {
 				}
 			}
 			var err error
-			t[i].Value, err = renderInterpolation(t[i].Value, root)
+			t[i].Value, err = renderInterpolation(t[i].Value, root, lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -138,7 +139,7 @@ func renderInterpolation(node, root any) (any, error) {
 		for k, v := range t {
 			if strings.HasPrefix(k, "_") {
 				if s, ok := v.(string); ok {
-					s2, err := interpolateString(s, root)
+					s2, err := interpolateString(s, root, lookup)
 					if err != nil {
 						return nil, fmt.Errorf("interpolation error for key %s: %w", k, err)
 					}
@@ -146,7 +147,7 @@ func renderInterpolation(node, root any) (any, error) {
 				}
 			}
 			var err error
-			t[k], err = renderInterpolation(t[k], root)
+			t[k], err = renderInterpolation(t[k], root, lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -157,7 +158,7 @@ func renderInterpolation(node, root any) (any, error) {
 			ks := fmt.Sprint(k)
 			if strings.HasPrefix(ks, "_") {
 				if s, ok := v.(string); ok {
-					s2, err := interpolateString(s, root)
+					s2, err := interpolateString(s, root, lookup)
 					if err != nil {
 						return nil, fmt.Errorf("interpolation error for key %s: %w", ks, err)
 					}
@@ -165,7 +166,7 @@ func renderInterpolation(node, root any) (any, error) {
 				}
 			}
 			var err error
-			t[k], err = renderInterpolation(t[k], root)
+			t[k], err = renderInterpolation(t[k], root, lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -174,7 +175,7 @@ func renderInterpolation(node, root any) (any, error) {
 	case []any:
 		for i := range t {
 			var err error
-			t[i], err = renderInterpolation(t[i], root)
+			t[i], err = renderInterpolation(t[i], root, lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -187,7 +188,7 @@ func renderInterpolation(node, root any) (any, error) {
 
 var interpolationRegex = regexp.MustCompile(`\{\{\s*([^{}]+)\s*\}\}`)
 
-func interpolateString(s string, root any) (string, error) {
+func interpolateString(s string, root any, lookup LookupFunc) (string, error) {
 	var errs []error
 	replacedStr := interpolationRegex.ReplaceAllStringFunc(s, func(match string) string {
 		content := interpolationRegex.FindStringSubmatch(match)[1]
@@ -195,7 +196,7 @@ func interpolateString(s string, root any) (string, error) {
 
 		if strings.HasPrefix(content, "env:") {
 			envVar := strings.TrimSpace(strings.TrimPrefix(content, "env:"))
-			val, ok := os.LookupEnv(envVar)
+			val, ok := lookup(envVar)
 			if !ok || val == "" {
 				errs = append(errs, fmt.Errorf("missing environment variable for interpolation: %s", envVar))
 				return ""

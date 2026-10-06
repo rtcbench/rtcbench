@@ -100,6 +100,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 }
 
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handleHealth(w, r)
+}
+
 type healthResponse struct {
 	Status               string            `json:"status"`
 	ViewersTotal         int               `json:"viewers_total"`
