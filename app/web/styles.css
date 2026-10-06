@@ -1,0 +1,194 @@
+@import "tailwindcss";
+
+@source "./";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme static {
+  --color-paper-50: #fcfcfc;
+  --color-paper-100: #f7f7f7;
+  --color-paper-200: #eeeeee;
+  --color-paper-300: #e6e6e6;
+  --color-graphite-50: #f3f3f3;
+  --color-graphite-100: #e8e8e8;
+  --color-graphite-200: #d6d6d6;
+  --color-graphite-300: #c4c4c4;
+  --color-graphite-400: #a3a3a3;
+  --color-graphite-600: #626262;
+  --color-graphite-700: #494949;
+  --color-graphite-800: #363636;
+  --color-graphite-850: #2d2d2d;
+  --color-graphite-900: #242424;
+  --color-graphite-950: #1c1c1c;
+  --color-ocean-400: #68bccf;
+  --color-ocean-500: #1d9db4;
+  --color-ocean-700: #05697a;
+  --color-coral-50: #fff0f1;
+  --color-coral-400: #f0808c;
+  --color-coral-600: #c83243;
+  --color-mint-400: #3ddc84;
+  --color-mint-600: #1a8f52;
+  --color-mint-950: #06271a;
+
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, "SFMono-Regular", "SF Mono", "Cascadia Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-display:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display",
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.75rem;
+  --radius-dialog: 1.25rem;
+  --background: var(--color-paper-100);
+  --foreground: var(--color-graphite-900);
+  --card: var(--color-paper-50);
+  --card-foreground: var(--color-graphite-900);
+  --popover: var(--color-paper-50);
+  --popover-foreground: var(--color-graphite-900);
+  --primary: var(--color-ocean-500);
+  --primary-foreground: var(--color-white);
+  --link: var(--color-ocean-700);
+  --secondary: var(--color-paper-300);
+  --secondary-foreground: var(--color-graphite-600);
+  --muted: var(--color-paper-200);
+  --muted-foreground: var(--color-graphite-600);
+  --accent: var(--color-paper-300);
+  --accent-foreground: var(--color-graphite-900);
+  --destructive: var(--color-coral-600);
+  --destructive-foreground: var(--color-white);
+  --destructive-muted: var(--color-coral-50);
+  --success: var(--color-mint-600);
+  --success-foreground: var(--color-white);
+  --warning: var(--color-amber-700);
+  --warning-foreground: var(--color-white);
+  --border: var(--color-graphite-200);
+  --input: var(--color-graphite-300);
+  --input-background: var(--color-paper-200);
+  --ring: var(--color-ocean-500);
+  --overlay: color-mix(in srgb, var(--color-graphite-900) 18%, transparent);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: var(--color-graphite-950);
+  --foreground: var(--color-graphite-100);
+  --card: var(--color-graphite-900);
+  --card-foreground: var(--color-graphite-100);
+  --popover: var(--color-graphite-850);
+  --popover-foreground: var(--color-graphite-50);
+  --primary: var(--color-ocean-500);
+  --primary-foreground: var(--color-white);
+  --link: var(--color-ocean-400);
+  --secondary: var(--color-graphite-800);
+  --secondary-foreground: var(--color-graphite-100);
+  --muted: var(--color-graphite-850);
+  --muted-foreground: var(--color-graphite-400);
+  --accent: var(--color-graphite-800);
+  --accent-foreground: var(--color-graphite-50);
+  --destructive: var(--color-coral-400);
+  --destructive-foreground: var(--color-white);
+  --destructive-muted: color-mix(
+    in srgb,
+    var(--color-coral-400) 12%,
+    var(--color-graphite-900)
+  );
+  --success: var(--color-mint-400);
+  --success-foreground: var(--color-mint-950);
+  --warning: var(--color-amber-300);
+  --warning-foreground: var(--color-amber-950);
+  --border: var(--color-graphite-800);
+  --input: var(--color-graphite-700);
+  --input-background: var(--color-graphite-900);
+  --ring: var(--color-ocean-400);
+  --overlay: color-mix(in srgb, var(--color-black) 50%, transparent);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-link: var(--link);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-muted: var(--destructive-muted);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+}
+
+:root {
+  --control-height: 2.5rem;
+  --control-height-sm: 2.25rem;
+  --control-px: 0.75rem;
+  --row-py: 0.625rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background font-sans text-sm text-foreground;
+  }
+  ::selection {
+    @apply bg-primary/35;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--primary);
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    @apply font-mono;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .code-block {
+    @apply rounded-md border bg-background p-4 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-foreground;
+  }
+}

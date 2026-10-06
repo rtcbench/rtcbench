@@ -1,6 +1,9 @@
 # rtcbench outputs
 graphs/
 logs/
+/rtcbench-data/
+/internal/api/web/*
+!/internal/api/web/.gitkeep
 
 /target
 /bin

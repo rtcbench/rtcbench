@@ -6,23 +6,20 @@ import (
 	"flag"
 	"fmt"
 	stdlog "log"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime/pprof"
 	"syscall"
 	"time"
 
-	"github.com/goccy/go-yaml"
 	"github.com/joho/godotenv"
 	"github.com/rtcbench/rtcbench"
+	"github.com/rtcbench/rtcbench/internal/api"
+	"github.com/rtcbench/rtcbench/internal/launch"
 	"github.com/rtcbench/rtcbench/internal/netutil"
-	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/pkg/metricsserver"
 	"github.com/rtcbench/rtcbench/pkg/statsjsonl"
-	"github.com/rtcbench/rtcbench/plugin/janus"
-	"github.com/rtcbench/rtcbench/plugin/jitsi"
-	"github.com/rtcbench/rtcbench/plugin/livekit"
-	"github.com/rtcbench/rtcbench/plugin/mediasoup"
 )
 
 var version = "dev"
@@ -41,6 +38,8 @@ func main() {
 	cpuprofile := flag.String("cpuprofile", "", "Write CPU profile to file")
 	startAt := flag.Int64("start-at", 0, "Unix timestamp to wait until before joining rooms")
 	showVersion := flag.Bool("version", false, "Print version and exit")
+	apiAddr := flag.String("api-addr", "127.0.0.1:8080", "Address for the HTTP API when no config file is given")
+	data := flag.String("data", "rtcbench-data", "Directory for configs and run outputs when no config file is given")
 	flag.Parse()
 
 	if *showVersion {
@@ -62,26 +61,29 @@ func main() {
 		}()
 	}
 
-	if flag.NArg() != 1 {
-		if flag.NArg() > 1 {
-			for _, arg := range flag.Args() {
-				if len(arg) > 0 && arg[0] == '-' {
-					stdlog.Fatalf("unknown flag: %s (flags must appear before the config file)", arg)
-				}
+	_ = godotenv.Load()
+
+	if flag.NArg() == 0 {
+		serveAPI(*apiAddr, *data)
+		return
+	}
+
+	if flag.NArg() > 1 {
+		for _, arg := range flag.Args() {
+			if len(arg) > 0 && arg[0] == '-' {
+				stdlog.Fatalf("unknown flag: %s (flags must appear before the config file)", arg)
 			}
 		}
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	_ = godotenv.Load()
-
 	cfg, err = loadYAMLConfig(flag.Arg(0))
 	if err != nil {
 		stdlog.Fatalf("Failed to load YAML config file: %v", err)
 	}
 
-	reg, err := buildLogRegistry(cfg.Spec.Logging)
+	reg, err := launch.Logs(cfg.Spec.Logging)
 	if err != nil {
 		stdlog.Fatalf("Failed to initialize logging: %v", err)
 	}
@@ -99,10 +101,7 @@ func main() {
 	}
 
 	client = rtcbench.NewClient(cfg, reg)
-	client.RegisterPlugin(jitsi.PluginID, jitsi.NewPlugin)
-	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
-	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
-	client.RegisterPlugin(mediasoup.PluginID, mediasoup.NewPlugin)
+	launch.RegisterPlugins(client)
 
 	sigtermCtx, sigtermCancel = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer sigtermCancel()
@@ -189,62 +188,36 @@ func main() {
 	}
 }
 
-func buildLogRegistry(lc rtcbench.LoggingConfig) (*log.Registry, error) {
-	levels := make(map[string]log.Level, len(lc.Streams))
-	for _, s := range lc.Streams {
-		lvl, err := log.ParseLevel(s.Level)
-		if err != nil {
-			return nil, fmt.Errorf("stream %q: %w", s.Name, err)
-		}
-		levels[s.Name] = lvl
+func serveAPI(addr, dir string) {
+	srv, err := api.New(dir, version, os.Stderr)
+	if err != nil {
+		stdlog.Fatalf("Failed to open %s: %v", dir, err)
 	}
 
-	var handlers []log.Handler
-	if lc.Console {
-		consoleLvl, err := log.ParseLevel(lc.ConsoleLevel)
-		if err != nil {
-			return nil, fmt.Errorf("consoleLevel: %w", err)
-		}
-		handlers = append(handlers, log.NewConsoleHandler(lc.Color, consoleLvl))
-	}
-	if lc.Directory != "" {
-		fileLvl, err := log.ParseLevel(lc.FileLevel)
-		if err != nil {
-			return nil, fmt.Errorf("fileLevel: %w", err)
-		}
-		fh, err := log.NewFileHandler(lc.Directory, fileLvl, lc.Combined)
-		if err != nil {
-			return nil, err
-		}
-		handlers = append(handlers, fh)
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	return log.NewRegistry(handlers, levels), nil
+	httpServer := &http.Server{Addr: addr, Handler: srv.Handler()}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdownCtx)
+		_ = httpServer.Shutdown(shutdownCtx)
+	}()
+
+	srv.Logf("rtcbench %s listening on http://%s", version, addr)
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		stdlog.Fatal(err)
+	}
 }
 
 func loadYAMLConfig(yamlFile string) (*rtcbench.Config, error) {
-	var (
-		bytes      []byte
-		yamlConfig rtcbench.YAMLConfig
-		err        error
-	)
-
-	bytes, err = os.ReadFile(yamlFile)
+	data, err := os.ReadFile(yamlFile)
 	if err != nil {
 		return nil, err
 	}
-
-	bytes, err = RenderEnvYAML(bytes)
-	if err != nil {
-		return nil, err
-	}
-
-	err = yaml.Unmarshal(bytes, &yamlConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	return yamlConfig.IntoConfig()
+	return launch.LoadConfig(data, os.LookupEnv)
 }
 
 func logRunMetricsSummary(l interface{ Infof(string, ...any) }, summary rtcbench.RunMetricsSummary) {

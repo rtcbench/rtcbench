@@ -7,10 +7,27 @@
 VERSION := $(shell git describe --tags --always --dirty)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
+ifeq ($(shell echo %OS%),Windows_NT)
+which = $(shell where $(1) 2>NUL)
+RM := del /q 2>NUL
+else
+which = $(shell command -v $(1) 2>/dev/null)
+endif
+
+ifneq ($(call which,bun),)
+BUILD_APP := cd app && bun install && bun run build
+else ifneq ($(call which,node),)
+BUILD_APP := cd app && npm install --no-package-lock && npm run build
+else
+BUILD_APP := @echo Missing bun or node, this build will not have a web UI.
+endif
+
 all:
+	$(BUILD_APP)
 	go build -v $(LDFLAGS) ./cmd/rtcbench
 
 install:
+	$(BUILD_APP)
 	go install -v $(LDFLAGS) ./cmd/rtcbench
 
 test:
@@ -146,7 +163,7 @@ clean-screenshots:
 	rm -rf e2e/screenshots/*/
 
 clean:
-	rm -f rtcbench rtcbench.exe
+	$(RM) rtcbench rtcbench.exe
 	go clean -cache
 	go clean -testcache
 	go clean -modcache
