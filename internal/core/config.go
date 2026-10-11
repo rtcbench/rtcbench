@@ -692,8 +692,7 @@ type CameraConfig struct {
 	// MixedRole makes the PerRoom camera-holding participants act as full
 	// conference participants (publish AND subscribe) rather than send-only.
 	// Set PerRoom == usersPerRoom for an all-participants-send-and-receive
-	// conference. Honored by the default scenario; LiveKit-only at the plugin
-	// layer.
+	// conference, when supported by the selected plugin
 	MixedRole bool
 	SVC       SVCCameraConfig
 }

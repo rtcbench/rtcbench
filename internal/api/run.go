@@ -18,7 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/rtcbench/rtcbench"
+	"github.com/rtcbench/rtcbench/internal/core"
 	"github.com/rtcbench/rtcbench/internal/launch"
 	"github.com/rtcbench/rtcbench/internal/netutil"
 	"github.com/rtcbench/rtcbench/pkg/log"
@@ -34,12 +34,13 @@ const (
 )
 
 type StartRequest struct {
-	Name       string `json:"name"`
-	ConfigName string `json:"configName,omitempty"`
-	Config     string `json:"config"`
-	EnvName    string `json:"envName,omitempty"`
-	StartAt    int64  `json:"startAt,omitempty"`
-	CPUProfile bool   `json:"cpuProfile,omitempty"`
+	DeploymentID string `json:"deploymentId,omitempty"`
+	Name         string `json:"name"`
+	ConfigName   string `json:"configName,omitempty"`
+	Config       string `json:"config"`
+	EnvName      string `json:"envName,omitempty"`
+	StartAt      int64  `json:"startAt,omitempty"`
+	CPUProfile   bool   `json:"cpuProfile,omitempty"`
 }
 
 type UpdateRequest struct {
@@ -47,19 +48,22 @@ type UpdateRequest struct {
 }
 
 type Run struct {
-	ID         string                      `json:"id"`
-	Name       string                      `json:"name"`
-	ConfigName string                      `json:"configName,omitempty"`
-	EnvName    string                      `json:"envName,omitempty"`
-	Status     string                      `json:"status"`
-	StartedAt  time.Time                   `json:"startedAt"`
-	EndedAt    *time.Time                  `json:"endedAt,omitempty"`
-	StartAt    int64                       `json:"startAt,omitempty"`
-	CPUProfile bool                        `json:"cpuProfile,omitempty"`
-	Env        map[string]string           `json:"env,omitempty"`
-	Error      string                      `json:"error,omitempty"`
-	Failures   []string                    `json:"failures,omitempty"`
-	Summary    *rtcbench.RunMetricsSummary `json:"summary,omitempty"`
+	RoomName     string                  `json:"roomName,omitempty"`
+	PluginName   string                  `json:"pluginName,omitempty"`
+	DeploymentID string                  `json:"deploymentId,omitempty"`
+	ID           string                  `json:"id"`
+	Name         string                  `json:"name"`
+	ConfigName   string                  `json:"configName,omitempty"`
+	EnvName      string                  `json:"envName,omitempty"`
+	Status       string                  `json:"status"`
+	StartedAt    time.Time               `json:"startedAt"`
+	EndedAt      *time.Time              `json:"endedAt,omitempty"`
+	StartAt      int64                   `json:"startAt,omitempty"`
+	CPUProfile   bool                    `json:"cpuProfile,omitempty"`
+	Env          map[string]string       `json:"env,omitempty"`
+	Error        string                  `json:"error,omitempty"`
+	Failures     []string                `json:"failures,omitempty"`
+	Summary      *core.RunMetricsSummary `json:"summary,omitempty"`
 }
 
 type run struct {
@@ -71,8 +75,8 @@ type run struct {
 }
 
 type session struct {
-	config  *rtcbench.Config
-	client  *rtcbench.Client
+	config  *core.Config
+	client  *core.Client
 	logs    *log.Registry
 	stats   *statsjsonl.Writer
 	profile *os.File
@@ -103,10 +107,15 @@ func (s *Server) load() error {
 		if err != nil {
 			return nil
 		}
-		var r Run
-		if json.Unmarshal(data, &r) != nil || !strings.HasSuffix(d.Name(), "-"+r.ID) {
+		var stored struct {
+			Run
+			SFUID string `json:"sfuId"`
+		}
+		if json.Unmarshal(data, &stored) != nil || !strings.HasSuffix(d.Name(), "-"+stored.ID) {
 			return nil
 		}
+		r := stored.Run
+		r.DeploymentID = cmp.Or(r.DeploymentID, stored.SFUID)
 		if r.Status == StatusRunning {
 			now := time.Now()
 			r.Status, r.EndedAt = StatusInterrupted, &now
@@ -160,9 +169,32 @@ func (s *Server) start(req StartRequest) (Run, error) {
 	if !validName(name) {
 		return Run{}, fmt.Errorf("invalid run name %q", name)
 	}
+	if req.DeploymentID != "" {
+		if _, err := uuid.Parse(req.DeploymentID); err != nil {
+			return Run{}, errors.New("invalid deployment ID")
+		}
+		req.EnvName = ""
+		if _, err := os.Stat(filepath.Join(s.envs.dir, "plugins", req.DeploymentID+".yml")); err == nil {
+			req.EnvName = "plugins/" + req.DeploymentID
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return Run{}, err
+		}
+	}
 	env, variables, err := s.environment(req.EnvName)
 	if err != nil {
 		return Run{}, err
+	}
+	if req.DeploymentID != "" {
+		config, overrides, err := s.deployments.Bind(req.DeploymentID, []byte(req.Config))
+		if err != nil {
+			return Run{}, err
+		}
+		req.Config = string(config)
+		for k, v := range overrides {
+			env[k] = v
+			delete(variables, k)
+		}
+		variables["PLUGIN_ID"], variables["SERVER_IP"] = overrides["PLUGIN_ID"], overrides["SERVER_IP"]
 	}
 	lookup := func(key string) (string, bool) {
 		if v, ok := env[key]; ok {
@@ -206,15 +238,18 @@ func (s *Server) start(req StartRequest) (Run, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	rn := &run{
 		Run: Run{
-			ID:         id,
-			Name:       name,
-			ConfigName: req.ConfigName,
-			EnvName:    req.EnvName,
-			Status:     StatusRunning,
-			StartedAt:  started,
-			StartAt:    req.StartAt,
-			CPUProfile: req.CPUProfile,
-			Env:        variables,
+			ID:           id,
+			DeploymentID: req.DeploymentID,
+			RoomName:     cfg.Spec.Conference.Name,
+			PluginName:   s.deployments.Name(req.DeploymentID),
+			Name:         name,
+			ConfigName:   req.ConfigName,
+			EnvName:      req.EnvName,
+			Status:       StatusRunning,
+			StartedAt:    started,
+			StartAt:      req.StartAt,
+			CPUProfile:   req.CPUProfile,
+			Env:          variables,
 		},
 		dir:     dir,
 		cancel:  cancel,
@@ -232,7 +267,7 @@ func (s *Server) start(req StartRequest) (Run, error) {
 	return rn.Run, nil
 }
 
-func (s *Server) open(dir string, req StartRequest, cfg *rtcbench.Config) (*session, error) {
+func (s *Server) open(dir string, req StartRequest, cfg *core.Config) (*session, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -261,8 +296,10 @@ func (s *Server) open(dir string, req StartRequest, cfg *rtcbench.Config) (*sess
 		logs.Close()
 		return nil, err
 	}
-	client := rtcbench.NewClient(cfg, logs)
-	launch.RegisterPlugins(client)
+	client := core.NewClient(cfg, logs)
+	if s.Register != nil {
+		s.Register(client)
+	}
 	client.AddStatsConsumer(stats.Subscriber())
 
 	sess := &session{config: cfg, client: client, logs: logs, stats: stats}
@@ -297,7 +334,7 @@ func (s *Server) execute(ctx context.Context, rn *run, sess *session) {
 	if ctx.Err() == nil {
 		scenario := sess.config.Spec.Scenario
 		if scenario == "" {
-			scenario = rtcbench.DefaultScenarioID
+			scenario = core.DefaultScenarioID
 		}
 		err := sess.client.RunScenario(ctx, scenario)
 		canceled := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
@@ -305,9 +342,9 @@ func (s *Server) execute(ctx context.Context, rn *run, sess *session) {
 			general.Errorf("scenario %q failed: %v", scenario, err)
 			runErr = err
 		}
-		fatal := errors.Is(err, rtcbench.ErrUnknownPlugin) ||
-			errors.Is(err, rtcbench.ErrUnknownScenario) ||
-			errors.Is(err, rtcbench.ErrUserExists)
+		fatal := errors.Is(err, core.ErrUnknownPlugin) ||
+			errors.Is(err, core.ErrUnknownScenario) ||
+			errors.Is(err, core.ErrUserExists)
 		if !fatal {
 			general.Infof("finished scenario %q", scenario)
 			<-ctx.Done()
@@ -321,10 +358,10 @@ func (s *Server) execute(ctx context.Context, rn *run, sess *session) {
 	}
 	summary := sess.client.MetricsSummary()
 	var failures []string
-	if err := rtcbench.EvaluateRunThresholds(summary, sess.config.Spec.Metrics.Thresholds); err != nil {
+	if err := core.EvaluateRunThresholds(summary, sess.config.Spec.Metrics.Thresholds); err != nil {
 		failures = append(failures, err.Error())
 	}
-	if err := rtcbench.EvaluateReceiverThresholds(summary.Receivers, sess.config.Spec.Metrics.ReceiverThresholds); err != nil {
+	if err := core.EvaluateReceiverThresholds(summary.Receivers, sess.config.Spec.Metrics.ReceiverThresholds); err != nil {
 		failures = append(failures, err.Error())
 	}
 
@@ -367,6 +404,8 @@ func (s *Server) execute(ctx context.Context, rn *run, sess *session) {
 }
 
 func (s *Server) Shutdown(ctx context.Context) {
+	s.closeTerminals(ctx)
+	s.deployments.Close(ctx)
 	s.mu.Lock()
 	var active []*run
 	for _, rn := range s.runs {

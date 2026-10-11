@@ -14,20 +14,31 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/rtcbench/rtcbench/internal/core"
+	"github.com/rtcbench/rtcbench/internal/deployment"
+	deploy "github.com/rtcbench/rtcbench/pkg/deployment"
 )
 
 type Server struct {
-	dir       string
-	configs   documents
-	envs      documents
-	overrides string
-	examples  string
-	web       fs.FS
-	version   string
-	log       *stdlog.Logger
-	mu        sync.Mutex
-	runs      map[string]*run
-	profiling bool
+	Register    func(*core.Client)
+	Examples    fs.FS
+	Plugins     fs.FS
+	settings    settings
+	dir         string
+	configs     documents
+	envs        documents
+	overrides   string
+	Web         fs.FS
+	webProxy    http.Handler
+	version     string
+	log         *stdlog.Logger
+	mu          sync.Mutex
+	runs        map[string]*run
+	profiling   bool
+	deployments *deployment.Manager
+	terminals   map[*terminalSession]bool
+	closing     bool
 }
 
 type File struct {
@@ -37,31 +48,52 @@ type File struct {
 
 const logTailBytes = 256 << 10
 
-func New(dir, version string, console io.Writer) (*Server, error) {
+func New(dir, settingsFile, version string, console io.Writer, plugins ...deploy.Plugin) (*Server, error) {
+	config, err := readSettings(dir, settingsFile)
+	if err != nil {
+		return nil, err
+	}
 	configs := documents{kind: "config", dir: filepath.Join(dir, "configs")}
-	envs := documents{kind: "environment", dir: filepath.Join(dir, "envs"), redact: redactEnv, merge: mergeEnv(true)}
-	for _, sub := range []string{configs.dir, envs.dir, filepath.Join(dir, "runs")} {
+	envs := documents{
+		kind:   "environment",
+		dir:    filepath.Join(dir, "envs"),
+		redact: redactEnv,
+		merge:  mergeEnv(true),
+	}
+	for _, sub := range []string{configs.dir, envs.dir, filepath.Join(dir, "runs"), filepath.Join(dir, "plugins")} {
 		if err := os.MkdirAll(sub, 0o755); err != nil {
 			return nil, err
 		}
 	}
-	examples, err := filepath.Abs("config-examples")
-	if err != nil {
-		return nil, err
-	}
-	web, _ := fs.Sub(webFiles, "web")
 	s := &Server{
+		settings:  config,
 		dir:       dir,
 		configs:   configs,
 		envs:      envs,
 		overrides: filepath.Join(dir, "system-overrides.yml"),
-		examples:  examples,
-		web:       web,
+		Web:       defaultWeb(),
 		version:   version,
 		log:       stdlog.New(console, "", stdlog.LstdFlags),
 		runs:      map[string]*run{},
+		terminals: map[*terminalSession]bool{},
 	}
-	return s, s.load()
+	if err := s.configureWeb(); err != nil {
+		return nil, fmt.Errorf("%s: %w", settingsFile, err)
+	}
+	if err := s.load(); err != nil {
+		return nil, err
+	}
+	systems := filepath.Join(dir, "systems")
+	if _, err := os.Stat(systems); errors.Is(err, os.ErrNotExist) {
+		if err := os.Rename(filepath.Join(dir, "sfus"), systems); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+	s.deployments, err = deployment.New(systems, plugins...)
+	if err == nil {
+		s.deployments.LoadBuildContext = s.loadBuildContext
+	}
+	return s, err
 }
 
 func (s *Server) Logf(format string, args ...any) {
@@ -70,6 +102,8 @@ func (s *Server) Logf(format string, args ...any) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	router := http.NewServeMux()
+	s.deployments.Register(mux)
 	mux.HandleFunc("GET /api/v1/version", s.getVersion)
 	mux.HandleFunc("GET /api/v1/runs", s.listRuns)
 	mux.HandleFunc("POST /api/v1/runs", s.postRun)
@@ -88,14 +122,20 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET "+api+"/{name...}", d.get)
 		mux.HandleFunc("PUT "+api+"/{name...}", d.put)
 		mux.HandleFunc("DELETE "+api+"/{name...}", d.delete)
-		mux.HandleFunc("GET /"+d.kind+"/{name...}", s.page(d))
+		router.HandleFunc("GET /"+d.kind+"/{name...}", s.page(d))
 	}
 	mux.HandleFunc("GET /api/v1/system-overrides", s.getOverrides)
 	mux.HandleFunc("PUT /api/v1/system-overrides", s.putOverrides)
 	mux.HandleFunc("GET /api/v1/examples", s.getExamples)
 	mux.HandleFunc("POST /api/v1/examples", s.copyExamples)
-	mux.HandleFunc("GET /", s.serveWeb)
-	return s.logRequests(mux)
+	mux.HandleFunc("GET /api/v1/plugins", s.listPlugins)
+	mux.HandleFunc("POST /api/v1/plugins", s.createPlugin)
+	mux.HandleFunc("GET /api/v1/plugins/{name}", s.getPlugin)
+	mux.HandleFunc("GET /api/v1/plugins/{name}/download", s.downloadPlugin)
+	mux.HandleFunc("GET /api/v1/terminal", s.terminal)
+	router.Handle("/api/", mux)
+	router.HandleFunc("/", s.serveWeb)
+	return s.logRequests(router)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

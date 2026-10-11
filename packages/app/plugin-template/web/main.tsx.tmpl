@@ -1,0 +1,21 @@
+import { useState } from "react";
+import { createRoot } from "react-dom/client";
+import { RTCBench } from "@rtcbench/app";
+import "@rtcbench/app/styles.css";
+import "@rtcbench/lab/styles.css";
+import "./styles.css";
+
+function App() {
+  const [dark, setDark] = useState(false);
+  return (
+    <RTCBench
+      apiUrl={new URL("api/v1", document.baseURI).href}
+      welcome={document.documentElement.dataset.welcome === "true"}
+      storageKey="__PLUGIN__:workspace"
+      dark={dark}
+      onThemeChange={setDark}
+    />
+  );
+}
+
+createRoot(document.getElementById("root")!).render(<App />);

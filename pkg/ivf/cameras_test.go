@@ -21,13 +21,13 @@ func writeTestIVF(t *testing.T, path string, frames [][]byte) {
 
 	// IVF file header (32 bytes)
 	var hdr [32]byte
-	copy(hdr[0:4], "DKIF")           // signature
-	binary.LittleEndian.PutUint16(hdr[6:8], 32)   // header size
-	copy(hdr[8:12], "VP90")          // codec FourCC
-	binary.LittleEndian.PutUint16(hdr[12:14], 640) // width
-	binary.LittleEndian.PutUint16(hdr[14:16], 480) // height
-	binary.LittleEndian.PutUint32(hdr[16:20], 30)  // timebase denominator (frame rate)
-	binary.LittleEndian.PutUint32(hdr[20:24], 1)   // timebase numerator
+	copy(hdr[0:4], "DKIF")                                         // signature
+	binary.LittleEndian.PutUint16(hdr[6:8], 32)                    // header size
+	copy(hdr[8:12], "VP90")                                        // codec FourCC
+	binary.LittleEndian.PutUint16(hdr[12:14], 640)                 // width
+	binary.LittleEndian.PutUint16(hdr[14:16], 480)                 // height
+	binary.LittleEndian.PutUint32(hdr[16:20], 30)                  // timebase denominator (frame rate)
+	binary.LittleEndian.PutUint32(hdr[20:24], 1)                   // timebase numerator
 	binary.LittleEndian.PutUint32(hdr[24:28], uint32(len(frames))) // frame count
 	f.Write(hdr[:])
 
@@ -52,6 +52,7 @@ func TestNewCamerasDisk(t *testing.T) {
 	}
 
 	src := cams.NewSource()
+	defer src.Close()
 
 	// Read all 3 frames (2 from a.ivf + 1 from b.ivf)
 	for i := 0; i < 3; i++ {
@@ -88,7 +89,9 @@ func TestNewCamerasInMemory(t *testing.T) {
 
 	// Two independent sources from the same Cameras should track position independently.
 	src1 := cams.NewSource()
+	defer src1.Close()
 	src2 := cams.NewSource()
+	defer src2.Close()
 
 	d1, _, _ := src1.NextFrame()
 	d2, _, _ := src2.NextFrame()
@@ -99,7 +102,7 @@ func TestNewCamerasInMemory(t *testing.T) {
 	}
 
 	// Advance src1 past all frames; src2 should still be at frame 1.
-	src1.NextFrame() // frame 1
+	src1.NextFrame()            // frame 1
 	d1, _, _ = src1.NextFrame() // wraps to frame 0
 	d2, _, _ = src2.NextFrame() // frame 1
 

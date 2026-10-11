@@ -1,0 +1,32 @@
+package main
+
+import (
+	"context"
+	"embed"
+	"io/fs"
+	"log"
+	"os"
+
+	"github.com/rtcbench/rtcbench"
+
+	"__MODULE__/plugin"
+)
+
+//go:embed all:web/dist plugin.yml
+var frontend embed.FS
+
+func main() {
+	web, err := fs.Sub(frontend, "web/dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := rtcbench.Run(context.Background(), os.Args[1:], rtcbench.Options{
+		Web:     web,
+		Plugins: frontend,
+		Register: func(client *rtcbench.Client) {
+			client.RegisterPlugin("__PLUGIN__", plugin.New)
+		},
+	}); err != nil {
+		log.Fatal(err)
+	}
+}

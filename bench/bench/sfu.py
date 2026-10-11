@@ -30,8 +30,8 @@ def setup_machines(ssh, cluster):
       - livekit-server    -> SFU machines at REMOTE_LIVEKIT_BIN
       - IVF files         -> sender machines at REMOTE_IVF_DIR
     """
-    sender_hosts = list(cluster.get("senders", []))
-    viewer_hosts = [cluster["viewer"]] if "viewer" in cluster else []
+    sender_hosts = cluster.get("senders", [cluster["sender"]] if "sender" in cluster else [])
+    viewer_hosts = [cluster["viewer"]] if "viewer" in cluster else cluster.get("receivers", [])
     sfu_hosts = list(cluster.get("sfu", []))
 
     rtcbench_bin = os.path.join(BINARIES_DIR, "rtcbench")
@@ -41,7 +41,7 @@ def setup_machines(ssh, cluster):
         raise FileNotFoundError(
             f"rtcbench binary not found at {rtcbench_bin}. "
             "Build with: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "
-            "go build -o bench/binaries/rtcbench ./cmd/rtcbench")
+            "go build -trimpath -o bench/binaries/rtcbench ./cmd/rtcbench")
     if not os.path.exists(livekit_bin):
         raise FileNotFoundError(
             f"livekit-server binary not found at {livekit_bin}. "
@@ -129,7 +129,7 @@ def start_sfu(ssh, sfu_host, sfu_name, cluster=None):
             "    stream_allocator:\n"
             "      min_channel_capacity: 10000000000\n"
             "keys:\n"
-            "  devkey: secret\n"
+            "  devkey: secret-secret-secret-secret-secret\n"
             "room:\n"
             "  auto_create: true\n"
             "  departure_timeout: 5\n"

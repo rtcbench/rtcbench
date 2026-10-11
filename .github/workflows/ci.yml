@@ -23,8 +23,26 @@ jobs:
       - name: Build (make)
         run: make
 
+      - name: Web app tests
+        working-directory: packages/app
+        run: bun run test
+
       - name: Go tests
         run: make test
+
+      - name: App browser tests
+        working-directory: e2e/playwright/app
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+          bun run check
+          bun run test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: app-browser-results
+          path: e2e/playwright/app/test-results
 
   e2e-janus:
     name: e2e – Janus

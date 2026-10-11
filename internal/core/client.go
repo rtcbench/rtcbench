@@ -25,8 +25,8 @@ const (
 	Sender UserRole = "sender"
 	// Both is a mixed-role participant that simultaneously publishes its own
 	// video (like Sender) and subscribes to every other participant (like
-	// Viewer), i.e. a full conference participant. Currently wired for the
-	// LiveKit plugin; other plugins return ErrUnsupportedRole.
+	// Viewer), i.e. a full conference participant
+	// Plugins without mixed-role support return ErrUnsupportedRole
 	Both UserRole = "both"
 )
 

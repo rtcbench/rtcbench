@@ -1,17 +1,26 @@
 import * as os from 'node:os';
 
+const numWorkers = os.cpus().length;
+const signalingPort = Number(process.env['HTTP_PORT'] || 4443);
+const mediaPort = Number(process.env['MEDIASOUP_MEDIA_PORT'] || 44444);
+const lastMediaPort = mediaPort + numWorkers - 1;
+if (!Number.isInteger(mediaPort) || mediaPort < 1 || lastMediaPort > 65535 ||
+	(signalingPort >= mediaPort && signalingPort <= lastMediaPort)) {
+	throw new Error(`Invalid media ports ${mediaPort}-${lastMediaPort} for ${numWorkers} workers; ports must fit within 1-65535 and not overlap signaling`);
+}
+
 export const config = {
 	domain: process.env['DOMAIN'] || 'localhost',
 	http: {
 		listenIp: '0.0.0.0',
-		listenPort: Number(process.env['HTTP_PORT'] || 4443),
+		listenPort: signalingPort,
 		tls: {
 			cert: '/app/tls.crt',
 			key: '/app/tls.key',
 		},
 	},
 	mediasoup: {
-		numWorkers: Object.keys(os.cpus()).length,
+		numWorkers,
 		workerSettings: {
 			dtlsCertificateFile: undefined,
 			dtlsPrivateKeyFile: undefined,
@@ -35,13 +44,13 @@ export const config = {
 					protocol: 'udp',
 					ip: process.env['MEDIASOUP_LISTEN_IP'] || '0.0.0.0',
 					announcedAddress: process.env['MEDIASOUP_ANNOUNCED_ADDRESS'],
-					port: 44444,
+					port: mediaPort,
 				},
 				{
 					protocol: 'tcp',
 					ip: process.env['MEDIASOUP_LISTEN_IP'] || '0.0.0.0',
 					announcedAddress: process.env['MEDIASOUP_ANNOUNCED_ADDRESS'],
-					port: 44444,
+					port: mediaPort,
 				},
 			],
 		},

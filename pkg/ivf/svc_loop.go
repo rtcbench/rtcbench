@@ -73,6 +73,7 @@ func SVCLoopIntoTrackUntil(
 	cfg SVCConfig,
 	targetBitrate func() int, // may be nil
 ) {
+	defer src.Close()
 	payloader := &vp9.SVCPayloader{
 		Config: vp9.SVCLayerConfig{
 			NumSpatialLayers:  cfg.NumSpatialLayers,

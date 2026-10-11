@@ -1,0 +1,18 @@
+RTCBENCH ?= ../rtcbench
+
+.PHONY: all web
+all: web
+	go mod edit "-replace=github.com/rtcbench/rtcbench=$(abspath $(RTCBENCH))"
+	go mod tidy
+	go build -trimpath -o rtcbench .
+	mkdir -p rtcbench-data/configs
+	cp -n rtcbench.yml rtcbench-data/rtcbench.yml
+	cp -n benchmark.yml rtcbench-data/configs/__PLUGIN__.yml
+
+web:
+	cd "$(RTCBENCH)/packages" && bun install --frozen-lockfile
+	cd "$(RTCBENCH)/packages/admin" && bun run --bun build
+	cd "$(RTCBENCH)/packages/lab" && bun run --bun build
+	cd "$(RTCBENCH)/packages/app" && bun run --bun build
+	cd web && bun install
+	cd web && bun run --bun build "$(abspath $(RTCBENCH))"

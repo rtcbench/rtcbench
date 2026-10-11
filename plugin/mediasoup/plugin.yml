@@ -1,0 +1,7 @@
+id: mediasoup
+name: mediasoup
+description: Benchmark mediasoup rooms
+dockerfile: ../../docker/mediasoup/Dockerfile
+build_context:
+  - Dockerfile
+  - config.mjs

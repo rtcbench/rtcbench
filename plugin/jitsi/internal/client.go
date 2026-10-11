@@ -3,6 +3,7 @@ package jitsi
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
@@ -16,6 +17,8 @@ type Client struct {
 	pipeline           *rtcbench.StatsPipeline
 	log                *log.Logger
 	serverIP           string
+	boshURL            string
+	domain             string
 	clientIP           string
 	statsBufferSize    int
 	packetCaptureDir   string
@@ -109,6 +112,11 @@ func (s *Session) resetPublishing() {
 
 func NewClient(e rtcbench.PluginEnv) (*Client, error) {
 	cfg := e.Config()
+	options, _ := cfg.Spec.PluginConfig["jitsi"].(map[string]any)
+	boshURL, domain, err := signaling(cfg.Spec.Network.ServerIP, options)
+	if err != nil {
+		return nil, err
+	}
 
 	pipeline := rtcbench.NewStatsPipeline(e)
 
@@ -121,12 +129,30 @@ func NewClient(e rtcbench.PluginEnv) (*Client, error) {
 		pipeline:         pipeline,
 		log:              e.LogRegistry().NewLogger("jitsi", ""),
 		serverIP:         cfg.Spec.Network.ServerIP,
+		boshURL:          boshURL,
+		domain:           domain,
 		clientIP:         cfg.Spec.Network.ClientIP,
 		statsBufferSize:  cfg.Spec.Conference.StatsBufferSize,
 		packetCaptureDir: pcapDir,
 		svcConfig:        cfg.Spec.Conference.Cameras.SVC,
 		impairmentRouter: e.ImpairmentRouter(),
 	}, nil
+}
+
+func signaling(serverIP string, options map[string]any) (string, string, error) {
+	endpoint, _ := options["boshURL"].(string)
+	if endpoint == "" {
+		endpoint = "https://" + serverIP + "/http-bind"
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return "", "", fmt.Errorf("jitsi: invalid boshURL %q", endpoint)
+	}
+	domain, _ := options["domain"].(string)
+	if domain == "" {
+		domain = u.Hostname()
+	}
+	return endpoint, domain, nil
 }
 
 func (c *Client) SetRecording(enabled bool, directory string) {

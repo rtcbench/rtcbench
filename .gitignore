@@ -1,4 +1,7 @@
 # rtcbench outputs
+node_modules/
+dist/
+*.tgz
 graphs/
 logs/
 /rtcbench-data/

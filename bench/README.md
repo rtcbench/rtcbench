@@ -14,7 +14,7 @@ Prerequisites: Go 1.23+, Docker.
 # From the repo root:
 
 # 1. Build rtcbench binary
-go build -o bench/binaries/rtcbench ./cmd/rtcbench
+go build -trimpath -o bench/binaries/rtcbench ./cmd/rtcbench
 
 # 2. Build the LiveKit SFU image
 docker build -t rtcbench-livekit:latest docker/livekit

@@ -66,16 +66,34 @@ func TestClientMetricsSnapshotTracksRunMetrics(t *testing.T) {
 	if histogram.Count != 1 {
 		t.Fatalf("join histogram count = %d, want 1", histogram.Count)
 	}
-	if histogram.Max <= 0 {
-		t.Fatalf("join histogram max = %f, want > 0", histogram.Max)
+	if histogram.Max < 0 {
+		t.Fatalf("join histogram max = %f, want >= 0", histogram.Max)
 	}
 
 	sessionHistogram := snapshot.Histogram(metricSessionDuration, labels)
 	if sessionHistogram.Count != 1 {
 		t.Fatalf("session histogram count = %d, want 1", sessionHistogram.Count)
 	}
-	if sessionHistogram.Max <= 0 {
-		t.Fatalf("session histogram max = %f, want > 0", sessionHistogram.Max)
+	if sessionHistogram.Max < 0 {
+		t.Fatalf("session histogram max = %f, want >= 0", sessionHistogram.Max)
+	}
+}
+
+func TestMetricsRecordsZeroAndNonzeroDurations(t *testing.T) {
+	m := newRunMetricsCollector()
+	labels := Labels{metricLabelPlugin: "fake"}
+	for _, duration := range []float64{0, 0.25} {
+		m.RecordOperationResult(labels, "join", duration, nil)
+		m.ObserveSessionDuration(labels, duration)
+	}
+	snapshot := m.Snapshot()
+	for _, h := range []HistogramSnapshot{
+		snapshot.Histogram(metricOperationDuration, withLabel(labels, metricLabelOp, "join")),
+		snapshot.Histogram(metricSessionDuration, labels),
+	} {
+		if h.Count != 2 || h.Sum != 0.25 || h.Min != 0 || h.Max != 0.25 {
+			t.Fatalf("histogram = %+v, want both zero and 0.25-second samples", h)
+		}
 	}
 }
 

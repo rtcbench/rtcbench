@@ -5,6 +5,7 @@ Infrastructure (janus/jitsi) runs in Docker Compose (fixtures in conftest.py).
 rtcbench itself runs as a Docker container per test, joined to the infra network.
 """
 import contextlib
+import os
 import subprocess
 import tempfile
 import time
@@ -15,6 +16,14 @@ import requests
 import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
+
+
+def _docker_path(path: Path) -> str:
+    if path.is_relative_to(REPO_ROOT):
+        root = os.environ.get("RTCBENCH_HOST_REPO", str(REPO_ROOT))
+        return f"{root}/{path.relative_to(REPO_ROOT)}"
+    return str(path)
+
 
 # When the test runner itself is in a Docker container (local dev via Makefile),
 # published ports are reachable via host.docker.internal, not localhost.
@@ -196,10 +205,10 @@ def rtcbench_run(
     config = Path(config)
 
     if config.is_absolute():
-        ci_mounts = ["-v", f"{config}:/tmp/e2e-config.yml:ro"]
+        ci_mounts = ["--mount", f"type=bind,src={_docker_path(config)},dst=/tmp/e2e-config.yml,readonly"]
         container_config = "/tmp/e2e-config.yml"
     else:
-        ci_mounts = ["-v", f"{REPO_ROOT / 'ci'}:/ci:ro"]
+        ci_mounts = ["--mount", f"type=bind,src={_docker_path(REPO_ROOT / 'ci')},dst=/ci,readonly"]
         container_config = f"/ci/{config}"
 
     env_flags = []
@@ -216,15 +225,15 @@ def rtcbench_run(
         "docker", "run", "--rm", "--name", name,
         "--network", network,
         "-p", "9090",
-        "-v", f"{video_dir}:/test-videos:ro",
+        "--mount", f"type=bind,src={_docker_path(video_dir)},dst=/test-videos,readonly",
         *env_flags,
         *cap_flags,
         *ci_mounts,
     ]
     if recording_dir is not None:
-        cmd += ["-v", f"{recording_dir}:/tmp/recordings"]
+        cmd += ["--mount", f"type=bind,src={_docker_path(recording_dir)},dst=/tmp/recordings"]
     if capture_dir is not None:
-        cmd += ["-v", f"{capture_dir}:/tmp/captures"]
+        cmd += ["--mount", f"type=bind,src={_docker_path(capture_dir)},dst=/tmp/captures"]
     cmd += ["rtcbench:latest", container_config]
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
