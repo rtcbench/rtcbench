@@ -1,0 +1,17 @@
+apiVersion: rtcbench/v1
+kind: VideoCallStressTest
+metadata:
+  name: __PLUGIN__
+spec:
+  plugin: __PLUGIN__
+  conference:
+    name: room
+    totalRooms: 1
+    usersPerRoom: 1
+    joinPolicy:
+      concurrency: 1
+  network:
+    serverIP: 127.0.0.1
+    clientIP: 127.0.0.1
+  logging:
+    directory: rtcbench-data/logs

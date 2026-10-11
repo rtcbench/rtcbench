@@ -30,10 +30,11 @@ type pendingFrame struct {
 	firstArrival int64
 	lastArrival  int64
 	firstSeqNo   uint16
-	nextSeqNo    uint16 // expected next sequence number (firstSeqNo + packetCount)
+	nextSeqNo    uint16 // one past the highest sequence number in this frame
 	packetCount  int
 	totalBytes   int
-	complete     bool // false if any sequence gap detected
+	complete     bool                // false while sequence gaps remain
+	seen         map[uint16]struct{} // allocated only after a gap or duplicate
 }
 
 type FrameStatistics struct {
@@ -113,9 +114,9 @@ type FrameStatistics struct {
 	frameJitterUS float64
 
 	// packet-level RFC 3550 interarrival jitter (EWMA, microseconds)
-	prevPktArrival       int64
-	prevPktRTPTimestamp  uint32
-	packetJitterUS       float64
+	prevPktArrival      int64
+	prevPktRTPTimestamp uint32
+	packetJitterUS      float64
 
 	// framesComplete monotonic count of finalized complete frames
 	framesComplete int64
@@ -238,7 +239,7 @@ func (stats *FrameStatistics) SetOnFrameLost(fn func(nowNano int64)) {
 
 // AcceptPacket updates the stat tracker with information about the newly arrived VP9 RTP packet.
 // seqNo is the RTP sequence number used for frame completeness detection.
-// Out-of-order packets (sequence gap within a frame) mark the frame as incomplete.
+// Sequence gaps mark a frame incomplete only if they remain when it is finalized
 func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, seqNo uint16, rtpTimestamp uint32, nBytes int, payloadDesc *vp9.PayloadDescriptor) {
 	spatialID := payloadDesc.SID
 	temporalID := payloadDesc.TID
@@ -260,7 +261,7 @@ func (stats *FrameStatistics) AcceptPacket(clientReadTime int64, seqNo uint16, r
 		stats.prevPktArrival = clientReadTime
 		stats.prevPktRTPTimestamp = rtpTimestamp
 	} else if int32(rtpTimestamp-stats.prevPktRTPTimestamp) >= 0 {
-		dR := float64(clientReadTime - stats.prevPktArrival)                                   // µs
+		dR := float64(clientReadTime - stats.prevPktArrival)                                  // µs
 		dS := float64(int32(rtpTimestamp-stats.prevPktRTPTimestamp)) * 1_000_000.0 / 90_000.0 // RTP ticks -> µs
 		d := dR - dS
 		if d < 0 {
@@ -393,13 +394,31 @@ func (stats *FrameStatistics) trackFrame(clientReadTime int64, seqNo uint16, rtp
 	}
 
 	// same frame — accumulate
-	if seqNo != stats.currentFrame.nextSeqNo {
-		stats.currentFrame.complete = false
-	}
+	stats.currentFrame.acceptSequence(seqNo)
 	stats.currentFrame.lastArrival = clientReadTime
-	stats.currentFrame.nextSeqNo = seqNo + 1
 	stats.currentFrame.packetCount++
 	stats.currentFrame.totalBytes += nBytes
+}
+
+func (f *pendingFrame) acceptSequence(seq uint16) {
+	if f.seen == nil && seq == f.nextSeqNo {
+		f.nextSeqNo++
+		return
+	}
+	if f.seen == nil {
+		f.seen = make(map[uint16]struct{}, f.packetCount+1)
+		for i := 0; i < f.packetCount; i++ {
+			f.seen[f.firstSeqNo+uint16(i)] = struct{}{}
+		}
+	}
+	f.seen[seq] = struct{}{}
+	if int16(seq-f.firstSeqNo) < 0 {
+		f.firstSeqNo = seq
+	}
+	if int16(seq-f.nextSeqNo) >= 0 {
+		f.nextSeqNo = seq + 1
+	}
+	f.complete = len(f.seen) == int(uint16(f.nextSeqNo-f.firstSeqNo))
 }
 
 // finalizeFrame records completeness and computes frame-level jitter.
@@ -426,8 +445,8 @@ func (stats *FrameStatistics) finalizeFrame(f *pendingFrame) {
 	// frame jitter — RFC 3550 style: D = (Rj-Ri) - (Sj-Si)
 	// Uses RTP timestamps to compensate for expected timing changes (e.g. layer switches).
 	if stats.hasPrevFrame {
-		dR := float64(f.firstArrival - stats.prevFrameFirstArrival)                                     // µs
-		dS := float64(int32(f.rtpTimestamp-stats.prevFrameRTPTimestamp)) * 1_000_000.0 / 90_000.0        // RTP ticks -> µs
+		dR := float64(f.firstArrival - stats.prevFrameFirstArrival)                               // µs
+		dS := float64(int32(f.rtpTimestamp-stats.prevFrameRTPTimestamp)) * 1_000_000.0 / 90_000.0 // RTP ticks -> µs
 		d := dR - dS
 		if d < 0 {
 			d = -d

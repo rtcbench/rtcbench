@@ -92,6 +92,7 @@ func TestDiskSource_MultiFileWrapAround(t *testing.T) {
 	writeTestIVF(t, file2, [][]byte{{0x03, 0x03}})
 
 	src := NewDiskSource([]string{file1, file2})
+	defer src.Close()
 
 	want := [][]byte{
 		{0x01, 0x01}, {0x02, 0x02}, {0x03, 0x03}, // cycle 1
@@ -122,6 +123,7 @@ func TestMemSource_MultiFileWrapAround(t *testing.T) {
 	}
 
 	src := NewMemSource(cams)
+	defer src.Close()
 
 	want := [][]byte{
 		{0x01, 0x01}, {0x02, 0x02}, {0x03, 0x03}, // cycle 1
@@ -150,6 +152,7 @@ func TestDiskSource_FrameDuration(t *testing.T) {
 	writeTestIVF(t, path, [][]byte{{0xAA}, {0xBB}, {0xCC}})
 
 	src := NewDiskSource([]string{path})
+	defer src.Close()
 
 	// First frame: no prior timestamp, defaults to 33ms.
 	_, dur0, err := src.NextFrame()
@@ -190,6 +193,7 @@ func TestMemSource_SingleFileWrap(t *testing.T) {
 	}
 
 	src := NewMemSource(cams)
+	defer src.Close()
 
 	// 2 frames per cycle, read 5 frames: AA BB AA BB AA
 	want := []byte{0xAA, 0xBB, 0xAA, 0xBB, 0xAA}

@@ -1,0 +1,7 @@
+id: livekit
+name: LiveKit
+description: Benchmark LiveKit rooms
+dockerfile: ../../docker/livekit/Dockerfile
+build_context:
+  - Dockerfile
+  - livekit.yaml

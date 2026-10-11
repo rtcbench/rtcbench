@@ -36,11 +36,19 @@ spec:
     directory: ignored
 `
 
-const labEnv = "- name: PLUGIN_ID\n  type: variable\n  value: nope\n- name: TOKEN\n  type: secret\n  value: s3cret\n- name: SERVER_IP\n  type: system\n"
+const labEnv = `- name: PLUGIN_ID
+  type: variable
+  value: nope
+- name: TOKEN
+  type: secret
+  value: s3cret
+- name: SERVER_IP
+  type: system
+`
 
 func newServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
-	s, err := New(t.TempDir(), "test", io.Discard)
+	s, err := New(t.TempDir(), "rtcbench.yml", "test", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +65,9 @@ func do(t *testing.T, h http.Handler, method, path string, body any) *httptest.R
 		reader = strings.NewReader("")
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(method, path, reader))
+	r := httptest.NewRequest(method, path, reader)
+	r.Host = "localhost"
+	h.ServeHTTP(rec, r)
 	return rec
 }
 
@@ -71,8 +81,9 @@ func TestStartRejectsInvalidRequests(t *testing.T) {
 }
 
 func TestRunLifecycle(t *testing.T) {
+	t.Setenv("ROOM_NAME", "research-room_42")
 	var console bytes.Buffer
-	s, err := New(t.TempDir(), "test", &console)
+	s, err := New(t.TempDir(), "rtcbench.yml", "test", &console)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +93,7 @@ func TestRunLifecycle(t *testing.T) {
 	}
 	rec := do(t, h, "POST", "/api/v1/runs", StartRequest{
 		ConfigName: "unknown plugin",
-		Config:     config,
+		Config:     strings.Replace(config, "name: room", "name: $env:ROOM_NAME", 1),
 		EnvName:    "lab",
 	})
 	if rec.Code != http.StatusCreated {
@@ -92,6 +103,9 @@ func TestRunLifecycle(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&run)
 	if len(run.ID) != 36 || run.Name != "unknown plugin" || run.ConfigName != "unknown plugin" || run.EnvName != "lab" || len(run.Env) != 1 || run.Env["PLUGIN_ID"] != "nope" {
 		t.Fatalf("run: %+v", run)
+	}
+	if run.RoomName != "research-room_42" {
+		t.Fatalf("room name was not resolved: %q", run.RoomName)
 	}
 	path := "/api/v1/runs/" + run.ID
 
@@ -137,7 +151,12 @@ func TestRunLifecycle(t *testing.T) {
 	for _, f := range files {
 		names[f.Path] = true
 	}
-	for _, want := range []string{"config.yml", "run.json", "viewers.json", "logs/combined.log"} {
+	for _, want := range []string{
+		"config.yml",
+		"run.json",
+		"viewers.json",
+		"logs/combined.log",
+	} {
 		if !names[want] {
 			t.Fatalf("missing %s in %v", want, names)
 		}
@@ -159,7 +178,12 @@ func TestRunLifecycle(t *testing.T) {
 	}
 
 	logs := console.String()
-	for _, want := range []string{"run " + run.ID + " started", "run " + run.ID + " failed", "PATCH " + path + " 200", "DELETE " + path + " 204"} {
+	for _, want := range []string{
+		"run " + run.ID + " started",
+		"run " + run.ID + " failed",
+		"PATCH " + path + " 200",
+		"DELETE " + path + " 204",
+	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("server log missing %q:\n%s", want, logs)
 		}
@@ -167,19 +191,63 @@ func TestRunLifecycle(t *testing.T) {
 }
 
 func TestLoadMarksRunningRunsInterrupted(t *testing.T) {
-	dir := t.TempDir()
-	id := uuid.NewString()
-	runDir := filepath.Join(dir, "runs", "lab", "old", "run-20260101T000000.000000Z-"+id)
-	_ = os.MkdirAll(runDir, 0o755)
-	data, _ := json.Marshal(Run{ID: id, Name: "old", Status: StatusRunning, StartedAt: time.Now()})
-	_ = os.WriteFile(filepath.Join(runDir, "run.json"), data, 0o644)
+	for _, field := range []string{"deploymentId", "sfuId"} {
+		t.Run(field, func(t *testing.T) {
+			dir := t.TempDir()
+			id, deploymentID := uuid.NewString(), uuid.NewString()
+			runDir := filepath.Join(dir, "runs", "lab", "old", "run-20260101T000000.000000Z-"+id)
+			if err := os.MkdirAll(runDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			data, _ := json.Marshal(map[string]any{
+				"id":        id,
+				"name":      "old",
+				"roomName":  "research-room_42",
+				"status":    StatusRunning,
+				"startedAt": time.Now(),
+				field:       deploymentID,
+			})
+			if err := os.WriteFile(filepath.Join(runDir, "run.json"), data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			s, err := New(dir, "rtcbench.yml", "test", io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := s.runs[id]
+			if r.RoomName != "research-room_42" || r.DeploymentID != deploymentID || r.Status != StatusInterrupted {
+				t.Fatalf("restored run: %+v", r.Run)
+			}
+			response := do(t, s.Handler(), "GET", "/api/v1/runs/"+id, nil)
+			if !strings.Contains(response.Body.String(), `"deploymentId":"`+deploymentID+`"`) || strings.Contains(response.Body.String(), `"sfuId"`) {
+				t.Fatalf("run response: %s", response.Body)
+			}
+		})
+	}
+}
 
-	s, err := New(dir, "test", io.Discard)
-	if err != nil {
+func TestSystemsStateRename(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "sfus")
+	if err := os.Mkdir(old, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.runs[id].Status; got != StatusInterrupted {
-		t.Fatalf("status %q", got)
+	state := []byte(`{"keys":{},"hosts":{},"deployments":{},"networks":{"test":{"id":"test","name":"Research","cidr":"10.0.0.0/24"}}}`)
+	if err := os.WriteFile(filepath.Join(old, "state.json"), state, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		s, err := New(dir, "rtcbench.yml", "test", io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := do(t, s.Handler(), "GET", "/api/v1/systems", nil)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"Research"`) {
+			t.Fatalf("systems response: %d %s", response.Code, response.Body)
+		}
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("old systems directory remains: %v", err)
 	}
 }
 
@@ -224,20 +292,134 @@ func TestDocuments(t *testing.T) {
 
 func TestWebServesIndexForPages(t *testing.T) {
 	s, h := newServer(t)
-	s.web = fstest.MapFS{"index.html": {Data: []byte("app")}, "main.js": {Data: []byte("js")}}
-	for path, want := range map[string]string{"/": "app", "/runs": "app", "/config/two": "app", "/environment/two": "app", "/main.js": "js"} {
-		if body := do(t, h, "GET", path, nil).Body.String(); body != want {
-			t.Fatalf("%s: %q", path, body)
+	s.Web = fstest.MapFS{"index.html": {Data: []byte("app")}, "main.js": {Data: []byte("js")}}
+	for path, want := range map[string]string{
+		"/":                "app",
+		"/runs":            "app",
+		"/config/two":      "app",
+		"/environment/two": "app",
+		"/main.js":         "js",
+	} {
+		response := do(t, h, "GET", path, nil)
+		if response.Body.String() != want || response.Header().Get("Cache-Control") != "no-cache" {
+			t.Fatalf("%s: %q %v", path, response.Body.String(), response.Header())
 		}
+	}
+	s.Web = fstest.MapFS{"index.html": {Data: []byte(`<base href="/">`)}}
+	for prefix, want := range map[string]string{"/app": "/app/", "//evil.example": "/", `/\evil.example`: "/"} {
+		r := httptest.NewRequest("GET", "/systems/deployments/new/instances/new", nil)
+		r.Header.Set("X-Forwarded-Prefix", prefix)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Body.String() != `<base href="`+want+`">` {
+			t.Fatalf("prefix %q: %s", prefix, w.Body.String())
+		}
+	}
+}
+
+func TestVersionedWebAssets(t *testing.T) {
+	s, h := newServer(t)
+	s.version = `build"&1`
+	s.Web = fstest.MapFS{"index.html": {Data: []byte(`<script src="main.js"></script><link href="styles.css">`)}}
+	want := `<script src="main.js?v=build%22%261"></script><link href="styles.css?v=build%22%261">`
+	if body := do(t, h, "GET", "/configs", nil).Body.String(); body != want {
+		t.Fatalf("versioned assets: %s", body)
+	}
+}
+
+func TestWelcomeSettings(t *testing.T) {
+	for _, test := range []struct {
+		name, config     string
+		welcome, invalid bool
+	}{
+		{
+			"missing",
+			"",
+			false,
+			false,
+		},
+		{
+			"empty",
+			"\n",
+			false,
+			false,
+		},
+		{
+			"defaults",
+			"{}",
+			false,
+			false,
+		},
+		{
+			"enabled",
+			"welcome: true",
+			true,
+			false,
+		},
+		{
+			"disabled",
+			"welcome: false",
+			false,
+			false,
+		},
+		{
+			"malformed",
+			"welcome: [",
+			false,
+			true,
+		},
+		{
+			"wrong type",
+			"welcome: sometimes",
+			false,
+			true,
+		},
+		{
+			"unknown setting",
+			"welcom: true",
+			false,
+			true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if test.config != "" {
+				if err := os.WriteFile(filepath.Join(dir, "rtcbench.yml"), []byte(test.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s, err := New(dir, "rtcbench.yml", "test", io.Discard)
+			if test.invalid {
+				if err == nil || !strings.Contains(err.Error(), "rtcbench.yml") {
+					t.Fatalf("expected settings error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Web = fstest.MapFS{"index.html": {Data: []byte(`<html data-welcome="false"><base href="/">`)}}
+			r := httptest.NewRequest("GET", "/welcome", nil)
+			r.Header.Set("X-Forwarded-Prefix", "/app")
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			want := "false"
+			if test.welcome {
+				want = "true"
+			}
+			if w.Code != 200 || w.Body.String() != `<html data-welcome="`+want+`"><base href="/app/">` || w.Header().Get("Cache-Control") != "no-cache" {
+				t.Fatalf("welcome=%v: %d %s", test.welcome, w.Code, w.Body.String())
+			}
+		})
 	}
 }
 
 func TestExamples(t *testing.T) {
 	s, h := newServer(t)
-	s.examples = t.TempDir()
-	_ = os.MkdirAll(filepath.Join(s.examples, "jitsi"), 0o755)
-	_ = os.WriteFile(filepath.Join(s.examples, "one.yml"), []byte("a: 1\n"), 0o644)
-	_ = os.WriteFile(filepath.Join(s.examples, "jitsi", "two.yml"), []byte("b: 2\n"), 0o644)
+	s.Examples = fstest.MapFS{
+		"one.yml":       {Data: []byte("a: 1\n")},
+		"jitsi/two.yml": {Data: []byte("b: 2\n")},
+	}
 
 	var examples Examples
 	_ = json.NewDecoder(do(t, h, "GET", "/api/v1/examples", nil).Body).Decode(&examples)
@@ -318,7 +500,12 @@ func TestEnvSecrets(t *testing.T) {
 	if code := do(t, h, "PUT", "/api/v1/system-overrides", DocumentRequest{YAML: "- name: PLUGIN_ID\n  type: variable\n  value: nope\n- name: TOKEN\n  type: secret\n  value: s3cret\n"}).Code; code != http.StatusOK {
 		t.Fatalf("overrides: %d", code)
 	}
-	for _, path := range []string{"/api/v1/environments", "/api/v1/environments/lab", "/environment/lab.yml", "/api/v1/system-overrides"} {
+	for _, path := range []string{
+		"/api/v1/environments",
+		"/api/v1/environments/lab",
+		"/environment/lab.yml",
+		"/api/v1/system-overrides",
+	} {
 		if body := do(t, h, "GET", path, nil).Body.String(); !strings.Contains(body, "TOKEN") || strings.Contains(body, "s3cret") {
 			t.Fatalf("%s: %s", path, body)
 		}

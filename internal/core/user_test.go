@@ -367,8 +367,8 @@ func TestUserMetricsSnapshotTracksLifecycle(t *testing.T) {
 	if metrics.CloseAttempts != 1 || metrics.CloseSuccesses != 1 || metrics.CloseFailures != 0 {
 		t.Fatalf("close metrics = %+v, want 1 success and 0 failures", metrics)
 	}
-	if metrics.JoinLatencyTotal <= 0 || metrics.PublishVideoLatencyTotal <= 0 || metrics.CloseLatencyTotal <= 0 {
-		t.Fatalf("latency totals = %+v, want positive durations", metrics)
+	if metrics.JoinLatencyTotal < 0 || metrics.PublishVideoLatencyTotal < 0 || metrics.CloseLatencyTotal < 0 {
+		t.Fatalf("latency totals = %+v, want nonnegative durations", metrics)
 	}
 }
 

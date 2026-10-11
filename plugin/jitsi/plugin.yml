@@ -1,0 +1,8 @@
+id: jitsi
+name: Jitsi
+description: Benchmark Jitsi Meet conferences
+dockerfile: ../../docker/jitsi/Dockerfile
+build_context:
+  - Dockerfile
+  - config.additions.js
+  - bench-sender.html

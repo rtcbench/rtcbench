@@ -13,6 +13,7 @@ import (
 // through their content indefinitely.
 type FrameSource interface {
 	NextFrame() (data []byte, dur time.Duration, err error)
+	Close() error
 }
 
 // diskSource reads IVF files from disk, cycling through paths.
@@ -33,6 +34,16 @@ func NewDiskSource(paths []string) FrameSource {
 	return &diskSource{paths: paths}
 }
 
+func (s *diskSource) Close() error {
+	if s.file == nil {
+		return nil
+	}
+	err := s.file.Close()
+	s.file = nil
+	s.reader = nil
+	return err
+}
+
 func (s *diskSource) NextFrame() ([]byte, time.Duration, error) {
 	defaultDur := 33 * time.Millisecond
 
@@ -46,8 +57,7 @@ func (s *diskSource) NextFrame() ([]byte, time.Duration, error) {
 
 			r, header, err := ivfreader.NewWith(f)
 			if err != nil {
-				s.file.Close()
-				s.file = nil
+				s.Close()
 				return nil, 0, fmt.Errorf("read %s: %w", s.paths[s.idx], err)
 			}
 			s.reader = r
@@ -59,9 +69,7 @@ func (s *diskSource) NextFrame() ([]byte, time.Duration, error) {
 		frame, fh, err := s.reader.ParseNextFrame()
 		if err != nil || (frame == nil && fh == nil) {
 			// End of file — close and advance to next.
-			s.file.Close()
-			s.file = nil
-			s.reader = nil
+			s.Close()
 			s.idx = (s.idx + 1) % len(s.paths)
 			continue
 		}
@@ -96,6 +104,8 @@ type memSource struct {
 func NewMemSource(cams *PreloadedCameras) FrameSource {
 	return &memSource{cams: cams}
 }
+
+func (s *memSource) Close() error { return nil }
 
 func (s *memSource) NextFrame() ([]byte, time.Duration, error) {
 	f := s.cams.Files[s.fileIdx][s.frameIdx]

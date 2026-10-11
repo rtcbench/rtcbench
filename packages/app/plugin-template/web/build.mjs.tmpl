@@ -1,0 +1,30 @@
+import { build } from "esbuild";
+import { copyFile, readdir, rename } from "node:fs/promises";
+import { resolve } from "node:path";
+
+const source = resolve(process.argv[2] || "../../rtcbench");
+
+await build({
+  entryPoints: ["main.tsx"],
+  outdir: "dist",
+  bundle: true,
+  minify: true,
+  jsx: "automatic",
+  alias: {
+    "@rtcbench/app": resolve(source, "packages/app/dist"),
+    "@rtcbench/admin": resolve(source, "packages/admin/dist"),
+    "@rtcbench/lab": resolve(source, "packages/lab/dist"),
+    react: resolve("node_modules/react"),
+    "react-dom": resolve("node_modules/react-dom"),
+  },
+  loader: { ".svg": "dataurl" },
+});
+await rename("dist/main.css", "dist/styles.css");
+await copyFile("index.html", "dist/index.html");
+await copyFile(resolve(source, "packages/app/dist/wterm-dom-LICENSE"), "dist/wterm-LICENSE");
+
+for (const file of await readdir(resolve(source, "packages/app/dist"))) {
+  if (file.startsWith("docker-") && file.endsWith(".json")) {
+    await copyFile(resolve(source, "packages/app/dist", file), resolve("dist", file));
+  }
+}

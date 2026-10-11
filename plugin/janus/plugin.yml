@@ -1,0 +1,9 @@
+id: janus
+name: Janus
+description: Benchmark Janus VideoRoom
+dockerfile: ../../docker/janus/Dockerfile
+build_context:
+  - Dockerfile
+  - janus.jcfg
+  - janus.plugin.videoroom.jcfg
+  - janus.transport.http.jcfg

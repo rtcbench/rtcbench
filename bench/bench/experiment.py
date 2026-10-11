@@ -374,7 +374,7 @@ module.exports = function({{sessions, id, params}}) {{
             ws_port = self.cluster.get("livekit_ws_port", 7880)
             return (f"http://{sfu_ip}:{web_port}/"
                     f"?ws=ws://{sfu_ip}:{ws_port}"
-                    f"&room={room_name}&key=devkey&secret=secret")
+                    f"&room={room_name}&key=devkey&secret=secret-secret-secret-secret-secret")
         elif self.sfu_name == "mediasoup":
             web_port = self.cluster.get("mediasoup_web_port", 8080)
             return (f"https://{sfu_ip}:{web_port}/"
@@ -499,8 +499,8 @@ module.exports = function({{sessions, id, params}}) {{
                  total_checked, expected_total,
                  total_checked / expected_total * 100 if expected_total > 0 else 0)
 
-        if total_checked < 50:
-            log.warning("Only %d viewers reported stats (need >=50)", total_checked)
+        if total_checked < expected_total:
+            log.warning("Only %d/%d viewers reported stats", total_checked, expected_total)
             self._health_reason = "TOO_FEW_VIEWERS"
             return False
 

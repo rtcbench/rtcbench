@@ -162,7 +162,11 @@ func (d documents) save(w http.ResponseWriter, r *http.Request, current string, 
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if err := root.WriteFile(file, data, 0o644); err != nil {
+	mode := fs.FileMode(0o644)
+	if d.redact != nil {
+		mode = 0o600
+	}
+	if err := root.WriteFile(file, data, mode); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -224,7 +228,10 @@ func (s *Server) page(d documents) http.HandlerFunc {
 
 func (s *Server) exampleFiles() []string {
 	files := []string{}
-	_ = fs.WalkDir(os.DirFS(s.examples), ".", func(file string, d fs.DirEntry, err error) error {
+	if s.Examples == nil {
+		return files
+	}
+	_ = fs.WalkDir(s.Examples, ".", func(file string, d fs.DirEntry, err error) error {
 		if err == nil && !d.IsDir() && strings.HasSuffix(file, ".yml") {
 			files = append(files, file)
 		}
@@ -250,7 +257,7 @@ func (s *Server) copyExamples(w http.ResponseWriter, _ *http.Request) {
 		if _, err := root.Stat(file); err == nil {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(s.examples, file))
+		data, err := fs.ReadFile(s.Examples, file)
 		if err == nil {
 			err = root.MkdirAll(path.Dir(file), 0o755)
 		}

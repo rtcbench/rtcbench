@@ -1,0 +1,24 @@
+package plugin
+
+import (
+	"context"
+
+	"github.com/rtcbench/rtcbench"
+)
+
+type Plugin struct{}
+
+func New() rtcbench.Plugin { return &Plugin{} }
+
+func (*Plugin) Setup(context.Context, rtcbench.PluginEnv) error { return nil }
+func (*Plugin) Shutdown(context.Context) error                  { return nil }
+
+func (*Plugin) NewParticipant(context.Context, *rtcbench.UserConfig) (rtcbench.Participant, error) {
+	return &Participant{}, nil
+}
+
+type Participant struct{}
+
+func (*Participant) JoinRoom(context.Context, *rtcbench.JoinRequest) error   { return nil }
+func (*Participant) LeaveRoom(context.Context, *rtcbench.LeaveRequest) error { return nil }
+func (*Participant) Close() error                                            { return nil }

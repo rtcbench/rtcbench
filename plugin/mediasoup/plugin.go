@@ -15,6 +15,7 @@ import (
 	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
+	"github.com/rtcbench/rtcbench/plugin/mediasoup/deployment"
 	ms "github.com/rtcbench/rtcbench/plugin/mediasoup/internal"
 )
 
@@ -45,6 +46,8 @@ type Plugin struct {
 }
 
 // NewPlugin returns a zero-initialized mediasoup plugin.
+var Deployment = deployment.Definition
+
 func NewPlugin() rtcbench.Plugin {
 	return &Plugin{}
 }

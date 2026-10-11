@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "emitDeclarationOnly": false,
+    "rootDir": "..",
+    "types": ["bun"]
+  },
+  "include": ["*.ts", "web", "../lab", "../admin"],
+  "exclude": ["**/dist", "**/node_modules"]
+}

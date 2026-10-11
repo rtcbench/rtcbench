@@ -16,6 +16,7 @@ import (
 	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
+	"github.com/rtcbench/rtcbench/plugin/janus/deployment"
 	janus "github.com/rtcbench/rtcbench/plugin/janus/internal"
 )
 
@@ -44,13 +45,22 @@ type Plugin struct {
 	observeReceiverRTT func(string, time.Duration)
 }
 
+var Deployment = deployment.Definition
+
 func NewPlugin() rtcbench.Plugin {
 	return &Plugin{}
 }
 
 func (p *Plugin) Setup(ctx context.Context, e rtcbench.PluginEnv) error {
 	baseURL := e.Config().Spec.PluginConfig[PluginID].(map[string]any)[cfgServerRoot].(string)
-	allowInsecure := e.Config().Spec.PluginConfig[PluginID].(map[string]any)[cfgAllowInsecure].(bool)
+	allowInsecure := false
+	if value, present := e.Config().Spec.PluginConfig[PluginID].(map[string]any)[cfgAllowInsecure]; present {
+		var valid bool
+		allowInsecure, valid = value.(bool)
+		if !valid {
+			return fmt.Errorf("janus: %s must be a boolean", cfgAllowInsecure)
+		}
+	}
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if allowInsecure {

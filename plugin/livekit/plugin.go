@@ -15,6 +15,7 @@ import (
 	"github.com/rtcbench/rtcbench/pkg/log"
 	"github.com/rtcbench/rtcbench/pkg/pionutil"
 	"github.com/rtcbench/rtcbench/pkg/viewer"
+	"github.com/rtcbench/rtcbench/plugin/livekit/deployment"
 	lkinternal "github.com/rtcbench/rtcbench/plugin/livekit/internal"
 )
 
@@ -48,6 +49,8 @@ type Plugin struct {
 
 	subscriptionCount int32 // atomic
 }
+
+var Deployment = deployment.Definition
 
 func NewPlugin() rtcbench.Plugin {
 	return &Plugin{}

@@ -4,27 +4,23 @@ import (
 	"fmt"
 
 	"github.com/goccy/go-yaml"
-	"github.com/rtcbench/rtcbench"
+	"github.com/rtcbench/rtcbench/internal/core"
 	"github.com/rtcbench/rtcbench/pkg/log"
-	"github.com/rtcbench/rtcbench/plugin/janus"
-	"github.com/rtcbench/rtcbench/plugin/jitsi"
-	"github.com/rtcbench/rtcbench/plugin/livekit"
-	"github.com/rtcbench/rtcbench/plugin/mediasoup"
 )
 
-func LoadConfig(data []byte, lookup LookupFunc) (*rtcbench.Config, error) {
+func LoadConfig(data []byte, lookup LookupFunc) (*core.Config, error) {
 	data, err := RenderEnvYAML(data, lookup)
 	if err != nil {
 		return nil, err
 	}
-	var yamlConfig rtcbench.YAMLConfig
+	var yamlConfig core.YAMLConfig
 	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
 		return nil, err
 	}
 	return yamlConfig.IntoConfig()
 }
 
-func Logs(lc rtcbench.LoggingConfig) (*log.Registry, error) {
+func Logs(lc core.LoggingConfig) (*log.Registry, error) {
 	levels := make(map[string]log.Level, len(lc.Streams))
 	for _, s := range lc.Streams {
 		lvl, err := log.ParseLevel(s.Level)
@@ -55,11 +51,4 @@ func Logs(lc rtcbench.LoggingConfig) (*log.Registry, error) {
 	}
 
 	return log.NewRegistry(handlers, levels), nil
-}
-
-func RegisterPlugins(client *rtcbench.Client) {
-	client.RegisterPlugin(jitsi.PluginID, jitsi.NewPlugin)
-	client.RegisterPlugin(janus.PluginID, janus.NewPlugin)
-	client.RegisterPlugin(livekit.PluginID, livekit.NewPlugin)
-	client.RegisterPlugin(mediasoup.PluginID, mediasoup.NewPlugin)
 }

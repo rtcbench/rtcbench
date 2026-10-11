@@ -9,6 +9,7 @@ import (
 	"github.com/rtcbench/rtcbench"
 	ivfpkg "github.com/rtcbench/rtcbench/pkg/ivf"
 	"github.com/rtcbench/rtcbench/pkg/pionutil"
+	"github.com/rtcbench/rtcbench/plugin/jitsi/deployment"
 	jitsi "github.com/rtcbench/rtcbench/plugin/jitsi/internal"
 )
 
@@ -20,6 +21,8 @@ type Plugin struct {
 	impairmentRouter   *pionutil.ImpairmentRouter
 	observeReceiverRTT func(string, time.Duration)
 }
+
+var Deployment = deployment.Definition
 
 func NewPlugin() rtcbench.Plugin {
 	return &Plugin{}

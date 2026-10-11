@@ -15,8 +15,7 @@ import (
 
 const (
 	// DefaultPacketsPerSample is the default number of packets between stats
-	// samples. LiveKit overrides this with 200 to match its lower-bitrate SVC
-	// configuration; all other plugins use the default.
+	// samples; plugins may override it for their stream characteristics
 	DefaultPacketsPerSample = 1000
 
 	// DefaultTrackBufferSize is the byte buffer length for reading RTP packets
@@ -165,8 +164,6 @@ loop:
 			continue
 		}
 
-		packetsInSample++
-
 		if seq != 0 && pkt.SequenceNumber != seq+1 {
 			v.pub.IncrError(vp9_stats.ErrViewerSeqNoJumpID)
 			// fall-through
@@ -177,12 +174,17 @@ loop:
 		if int(pkt.PayloadType) != vp9RTPPayloadType {
 			continue
 		}
+		// Padding probes use RTP sequence numbers but contain no VP9 frame
+		if pkt.Padding && len(pkt.Payload) == 0 {
+			continue
+		}
 
 		if err = vp9.ParseVP9PayloadDescriptor(pkt.Payload, &vp9PayloadDesc); err != nil {
 			v.pub.IncrError(vp9_stats.ErrViewerParseVP9PayloadID)
 			continue
 		}
 
+		packetsInSample++
 		vp9FrameStats.AcceptPacket(clientReadTime, pkt.SequenceNumber, pkt.Timestamp, len(pkt.Payload), &vp9PayloadDesc)
 
 		// TODO: map[uint32]*vp9.IvfSegmenter to split by SSRC

@@ -1,4 +1,4 @@
-.PHONY: all clean clean-ci clean-screenshots install test \
+.PHONY: all dev cli web clean clean-ci clean-screenshots install test e2e-app \
 	e2e e2e-janus e2e-jitsi e2e-livekit e2e-mediasoup screenshots \
 	_build-all _build-e2e-runner _build-janus _build-jitsi _build-livekit _build-mediasoup \
 	_e2e-run remote-ci remote-run remote-seed remote-status remote-clean remote-estimate \
@@ -10,29 +10,50 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 ifeq ($(shell echo %OS%),Windows_NT)
 which = $(shell where $(1) 2>NUL)
 RM := del /q 2>NUL
+EXE := .exe
 else
 which = $(shell command -v $(1) 2>/dev/null)
 endif
 
 ifneq ($(call which,bun),)
-BUILD_APP := cd app && bun install && bun run build
+RUN_APP := bun run
+INSTALL_PACKAGES := bun install --frozen-lockfile
 else ifneq ($(call which,node),)
-BUILD_APP := cd app && npm install --no-package-lock && npm run build
+RUN_APP := npm run
+INSTALL_PACKAGES := npm install --no-package-lock
 else
-BUILD_APP := @echo Missing bun or node, this build will not have a web UI.
+INSTALL_PACKAGES := echo Missing bun or node
+RUN_APP := echo Skipping
 endif
 
-all:
-	$(BUILD_APP)
-	go build -v $(LDFLAGS) ./cmd/rtcbench
+all: web
+	go build -v -trimpath $(LDFLAGS) ./cmd/rtcbench
 
-install:
-	$(BUILD_APP)
-	go install -v $(LDFLAGS) ./cmd/rtcbench
+install: web
+	go install -v -trimpath $(LDFLAGS) ./cmd/rtcbench
+
+dev:
+	cd packages && bun install --frozen-lockfile
+	go build -tags cli -gcflags="all=-N -l" $(LDFLAGS) -o bin/rtcbench-dev$(EXE) ./cmd/rtcbench
+	cd packages/app && bun run dev $(DEV_ARGS)
+
+cli:
+	go build -v -trimpath -tags cli $(LDFLAGS) ./cmd/rtcbench
+
+web:
+	cd packages && $(INSTALL_PACKAGES)
+	cd packages/lab && $(RUN_APP) build
+	cd packages/admin && $(RUN_APP) build
+	cd packages/app && $(RUN_APP) build && $(RUN_APP) build:web
 
 test:
 	go vet ./...
 	go test -v ./...
+
+e2e-app: all
+	cd e2e/playwright/app && bun install --frozen-lockfile
+	cd e2e/playwright/app && bunx playwright install chromium
+	cd e2e/playwright/app && bun run check && bun run test
 
 # ---------------------------------------------------------------------------
 # e2e tests (Python/pytest)
@@ -43,7 +64,7 @@ test:
 
 E2E_RUNNER := rtcbench-e2e-runner:latest
 BASETEMP := /tmp/pytest-rtcbench
-E2E_RUN := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(CURDIR):$(CURDIR) -v /tmp:/tmp --network host --add-host=host.docker.internal:host-gateway -w $(CURDIR) $(E2E_RUNNER)
+E2E_RUN := docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$(CURDIR):/src" -e "RTCBENCH_HOST_REPO=$(CURDIR)" -v /tmp:/tmp --network host --add-host=host.docker.internal:host-gateway -w /src $(E2E_RUNNER)
 
 _build-e2e-runner:
 	docker build -t $(E2E_RUNNER) -f docker/e2e/Dockerfile .
@@ -149,7 +170,7 @@ remote-estimate:
 # ---------------------------------------------------------------------------
 
 ci:
-	$(MAKE) test e2e
+	$(MAKE) test e2e e2e-app
 
 clean-ci:
 	docker compose --project-name rtcbench-janus --profile janus down -v --remove-orphans 2>/dev/null || true

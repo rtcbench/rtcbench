@@ -3,7 +3,6 @@ package jitsi
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,7 +35,8 @@ func (c *Client) performHandshake(
 		CameraPaths: cameraPaths,
 		Log:         l,
 		BOSHSender:  httpxml.NewBOSHSender(l),
-		BoshURL:     fmt.Sprintf("https://%s/http-bind", c.serverIP),
+		BoshURL:     c.boshURL,
+		Domain:      c.domain,
 		RoomName:    room,
 		MachineUID:  uuid.NewString(),
 		RID:         initialRid(),
@@ -44,9 +44,6 @@ func (c *Client) performHandshake(
 		LANServerIP: c.serverIP,
 		LANClientIP: c.clientIP,
 	}
-
-	u, _ := url.Parse(state.BoshURL)
-	state.Domain = u.Hostname()
 
 	stepsBeforeJingle := []func(*model.ConnectionState) error{
 		steps.Step01_StartSession,
@@ -138,7 +135,7 @@ func (c *Client) performHandshake(
 				state.RID,
 				state.Sid,
 				uuid.NewString(),
-				c.serverIP,
+				c.domain,
 			)
 
 			_, err := state.BOSHSender.Send(state.BoshURL, requestBody)

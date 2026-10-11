@@ -1,0 +1,9 @@
+.git
+rtcbench-data
+**/node_modules
+**/__pycache__
+**/.venv
+venv
+*.exe
+.env
+.env.*

@@ -17,8 +17,7 @@ class SSHRunner:
 
     def _ssh_base(self, host):
         return [
-            "ssh", "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            "ssh", "-o", "StrictHostKeyChecking=accept-new",
             "-o", "LogLevel=ERROR",
             "-o", "ConnectTimeout=10",
             "-i", self.ssh_key,
@@ -59,7 +58,7 @@ class SSHRunner:
         os.makedirs(local_path, exist_ok=True)
         cmd = [
             "rsync", "-az", "--timeout=30",
-            "-e", f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i {self.ssh_key}",
+            "-e", f"ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -i {self.ssh_key}",
             f"{self.ssh_user}@{host}:{remote_path}/",
             f"{local_path}/",
         ]
@@ -79,7 +78,7 @@ class SSHRunner:
             # Skip metadata that may fail on minimal filesystems (Buildroot rootfs)
             "--no-times", "--no-perms", "--no-owner", "--no-group",
             "--timeout=60",
-            "-e", f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i {self.ssh_key}",
+            "-e", f"ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -i {self.ssh_key}",
             src, dst,
         ]
         log.debug("rsync to %s:%s <- %s", host, remote_path, local_path)

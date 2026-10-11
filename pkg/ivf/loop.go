@@ -27,6 +27,7 @@ func LoopIntoTrackUntil(
 	track *webrtc.TrackLocalStaticSample,
 	src FrameSource,
 ) {
+	defer src.Close()
 	nextTime := time.Now()
 
 	for {
