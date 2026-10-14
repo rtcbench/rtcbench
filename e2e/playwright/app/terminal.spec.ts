@@ -99,3 +99,54 @@ for (const kind of ["server", "instances", "deployments"] as const) {
     await expect(page.getByRole("alert")).toHaveCount(0);
   });
 }
+
+test("the terminal tab menu picks a theme and the terminal goes full screen", async ({
+  page,
+}) => {
+  await page.goto("terminal");
+
+  const screen = page.locator(".wterm");
+  const tab = page.getByRole("tab", { name: "Terminal", exact: true });
+  const themeMenu = async () => {
+    await tab.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Theme", exact: true }).hover();
+    return page.getByRole("menuitemcheckbox", {
+      name: "Solarized",
+      exact: true,
+    });
+  };
+  await (await themeMenu()).click();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(screen).toHaveCSS("background-color", "rgb(0, 43, 54)");
+  await page.reload();
+  await expect(screen).toHaveCSS("background-color", "rgb(0, 43, 54)");
+  await expect(await themeMenu()).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("tab", { name: "Welcome", exact: true })
+    .click({ button: "right" });
+  await expect(
+    page.getByRole("menuitem", { name: "Theme", exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await tab.click();
+
+  const full = page.getByRole("button", { name: "Full screen", exact: true });
+  const frame = page.locator('[data-slot="terminal"]');
+  await full.click();
+  await expect(full).toHaveAttribute("aria-pressed", "true");
+  await expect
+    .poll(() => frame.evaluate((el) => el.matches(":popover-open")))
+    .toBe(true);
+  const viewport = page.viewportSize()!;
+  expect(await frame.boundingBox()).toEqual({
+    x: 0,
+    y: 0,
+    width: viewport.width,
+    height: viewport.height,
+  });
+  await full.click();
+  await expect(full).toHaveAttribute("aria-pressed", "false");
+  expect(await frame.evaluate((el) => el.matches(":popover-open"))).toBe(false);
+});

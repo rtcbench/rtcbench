@@ -1,5 +1,6 @@
-@import "./styles.css";
-@import "../../lab/dist/styles.css";
+@import "./page.css";
+@import "@labpane/os/styles.css";
+@import "../dist/styles.css";
 
 html,
 body,

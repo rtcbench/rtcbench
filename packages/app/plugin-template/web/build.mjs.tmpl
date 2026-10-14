@@ -12,8 +12,8 @@ await build({
   jsx: "automatic",
   alias: {
     "@rtcbench/app": resolve(source, "packages/app/dist"),
-    "@rtcbench/admin": resolve(source, "packages/admin/dist"),
-    "@rtcbench/lab": resolve(source, "packages/lab/dist"),
+    "@labpane/ui": resolve(source, "packages/node_modules/@labpane/ui/dist"),
+    "@labpane/os": resolve(source, "packages/node_modules/@labpane/os/dist"),
     react: resolve("node_modules/react"),
     "react-dom": resolve("node_modules/react-dom"),
   },

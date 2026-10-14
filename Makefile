@@ -1,4 +1,4 @@
-.PHONY: all dev cli web clean clean-ci clean-screenshots install test e2e-app \
+.PHONY: all dev cli desktop web clean clean-ci clean-screenshots install test e2e-app \
 	e2e e2e-janus e2e-jitsi e2e-livekit e2e-mediasoup screenshots \
 	_build-all _build-e2e-runner _build-janus _build-jitsi _build-livekit _build-mediasoup \
 	_e2e-run remote-ci remote-run remote-seed remote-status remote-clean remote-estimate \
@@ -6,6 +6,14 @@
 
 VERSION := $(shell git describe --tags --always --dirty)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+GOOS := $(shell go env GOOS)
+DESKTOP_TAGS := desktop,production
+ifeq ($(GOOS),darwin)
+DESKTOP_ENV := CGO_ENABLED=1 CGO_CFLAGS=-mmacosx-version-min=10.13 CGO_LDFLAGS="-framework UniformTypeIdentifiers -mmacosx-version-min=10.13"
+else ifneq ($(GOOS),windows)
+DESKTOP_TAGS := desktop,production,webkit2_41
+DESKTOP_ENV := CGO_ENABLED=1
+endif
 
 ifeq ($(shell echo %OS%),Windows_NT)
 which = $(shell where $(1) 2>NUL)
@@ -40,10 +48,16 @@ dev:
 cli:
 	go build -v -trimpath -tags cli $(LDFLAGS) ./cmd/rtcbench
 
+# Same binary as all, opening the app in its own window when started without arguments
+# macOS needs the Xcode command line tools, Linux needs libgtk-3-dev and libwebkit2gtk-4.1-dev
+desktop: web
+ifeq ($(GOOS),windows)
+	go run ./internal/appicon/winicon cmd/rtcbench
+endif
+	$(DESKTOP_ENV) go build -v -trimpath -tags $(DESKTOP_TAGS) $(LDFLAGS) ./cmd/rtcbench
+
 web:
 	cd packages && $(INSTALL_PACKAGES)
-	cd packages/lab && $(RUN_APP) build
-	cd packages/admin && $(RUN_APP) build
 	cd packages/app && $(RUN_APP) build && $(RUN_APP) build:web
 
 test:
@@ -60,7 +74,7 @@ e2e-app: all
 # ---------------------------------------------------------------------------
 # Infrastructure (janus/jitsi/livekit) runs in Docker Compose; rtcbench runs
 # as a per-test Docker container managed by pytest fixtures. New scenarios are
-# discovered automatically — no Makefile changes required.
+# discovered automatically, so no Makefile changes are required.
 
 E2E_RUNNER := rtcbench-e2e-runner:latest
 BASETEMP := /tmp/pytest-rtcbench
@@ -135,7 +149,7 @@ _build-mediasoup:
 # Remote distributed e2e (via ssh-parallel-test)
 # ---------------------------------------------------------------------------
 # Uses spt from the ssh-parallel-test repo to distribute e2e tests across
-# remote machines. Runs inside the spt Docker image — control machine
+# remote machines. Runs inside the spt Docker image, so the control machine
 # only needs Docker + make. SSH keys are mounted read-only.
 
 SPT_IMAGE := ghcr.io/ioqr/ssh-parallel-test:latest

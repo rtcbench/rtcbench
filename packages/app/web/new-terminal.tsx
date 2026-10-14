@@ -10,7 +10,7 @@ import {
   FieldError,
   SelectField,
   Spinner,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 import { usePoll } from "./api";
 import type { Inventory } from "./systems/model";
 
@@ -47,7 +47,7 @@ export function NewTerminal({
     >
       <DialogContent aria-describedby={undefined}>
         <form
-          className="flex flex-col gap-5"
+          className="labui:flex labui:flex-col labui:gap-5"
           onSubmit={(event) => {
             event.preventDefault();
             if (
@@ -90,7 +90,7 @@ export function NewTerminal({
                   options={targets}
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">
+                <p className="labui:text-sm labui:text-muted-foreground">
                   No {kind === "plugins" ? "plugin projects" : kind} available
                 </p>
               )

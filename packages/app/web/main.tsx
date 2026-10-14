@@ -1,11 +1,13 @@
-import { render } from "preact";
 import { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
 import {
-  densityPresets,
   densitySize,
+  useFullscreen,
+  useWindowFrame,
   type WorkspaceDensity,
-} from "@rtcbench/lab";
+} from "@labpane/os";
 import { RTCBench } from "./app";
+import { desktopWindow, setWindowTheme } from "./desktop";
 import { parse, routePath, type Route } from "./routes";
 
 const base = new URL(document.baseURI);
@@ -18,23 +20,30 @@ const readRoute = () => ({
   tabKey: history.state?.tabKey as string | undefined,
 });
 
+// densityKey holds a workspace size the user picked; the default is not saved so it can change
+const densityKey = "rtcbench:workspace-size";
+
 function Standalone() {
   const [route, setRoute] = useState<Route>(readRoute);
   const [density, setDensity] = useState<WorkspaceDensity>(() => {
     try {
-      const saved = localStorage.getItem("rtcbench:density");
-      return saved && Object.hasOwn(densityPresets, saved)
-        ? densityPresets[saved as keyof typeof densityPresets].value
-        : densitySize(Number(saved ?? 100)).value;
-    } catch {
-      return 100;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem("rtcbench:density", String(density));
+      const saved = localStorage.getItem(densityKey);
+      if (saved) return densitySize(Number(saved)).value;
     } catch {}
-  }, [density]);
+    return 40;
+  });
+  const changeDensity = (value: WorkspaceDensity) => {
+    setDensity(value);
+    try {
+      localStorage.setItem(densityKey, String(value));
+    } catch {}
+  };
+  const resetDensity = () => {
+    setDensity(40);
+    try {
+      localStorage.removeItem(densityKey);
+    } catch {}
+  };
   const [dark, setDark] = useState(() => {
     try {
       return localStorage.getItem("rtcbench:theme") === "dark";
@@ -49,10 +58,13 @@ function Standalone() {
   }, []);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
+    setWindowTheme(dark);
     try {
       localStorage.setItem("rtcbench:theme", dark ? "dark" : "light");
     } catch {}
   }, [dark]);
+  const [fullscreen, setFullscreen] = useFullscreen(desktopWindow);
+  useWindowFrame(desktopWindow);
   return (
     <RTCBench
       apiUrl={href("api/v1")}
@@ -63,7 +75,11 @@ function Standalone() {
       dark={dark}
       onThemeChange={setDark}
       density={density}
-      onDensityChange={setDensity}
+      onDensityChange={changeDensity}
+      onDensityReset={resetDensity}
+      fullscreen={fullscreen}
+      onFullscreenChange={setFullscreen}
+      host={desktopWindow}
       onRouteChange={(next, replace) => {
         history[replace ? "replaceState" : "pushState"](
           { tabKey: next.tabKey },
@@ -76,4 +92,4 @@ function Standalone() {
   );
 }
 
-render(<Standalone />, document.getElementById("root")!);
+createRoot(document.getElementById("root")!).render(<Standalone />);

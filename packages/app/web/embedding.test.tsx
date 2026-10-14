@@ -125,5 +125,4 @@ it("keeps Lab and the standalone entry out of the pages bundle", async () => {
   expect(imports.some((path) => /^@rtcbench\/lab(?:\/|$)/.test(path))).toBe(
     false,
   );
-  expect(imports.some((path) => /^preact(?:\/|$)/.test(path))).toBe(false);
 });

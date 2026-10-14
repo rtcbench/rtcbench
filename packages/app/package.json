@@ -3,35 +3,36 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --cwd=../.. --config=packages/app/bunfig.dev.toml ./packages/app/dev.mjs",
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && esbuild index.ts pages.ts --bundle --sourcemap --splitting --chunk-names=[name]-[hash] --format=esm --packages=external --loader:.svg=dataurl --outdir=dist && tailwindcss -i web/styles.css -o dist/styles.css --minify && node ../package-assets.mjs @wterm/dom && node docker-contexts.mjs dist && node deployment-web.mjs dist",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && esbuild index.ts pages.ts --bundle --sourcemap --splitting --chunk-names=[name]-[hash] --format=esm --packages=external --loader:.svg=dataurl --outdir=dist && tailwindcss -i web/styles.css -o dist/styles.css --minify && node ../unlayer.mjs dist/styles.css && tailwindcss -i web/page.css -o dist/page.css --minify && node ../package-assets.mjs @wterm/dom && node docker-contexts.mjs dist && node deployment-web.mjs dist",
     "build:web": "tailwindcss -i web/standalone.css -o ../../internal/api/web/styles.css --minify --map ../../internal/api/web/styles.css.map && node build-web.mjs",
-    "test": "bun test ./web ../lab ../admin && tsc -p tsconfig.test.json",
+    "test": "bun test ./web && tsc -p tsconfig.test.json",
     "format": "prettier --write --ignore-path ../../.gitignore web *.ts *.mjs *.json",
     "format:check": "prettier --check --ignore-path ../../.gitignore web *.ts *.mjs *.json",
     "prepack": "npm run build"
   },
   "dependencies": {
     "@wterm/dom": "^0.5.4",
-    "lucide-react": "^1.52.0",
-    "radix-ui": "^1.6.7",
+    "lucide-react": "^1.55.0",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@rtcbench/admin": "^0.1.0",
-    "@rtcbench/lab": "^0.1.0",
+    "@labpane/os": "^1.2.0",
+    "@labpane/ui": "^1.2.0",
+    "@radix-ui/react-popover": "^1.1.15",
     "@tailwindcss/cli": "^4.3.3",
     "@types/bun": "^1.4.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "esbuild": "^0.28.2",
-    "preact": "^11.0.0",
+    "livekit-client": "2.9.9",
+    "mediasoup-client": "^3.18.0",
+    "postcss": "^8.5.6",
     "prettier": "^3.9.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2",
-    "livekit-client": "2.9.9",
-    "mediasoup-client": "^3.18.0"
+    "tailwindcss3": "npm:tailwindcss@^3.4.17",
+    "typescript": "^7.0.2"
   },
   "version": "0.1.0",
   "description": "RTCBench pages and tabbed workspace for React",
@@ -48,6 +49,10 @@
     "./styles.css": {
       "types": "./dist/styles.d.ts",
       "default": "./dist/styles.css"
+    },
+    "./page.css": {
+      "types": "./dist/styles.d.ts",
+      "default": "./dist/page.css"
     }
   },
   "files": [
@@ -65,13 +70,14 @@
     "directory": "packages/app"
   },
   "peerDependencies": {
-    "@rtcbench/admin": "^0.1.0",
-    "@rtcbench/lab": "^0.1.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "@labpane/os": "^1.2.0",
+    "@labpane/ui": "^1.2.0",
+    "@radix-ui/react-popover": "^1.1.15",
+    "react": "^18.2.0 || ^19.0.0",
+    "react-dom": "^18.2.0 || ^19.0.0"
   },
   "peerDependenciesMeta": {
-    "@rtcbench/lab": {
+    "@labpane/os": {
       "optional": true
     }
   }

@@ -59,7 +59,7 @@ import {
   Page,
   PageHeader,
   Spinner,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 import { NewRun } from "./runs";
 
 import { YamlEditor, YamlView } from "./yaml";
@@ -105,7 +105,7 @@ function CopyExamples({
       <DialogTrigger asChild>
         <Button variant="secondary">
           <CopyIcon />
-          Copy from <span className="font-mono">{examples.pattern}</span>
+          Copy from <span className="labui:font-mono">{examples.pattern}</span>
         </Button>
       </DialogTrigger>
       <DialogContent aria-describedby={undefined}>
@@ -114,7 +114,7 @@ function CopyExamples({
             Copy {examples.files.length} example configs?
           </DialogTitle>
         </DialogHeader>
-        <ul className="code-block max-h-72 overflow-auto">
+        <ul className="rtc-code-block labui:max-h-72 labui:overflow-auto">
           {examples.files.map((file) => (
             <li key={file}>{file}</li>
           ))}
@@ -177,7 +177,7 @@ export function ConfigsPage() {
                 type="file"
                 accept=".yml,.yaml"
                 multiple
-                className="sr-only"
+                className="labui:sr-only"
                 onChange={(event) => {
                   upload([...(event.target.files ?? [])]);
                   event.target.value = "";
@@ -418,7 +418,7 @@ function ConfigEditor({ value, onChange }: EditorProps) {
         id={id}
         invalid={errors.length > 0}
         describedBy={errors.length ? `${id}-errors` : undefined}
-        className="min-h-[36rem]"
+        className="labui:min-h-[36rem]"
         value={value}
         onChange={(yaml) => onChange(yaml, true)}
       />

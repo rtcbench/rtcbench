@@ -16,7 +16,7 @@ import {
   Table,
   column,
   type TableColumn,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 import { useApi, usePoll } from "./api";
 import { Back, Link, useNavigation } from "./integration";
 import { pluginPrompt } from "./plugin-prompt";
@@ -38,7 +38,7 @@ const columns: TableColumn<Plugin>[] = [
       (p) =>
         p.project ? (
           <Link
-            className="text-link underline-offset-4 hover:underline"
+            className="labui:text-link labui:underline-offset-4 labui:hover:underline"
             href={`plugins/${p.project}`}
           >
             {p.name}
@@ -112,18 +112,18 @@ export function NewPluginPage({ name }: { name?: string }) {
       {(error || loadError) && <FieldError>{error || loadError}</FieldError>}
       {name ? (
         data ? (
-          <div className="flex max-w-2xl flex-col gap-5">
+          <div className="labui:flex labui:max-w-2xl labui:flex-col labui:gap-5">
             <p>
               Download the project and open it in your editor. The project
               includes a Go plugin, React frontend, Makefile, and Dockerfile.
             </p>
             <div>
-              <p className="text-sm text-muted-foreground">
+              <p className="labui:text-sm labui:text-muted-foreground">
                 Project location on this server
               </p>
-              <code className="break-all">{data.path}</code>
+              <code className="labui:break-all">{data.path}</code>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="labui:flex labui:flex-wrap labui:gap-2">
               <Button asChild>
                 <a href={url(endpoint + "/download")} download>
                   <DownloadIcon />
@@ -158,7 +158,10 @@ export function NewPluginPage({ name }: { name?: string }) {
                 Open terminal
               </Button>
             </div>
-            <p role="status" className="text-sm text-muted-foreground">
+            <p
+              role="status"
+              className="labui:text-sm labui:text-muted-foreground"
+            >
               {status}
             </p>
           </div>
@@ -167,7 +170,7 @@ export function NewPluginPage({ name }: { name?: string }) {
         )
       ) : (
         <form
-          className="flex max-w-2xl flex-col gap-5"
+          className="labui:flex labui:max-w-2xl labui:flex-col labui:gap-5"
           onSubmit={(event) => {
             event.preventDefault();
             void action(async () => {
@@ -183,7 +186,7 @@ export function NewPluginPage({ name }: { name?: string }) {
             });
           }}
         >
-          <p className="text-muted-foreground">
+          <p className="labui:text-muted-foreground">
             Generate a plugin project to build with your own editor.
           </p>
           <Field>
@@ -210,11 +213,11 @@ export function NewPluginPage({ name }: { name?: string }) {
               onChange={(event) => setModule(event.target.value)}
             />
           </Field>
-          <p className="text-sm text-muted-foreground">
+          <p className="labui:text-sm labui:text-muted-foreground">
             Saved in <code>plugins/{projectName || "<project-name>"}/</code>{" "}
             inside the data directory.
           </p>
-          <Button type="submit" className="self-start" disabled={busy}>
+          <Button type="submit" className="labui:self-start" disabled={busy}>
             <CodeIcon />
             Create plugin
           </Button>

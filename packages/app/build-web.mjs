@@ -1,5 +1,8 @@
 import { build } from "esbuild";
-import { deploymentEntries, copyDeploymentLicenses } from "./deployment-web.mjs";
+import {
+  deploymentEntries,
+  copyDeploymentLicenses,
+} from "./deployment-web.mjs";
 import { copyFile, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, relative } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -25,11 +28,7 @@ await build({
   minify: true,
   sourcemap: true,
   loader: { ".html": "copy", ".svg": "dataurl" },
-  alias: {
-    react: "preact/compat",
-    "react-dom": "preact/compat",
-    "react/jsx-runtime": "preact/jsx-runtime",
-  },
+  define: { "process.env.NODE_ENV": '"production"' },
 });
 await copyFile("../../docs/media/logo_icon.svg", `${outdir}/logo_icon.svg`);
 await copyFile(

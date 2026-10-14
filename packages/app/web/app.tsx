@@ -1,6 +1,12 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { PlusIcon, RotateCwIcon } from "lucide-react";
-import { Button } from "@rtcbench/admin";
+import {
+  ActionMenu,
+  Button,
+  DiscardDialog,
+  OptionMenu,
+  type MenuOption,
+} from "@labpane/ui";
 import {
   Workspace,
   WorkspaceFrame,
@@ -8,10 +14,12 @@ import {
   reconcileLayout,
   dockTab,
   panes,
-  type TabOption,
+  densitySize,
   type WorkspaceDensity,
   useUnsavedChanges,
-} from "@rtcbench/lab";
+  desktopSlots,
+  type WindowHost,
+} from "@labpane/os";
 
 import { parse, routePath, type Route } from "./routes";
 import { PageScope, PageTab, type PageOptions } from "./integration";
@@ -21,6 +29,11 @@ import { RunPage } from "./run";
 import { RunsPage } from "./runs";
 import { SystemsPage } from "./systems/page";
 import { AppMenu } from "./app-menu";
+import {
+  setTerminalTheme,
+  terminalThemeNames,
+  useTerminalTheme,
+} from "./terminal-theme";
 import { PluginsPage, NewPluginPage } from "./plugins";
 import { TerminalPage } from "./terminal-page";
 import { NewTerminal } from "./new-terminal";
@@ -35,12 +48,16 @@ import {
   type WorkspaceTab,
 } from "./tab-routes";
 
-const options: TabOption[] = Object.entries(destinations).map(([id, item]) => ({
-  id,
-  label: item.label,
-  group: id === "runs" ? undefined : item.group,
-  icon: <item.icon aria-hidden="true" className="size-4 shrink-0" />,
-}));
+const options: MenuOption[] = Object.entries(destinations).map(
+  ([id, item]) => ({
+    id,
+    label: item.label,
+    group: id === "runs" ? undefined : item.group,
+    icon: (
+      <item.icon aria-hidden="true" className="labui:size-4 labui:shrink-0" />
+    ),
+  }),
+);
 function readSaved(key: string | undefined) {
   try {
     return key ? sessionStorage.getItem(key) : null;
@@ -63,6 +80,12 @@ export type RTCBenchProps = Pick<PageOptions, "apiUrl" | "fetch" | "href"> & {
   onThemeChange?: (dark: boolean) => void;
   density?: WorkspaceDensity;
   onDensityChange?: (density: WorkspaceDensity) => void;
+  onDensityReset?: () => void;
+  // host is the desktop window the app fills; the window is the frame, and Labpane puts the menu
+  // and the window's controls where the platform expects them
+  host?: WindowHost;
+  fullscreen?: boolean;
+  onFullscreenChange?: (fullscreen: boolean) => void;
 };
 
 export function RTCBench({
@@ -73,8 +96,12 @@ export function RTCBench({
   className = "",
   dark = false,
   onThemeChange,
-  density = 100,
+  density = 40,
   onDensityChange,
+  onDensityReset,
+  host,
+  fullscreen,
+  onFullscreenChange,
   ...settings
 }: RTCBenchProps) {
   const [localRoute, setRoute] = useState<Route>({
@@ -93,6 +120,14 @@ export function RTCBench({
     () => readSaved(storeKey(":expanded")) === "true",
   );
   const [terminalOpener, setTerminalOpener] = useState<string>();
+  const [menuPane, setMenuPane] = useState<string>();
+  const openedTab = useRef<string | undefined>(undefined);
+  const [discard, setDiscard] = useState<{
+    label: string;
+    resolve: (discard: boolean) => void;
+  }>();
+  const control = densitySize(density).contentHeight;
+  const terminalTheme = useTerminalTheme();
   const [terminalOpened, setTerminalOpened] = useState(false);
   const refresh = useRef(new Map<string, () => void>());
   const [tabs, setTabs] = useState(() =>
@@ -150,19 +185,42 @@ export function RTCBench({
     go(target.path, target.key);
     return target.key;
   }
+  const menu = (align: "start" | "end") => (
+    <PageScope {...settings}>
+      <AppMenu
+        dark={dark}
+        onThemeChange={onThemeChange}
+        density={density}
+        onDensityChange={onDensityChange}
+        onDensityReset={onDensityReset}
+        fullscreen={fullscreen}
+        onFullscreenChange={onFullscreenChange}
+        align={align}
+      />
+    </PageScope>
+  );
+  const frame = (workspace: ReactNode) =>
+    host ? (
+      workspace
+    ) : (
+      <WorkspaceFrame expanded={expanded} change={setExpanded}>
+        {workspace}
+      </WorkspaceFrame>
+    );
   return (
     <div
-      className={`${dark ? "dark " : ""}h-full min-h-0 bg-background text-foreground overflow-hidden px-1.5 py-1.5 sm:px-2 lg:px-3 ${className}`}
+      className={`${dark ? "dark" : ""} labui:h-full labui:min-h-0 labui:bg-background labui:text-foreground labui:overflow-hidden labui:p-1.5 ${host ? "" : "labui:sm:px-2 labui:lg:px-3"} ${className}`}
     >
-      <WorkspaceFrame expanded={expanded} change={setExpanded}>
+      {frame(
         <Workspace
           density={density}
+          titleBar={!!host}
           tabs={visibleTabs.map((tab) => {
             const Icon = tabIcon(tab);
             return {
               ...tab,
               label: tabTitle(tab),
-              icon: <Icon aria-hidden="true" className="size-4" />,
+              icon: <Icon aria-hidden="true" className="labui:size-4" />,
               actions: tab.id === "terminal" && (
                 <Button
                   variant="ghost"
@@ -171,7 +229,7 @@ export function RTCBench({
                   title="Reconnect terminal"
                   onClick={() => refresh.current.get(tab.key)?.()}
                 >
-                  <RotateCwIcon aria-hidden="true" className="size-4" />
+                  <RotateCwIcon aria-hidden="true" className="labui:size-4" />
                 </Button>
               ),
               href: settings.href?.(tab.path) ?? "/" + tab.path,
@@ -182,26 +240,75 @@ export function RTCBench({
           active={active?.key}
           layout={layout}
           onLayoutChange={setLayout}
-          leading={
-            <PageScope {...settings}>
-              <AppMenu
-                dark={dark}
-                onThemeChange={onThemeChange}
-                density={density}
-                onDensityChange={onDensityChange}
-              />
-            </PageScope>
+          {...desktopSlots(host, menu)}
+          toolbar={(pane) => (
+            <OptionMenu
+              open={menuPane === pane.id}
+              onOpenChange={(open) => setMenuPane(open ? pane.id : undefined)}
+              options={options}
+              onSelect={(id) => {
+                if (id === "terminal") {
+                  setTerminalOpener(pane.active ?? active?.key ?? "");
+                  return;
+                }
+                const key = crypto.randomUUID();
+                go(id, key);
+                openedTab.current = key;
+              }}
+              onCloseAutoFocus={(event) => {
+                const key = openedTab.current;
+                if (!key) return;
+                event.preventDefault();
+                openedTab.current = undefined;
+                pane.focus(key);
+              }}
+              trigger={
+                <button
+                  type="button"
+                  className="labui:inline-flex labui:shrink-0 labui:items-center labui:justify-center labui:rounded-full labui:text-sm labui:font-medium labui:outline-none labui:transition-colors labui:hover:bg-accent labui:focus-visible:ring-2 labui:focus-visible:ring-ring"
+                  style={{ width: control, height: control }}
+                  aria-label="Open a tab"
+                  title="Open a tab"
+                >
+                  <PlusIcon aria-hidden="true" className="labui:size-4" />
+                </button>
+              }
+            />
+          )}
+          menu={(target, actions, restoreFocus, key) => (
+            <ActionMenu
+              actions={
+                visibleTabs.find((tab) => tab.key === key)?.id === "terminal"
+                  ? [
+                      ...actions,
+                      null,
+                      {
+                        label: "Theme",
+                        items: terminalThemeNames.map((name) => ({
+                          label: name[0]!.toUpperCase() + name.slice(1),
+                          checked: name === terminalTheme,
+                          onSelect: () => setTerminalTheme(name),
+                        })),
+                      },
+                    ]
+                  : actions
+              }
+              onCloseAutoFocus={
+                restoreFocus &&
+                ((event) => {
+                  event.preventDefault();
+                  restoreFocus();
+                })
+              }
+            >
+              {target}
+            </ActionMenu>
+          )}
+          confirmClose={(tab) =>
+            new Promise<boolean>((resolve) =>
+              setDiscard({ label: tab.label, resolve }),
+            )
           }
-          options={options}
-          onOpen={(id, opener) => {
-            if (id === "terminal") {
-              setTerminalOpener(opener ?? active?.key ?? "");
-              return "";
-            }
-            const key = crypto.randomUUID();
-            go(id, key);
-            return key;
-          }}
           onSelect={(key) => {
             const tab = visibleTabs.find((t) => t.key === key)!;
             if (active?.key !== key) go(tab.path, key);
@@ -228,11 +335,11 @@ export function RTCBench({
             setTabs(next);
             save(storageKey, next);
           }}
-          empty={(openTabMenu) => <Welcome empty open={openTabMenu} />}
+          empty={(pane) => <Welcome empty open={() => setMenuPane(pane.id)} />}
         >
-          {(tab, openTabMenu) =>
+          {(tab, pane) =>
             tab.id === "welcome" ? (
-              <Welcome open={openTabMenu} />
+              <Welcome open={() => setMenuPane(pane.id)} />
             ) : (
               <TabPage
                 {...settings}
@@ -259,8 +366,20 @@ export function RTCBench({
               />
             )
           }
-        </Workspace>
-      </WorkspaceFrame>
+        </Workspace>,
+      )}
+      <DiscardDialog
+        label={discard?.label}
+        onCancel={() => {
+          discard?.resolve(false);
+          setDiscard(undefined);
+        }}
+        onConfirm={() => {
+          discard?.resolve(true);
+          setDiscard(undefined);
+        }}
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      />
       {terminalOpener !== undefined && (
         <PageScope {...settings}>
           <NewTerminal
@@ -283,18 +402,18 @@ function Welcome({
   open: () => void;
 }) {
   return (
-    <div className="flex min-h-full flex-col items-center justify-center gap-4 p-3">
+    <div className="labui:flex labui:min-h-full labui:flex-col labui:items-center labui:justify-center labui:gap-4 labui:p-3">
       {!empty && (
-        <h1 className="font-display text-3xl font-bold tracking-tight">
+        <h1 className="labui:font-display labui:text-3xl labui:font-bold labui:tracking-tight">
           Welcome
         </h1>
       )}
       <button
         type="button"
         onClick={open}
-        className="flex flex-col items-center gap-4 rounded-lg p-8 text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        className="labui:flex labui:flex-col labui:items-center labui:gap-4 labui:rounded-lg labui:p-8 labui:text-muted-foreground labui:outline-none labui:hover:text-foreground labui:focus-visible:outline-2 labui:focus-visible:outline-ring"
       >
-        <PlusIcon aria-hidden="true" className="size-12 stroke-1" />
+        <PlusIcon aria-hidden="true" className="labui:size-12 labui:stroke-1" />
         <span>Open a tab</span>
       </button>
     </div>
