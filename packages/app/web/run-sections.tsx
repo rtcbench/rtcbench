@@ -27,7 +27,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 
 function LogView({ text }: { text?: string }) {
   const pre = useRef<HTMLPreElement>(null);
@@ -45,7 +45,7 @@ function LogView({ text }: { text?: string }) {
         const el = event.currentTarget;
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
       }}
-      className="code-block h-96 overflow-auto break-normal whitespace-pre"
+      className="rtc-code-block labui:h-96 labui:overflow-auto labui:break-normal labui:whitespace-pre"
     >
       {text}
     </pre>
@@ -71,11 +71,15 @@ export function LogsSection({
   );
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">Logs</h2>
+    <section className="labui:flex labui:flex-col labui:gap-4">
+      <div className="labui:flex labui:items-center labui:justify-between labui:gap-4">
+        <h2 className="labui:text-lg labui:font-semibold">Logs</h2>
         <Select value={stream} onValueChange={setStream}>
-          <SelectTrigger className="w-44" size="sm" aria-label="Log stream">
+          <SelectTrigger
+            className="labui:w-44"
+            size="sm"
+            aria-label="Log stream"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -117,7 +121,7 @@ export function FilesSection({
         (f) => f.path,
         (f) => (
           <a
-            className="inline-flex items-center gap-2 font-mono text-link hover:underline"
+            className="labui:inline-flex labui:items-center labui:gap-2 labui:font-mono labui:text-link labui:hover:underline"
             href={url(
               `${path}/files/${f.path.split("/").map(encodeURIComponent).join("/")}`,
             )}
@@ -143,7 +147,7 @@ export function FilesSection({
                 : undefined
             }
           >
-            <DownloadIcon className="size-3.5" />
+            <DownloadIcon className="labui:size-3.5" />
             {f.path}
           </a>
         ),
@@ -161,8 +165,8 @@ export function FilesSection({
     },
   ];
   return (
-    <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Files</h2>
+    <section className="labui:flex labui:flex-col labui:gap-4">
+      <h2 className="labui:text-lg labui:font-semibold">Files</h2>
       {error && (
         <Alert variant="destructive">
           <AlertTitle>{error}</AlertTitle>
@@ -267,12 +271,12 @@ export function SummarySection({
   ];
   if (!failures.length && !tables.some((rows) => rows?.length)) return null;
   return (
-    <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Summary</h2>
+    <section className="labui:flex labui:flex-col labui:gap-4">
+      <h2 className="labui:text-lg labui:font-semibold">Summary</h2>
       {failures.length > 0 && (
         <Alert variant="destructive">
           <AlertTitle>Thresholds failed</AlertTitle>
-          <AlertDescription className="font-mono text-xs">
+          <AlertDescription className="labui:font-mono labui:text-xs">
             {failures.map((failure) => (
               <span key={failure}>{failure}</span>
             ))}
@@ -315,7 +319,7 @@ const columns = (live: boolean): TableColumn<Viewer>[] => [
     "SVC",
     (v) => v.max_recv_sid * 10 + v.max_recv_tid,
     (v) => (
-      <span className="font-mono">
+      <span className="labui:font-mono">
         S{v.max_recv_sid}T{v.max_recv_tid}
       </span>
     ),
@@ -357,18 +361,18 @@ export function ViewersSection({
   ] as const;
 
   return (
-    <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Viewers</h2>
-      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <section className="labui:flex labui:flex-col labui:gap-4">
+      <h2 className="labui:text-lg labui:font-semibold">Viewers</h2>
+      <dl className="labui:grid labui:gap-3 labui:sm:grid-cols-2 labui:lg:grid-cols-4">
         {stats.map(([label, value]) => (
           <div
             key={label}
-            className="flex flex-col gap-1 rounded-lg border bg-card px-4 py-3"
+            className="labui:flex labui:flex-col labui:gap-1 labui:rounded-lg labui:border labui:bg-card labui:px-4 labui:py-3"
           >
-            <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            <dt className="labui:text-xs labui:font-medium labui:tracking-wide labui:text-muted-foreground labui:uppercase">
               {label}
             </dt>
-            <dd className="text-xl font-semibold tracking-tight tabular-nums">
+            <dd className="labui:text-xl labui:font-semibold labui:tracking-tight labui:tabular-nums">
               {value}
             </dd>
           </div>
@@ -377,7 +381,7 @@ export function ViewersSection({
       {errors.length > 0 && (
         <Alert variant="warning">
           <AlertTitle>Errors</AlertTitle>
-          <AlertDescription className="font-mono text-xs">
+          <AlertDescription className="labui:font-mono labui:text-xs">
             {errors.map(([name, count]) => (
               <span key={name}>
                 {name} {count}

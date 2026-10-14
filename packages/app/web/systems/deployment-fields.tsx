@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AddButton, SelectField, TextField, FieldError } from "@rtcbench/admin";
+import { AddButton, SelectField, TextField, FieldError } from "@labpane/ui";
 
 import {
   emptyAddress,
@@ -114,7 +114,7 @@ export function DeploymentFields({
         change={(ports) => change({ ports })}
       >
         {external && (
-          <p className="mt-4 text-sm text-muted-foreground">
+          <p className="labui:mt-4 labui:text-sm labui:text-muted-foreground">
             Match the existing SFU. Saving here does not reconfigure that
             server.
           </p>

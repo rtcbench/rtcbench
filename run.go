@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -87,8 +88,15 @@ func Run(ctx context.Context, args []string, options Options) error {
 	_ = godotenv.Load()
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if len(args) == 0 && openWindow != nil {
+		return serveDesktop(ctx, *settingsFile, options)
+	}
 	if flags.NArg() == 0 {
-		return serveAPI(ctx, *apiAddr, *data, *settingsFile, options)
+		listener, err := net.Listen("tcp", *apiAddr)
+		if err != nil {
+			return err
+		}
+		return serveAPI(ctx, listener, *data, *settingsFile, options, nil)
 	}
 	return runConfig(ctx, flags.Arg(0), *startAt, options.Register)
 }
@@ -179,9 +187,10 @@ func runConfig(ctx context.Context, file string, startAt int64, register func(*C
 		EvaluateReceiverThresholds(summary.Receivers, cfg.Spec.Metrics.ReceiverThresholds))
 }
 
-func serveAPI(ctx context.Context, addr, dir, settingsFile string, options Options) error {
+func serveAPI(ctx context.Context, listener net.Listener, dir, settingsFile string, options Options, ready func(url string)) error {
 	srv, err := api.New(dir, settingsFile, options.Version, os.Stderr, options.Deployments...)
 	if err != nil {
+		listener.Close()
 		return fmt.Errorf("open %s: %w", dir, err)
 	}
 	srv.Register = options.Register
@@ -192,7 +201,7 @@ func serveAPI(ctx context.Context, addr, dir, settingsFile string, options Optio
 	srv.Examples, _ = fs.Sub(examples, "config-examples")
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	httpServer := &http.Server{Addr: addr, Handler: srv.Handler()}
+	httpServer := &http.Server{Handler: srv.Handler()}
 	done := make(chan error, 1)
 	go func() {
 		<-ctx.Done()
@@ -201,8 +210,12 @@ func serveAPI(ctx context.Context, addr, dir, settingsFile string, options Optio
 		srv.Shutdown(shutdownCtx)
 		done <- httpServer.Shutdown(shutdownCtx)
 	}()
-	srv.Logf("rtcbench %s listening on http://%s", options.Version, addr)
-	err = httpServer.ListenAndServe()
+	url := "http://" + listener.Addr().String()
+	srv.Logf("rtcbench %s listening on %s", options.Version, url)
+	if ready != nil {
+		ready(url)
+	}
+	err = httpServer.Serve(listener)
 	cancel()
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil

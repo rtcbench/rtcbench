@@ -1,4 +1,4 @@
-import { Badge, Spinner } from "@rtcbench/admin";
+import { Badge, Spinner } from "@labpane/ui";
 import type { Deployment } from "./model";
 
 const labels: Record<string, string> = {
@@ -27,7 +27,7 @@ export function DeploymentStatus({
             : "warning"
       }
     >
-      {d.operation && <Spinner className="size-3" />}
+      {d.operation && <Spinner className="labui:size-3" />}
       {labels[d.operation || d.status] ?? d.status}
     </Badge>
   );

@@ -2,7 +2,7 @@ import { expect, it } from "bun:test";
 import { parse, routePath } from "./routes";
 import { systemPath, systemRoute } from "./systems/routes";
 import { restoreTabs } from "./tab-routes";
-import { restoreLayout, panes } from "../../lab/layout";
+import { restoreLayout, panes } from "@labpane/os";
 
 it("round-trips current URLs and rejects unsupported paths and malformed encoding", () => {
   for (const path of [

@@ -30,16 +30,11 @@ const tailwind = fileURLToPath(
   ),
 );
 const styles = [
-  ["../admin/styles.css", "../admin/dist/styles.css"],
-  ["../lab/styles.css", "../lab/dist/styles.css"],
-  ["dist/dev/input.css", "dist/dev/styles.css"],
+  ["web/styles.css", "dist/styles.css"],
+  ["web/standalone.css", "dist/dev/styles.css"],
 ];
 let server, deployment;
 try {
-  await Bun.write(
-    file("dist/dev/input.css"),
-    '@import "../../web/standalone.css";\n@source "../../..";\n',
-  );
   for (const [input, output] of styles) {
     const command = [
       process.execPath,
@@ -63,7 +58,7 @@ try {
   await Bun.write(file("dist/dev/index.html"), html);
   await Bun.write(
     file("dist/dev/main.tsx"),
-    'import "preact/debug";\nimport "../../web/main.tsx";\n',
+    'import "../../web/main.tsx";\n',
   );
   const settings = resolve(app, "../../rtcbench-data/rtcbench-dev.yml");
   if (!(await Bun.file(settings).exists())) {

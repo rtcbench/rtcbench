@@ -1,0 +1,60 @@
+@import "tailwindcss/preflight.css" layer(base);
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  *,
+  ::before,
+  ::after {
+    border-color: var(--labui-border);
+    outline-color: color-mix(in oklab, var(--labui-ring) 50%, transparent);
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--labui-background);
+    font-family: var(--labui-font-sans);
+    font-size: 0.875rem;
+    line-height: calc(1.25 / 0.875);
+    color: var(--labui-foreground);
+  }
+  ::selection {
+    background-color: color-mix(
+      in oklab,
+      var(--labui-primary) 35%,
+      transparent
+    );
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--labui-primary);
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--labui-font-mono);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+  @media (forced-colors: active) {
+    [role="tab"][aria-selected="true"] {
+      text-decoration: underline;
+      text-underline-offset: 0.3em;
+    }
+  }
+}

@@ -19,7 +19,7 @@ import {
   ConfirmDialog,
   TextField,
   AddButton,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 
 import {
   emptyAddress,
@@ -159,7 +159,7 @@ export function SystemSetup({
     }
   }
   return (
-    <form onSubmit={submit} className="flex flex-col gap-6">
+    <form onSubmit={submit} className="labui:flex labui:flex-col labui:gap-6">
       <Back
         nested={steps.length > 1}
         href={parent}
@@ -223,7 +223,7 @@ export function SystemSetup({
       />
       <fieldset
         disabled={busy}
-        className="flex max-w-2xl min-w-0 flex-col gap-4"
+        className="labui:flex labui:max-w-2xl labui:min-w-0 labui:flex-col labui:gap-4"
         key={step}
       >
         {step === "networks" || step === "keys" ? (
@@ -282,7 +282,7 @@ export function SystemSetup({
             <Button
               type="button"
               variant="destructive"
-              className="self-start"
+              className="labui:self-start"
               disabled={busy || used}
             >
               Remove

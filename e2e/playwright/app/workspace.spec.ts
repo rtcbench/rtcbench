@@ -73,7 +73,10 @@ test("nested splits resize by keyboard and restore after reload", async ({
     "Split below",
   );
   await expect(page.getByRole("tabpanel")).toHaveCount(3);
-  const separator = page.getByRole("separator").first();
+  const separator = page
+    .getByRole("separator")
+    .and(page.locator('[aria-label="Resize columns"]'))
+    .first();
   const before = Number(await separator.getAttribute("aria-valuenow"));
   await separator.focus();
   await page.keyboard.press("ArrowRight");
@@ -272,4 +275,49 @@ test("Escape cancels a lifted tab without changing pane membership", async ({
   ).toHaveCount(1);
   await expect(page.getByRole("tabpanel")).toHaveCount(2);
   await expectContained(page);
+});
+
+test("the workspace starts at 40% and saves only a size the user picks", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("seeded")) {
+      sessionStorage.setItem("seeded", "1");
+      localStorage.setItem("rtcbench:density", "100");
+    }
+  });
+  const slider = async () => {
+    await page.getByRole("button", { name: "RTCBench", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Workspace size", exact: true })
+      .click();
+    return page.getByRole("slider", { name: "Workspace size", exact: true });
+  };
+  const saved = () =>
+    page.evaluate(() => localStorage.getItem("rtcbench:workspace-size"));
+  await page.goto("welcome");
+  await expect(await slider()).toHaveValue("40");
+  expect(await saved()).toBeNull();
+
+  await page.reload();
+  const size = await slider();
+  await expect(size).toHaveValue("40");
+  await size.focus();
+  await page.keyboard.press("End");
+  expect(await saved()).toBe("100");
+  await page.reload();
+  await expect(await slider()).toHaveValue("100");
+
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("button", { name: "Workspace size", exact: true })
+    .click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Reset", exact: true }).click();
+  expect(await saved()).toBeNull();
+  await page
+    .getByRole("button", { name: "Workspace size", exact: true })
+    .click();
+  await expect(
+    page.getByRole("slider", { name: "Workspace size", exact: true }),
+  ).toHaveValue("40");
 });

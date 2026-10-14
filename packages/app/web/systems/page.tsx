@@ -20,7 +20,7 @@ import {
   PageHeader,
   Spinner,
   ConfirmDialog,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 
 import { SystemSetup } from "./setup";
 import { DeploymentDetails } from "./deployment-details";
@@ -205,13 +205,13 @@ function SystemContents({
             </>
           }
         />
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-3 text-sm">
+        <dl className="labui:grid labui:grid-cols-[auto_minmax(0,1fr)] labui:gap-x-6 labui:gap-y-3 labui:text-sm">
           {Object.entries(fields)
             .filter(([, value]) => value)
             .map(([label, value]) => (
-              <div key={label} className="contents">
-                <dt className="text-muted-foreground">{label}</dt>
-                <dd className="break-all">{value}</dd>
+              <div key={label} className="labui:contents">
+                <dt className="labui:text-muted-foreground">{label}</dt>
+                <dd className="labui:break-all">{value}</dd>
               </div>
             ))}
         </dl>
@@ -219,7 +219,7 @@ function SystemContents({
     );
   }
   return (
-    <div className="flex flex-col gap-6">
+    <div className="labui:flex labui:flex-col labui:gap-6">
       {error && <FieldError>{error}</FieldError>}
       {section === "keys" && (
         <>

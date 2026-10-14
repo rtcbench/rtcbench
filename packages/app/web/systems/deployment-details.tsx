@@ -21,7 +21,7 @@ import {
   PageActions,
   PageHeader,
   ConfirmDialog,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 
 import { NewRun } from "../runs";
 import type { Deployment, Instance, Plugin } from "./model";
@@ -69,7 +69,7 @@ export function DeploymentDetails({
     }
   }
   return (
-    <div className="flex flex-col gap-6">
+    <div className="labui:flex labui:flex-col labui:gap-6">
       <Back href={systemPath("deployments")} label="Deployments" />
       <PageHeader
         title={d.name}
@@ -104,8 +104,8 @@ export function DeploymentDetails({
           </>
         }
       />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="text-sm">
+      <div className="labui:flex labui:flex-wrap labui:items-center labui:justify-between labui:gap-3">
+        <span className="labui:text-sm">
           {host?.name ?? "Existing SFU"} | {network && `${network} | `}
           {d.address}
           <CopyButton value={d.address} label="Copy traffic IP" />
@@ -113,13 +113,13 @@ export function DeploymentDetails({
         <DeploymentStatus deployment={d} />
       </div>
       {d.operation && (
-        <p role="status" className="text-sm">
+        <p role="status" className="labui:text-sm">
           {d.progress}
         </p>
       )}
       {(error || d.error) && <FieldError>{error || d.error}</FieldError>}
       <form
-        className="flex max-w-2xl flex-col gap-4"
+        className="labui:flex labui:max-w-2xl labui:flex-col labui:gap-4"
         onSubmit={async (event) => {
           event.preventDefault();
           await action("ports", ports).catch((err: Error) =>
@@ -133,7 +133,7 @@ export function DeploymentDetails({
           change={setPorts}
           disabled={busy || !removable}
         >
-          <p className="mt-4 text-sm text-muted-foreground">
+          <p className="labui:mt-4 labui:text-sm labui:text-muted-foreground">
             {d.hostId
               ? "Stop the deployment to change ports, then deploy again to apply them."
               : "Match the existing SFU. Saving here does not reconfigure that server."}
@@ -156,8 +156,8 @@ export function DeploymentDetails({
           )}
         </PortFields>
       </form>
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold">System overrides</h2>
+      <section className="labui:flex labui:flex-col labui:gap-3">
+        <h2 className="labui:text-sm labui:font-semibold">System overrides</h2>
         <Table
           label="System overrides"
           rows={Object.entries(d.overrides ?? {})}
@@ -207,7 +207,7 @@ export function DeploymentDetails({
       {(showLogs || d.status === "failed") && (
         <pre
           aria-label="Operation output"
-          className="code-block max-h-64 overflow-auto whitespace-pre-wrap break-all"
+          className="rtc-code-block labui:max-h-64 labui:overflow-auto labui:whitespace-pre-wrap labui:break-all"
         >
           {d.logs || (d.operation ? "Loading..." : "No output")}
         </pre>

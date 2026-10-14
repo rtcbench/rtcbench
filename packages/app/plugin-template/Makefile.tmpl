@@ -11,8 +11,6 @@ all: web
 
 web:
 	cd "$(RTCBENCH)/packages" && bun install --frozen-lockfile
-	cd "$(RTCBENCH)/packages/admin" && bun run --bun build
-	cd "$(RTCBENCH)/packages/lab" && bun run --bun build
 	cd "$(RTCBENCH)/packages/app" && bun run --bun build
 	cd web && bun install
 	cd web && bun run --bun build "$(abspath $(RTCBENCH))"

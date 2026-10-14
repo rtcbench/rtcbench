@@ -8,7 +8,7 @@ import {
   Checkbox,
   Field,
   FieldLabel,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 
 import type { Address, Credentials, Inventory } from "./model";
 import { bindFields } from "./fields";
@@ -73,7 +73,7 @@ export function InstanceFields({
         {...field("fingerprint")}
         required
       />
-      <details className="text-xs text-muted-foreground">
+      <details className="labui:text-xs labui:text-muted-foreground">
         <summary>Fingerprint command</summary>
         <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256</code>
       </details>
@@ -85,8 +85,10 @@ export function InstanceFields({
         />
         <FieldLabel htmlFor={sudoId}>Passwordless sudo</FieldLabel>
       </Field>
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">Network addresses</span>
+      <div className="labui:flex labui:items-center labui:justify-between">
+        <span className="labui:text-sm labui:font-medium">
+          Network addresses
+        </span>
         {addNetwork}
       </div>
       {(value.networks ?? []).map((address, index) => {
@@ -98,7 +100,7 @@ export function InstanceFields({
           });
         const field = bindFields(address, update);
         return (
-          <div className="flex items-end gap-2" key={index}>
+          <div className="labui:flex labui:items-end labui:gap-2" key={index}>
             <SelectField
               label="Network"
               {...field("networkId")}

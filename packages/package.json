@@ -2,8 +2,6 @@
   "name": "rtcbench-packages",
   "private": true,
   "workspaces": [
-    "admin",
-    "lab",
     "app"
   ]
 }

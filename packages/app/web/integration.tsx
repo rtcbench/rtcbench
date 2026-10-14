@@ -9,7 +9,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
-import { Back as BackButton } from "@rtcbench/admin";
+import { Back as BackButton } from "@labpane/ui";
 
 export type PageOptions = {
   apiUrl?: string;

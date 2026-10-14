@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -221,5 +223,45 @@ func TestAPIPlugin(t *testing.T) {
 	srv.Shutdown(t.Context())
 	for _, plugin := range plugins {
 		waitFor(t, plugin.closed)
+	}
+}
+
+func TestRunDesktopServesUntilTheWindowCloses(t *testing.T) {
+	open := openWindow
+	t.Cleanup(func() { openWindow = open })
+	config := t.TempDir()
+	for _, name := range []string{"AppData", "XDG_CONFIG_HOME", "HOME"} {
+		t.Setenv(name, config)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var seen string
+	openWindow = func(_ context.Context, url, _ string) error {
+		if !strings.HasPrefix(url, "http://127.0.0.1:") || strings.HasSuffix(url, ":8080") {
+			return fmt.Errorf("unexpected url %s", url)
+		}
+		res, err := http.Get(url + "/api/v1/version")
+		if err != nil {
+			return err
+		}
+		defer res.Body.Close()
+		var body struct{ Version string }
+		err = json.NewDecoder(res.Body).Decode(&body)
+		seen = body.Version
+		return err
+	}
+	if err := Run(ctx, nil, Options{Version: "desktop-test"}); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "desktop-test" {
+		t.Fatalf("window saw version %q", seen)
+	}
+	if _, err := os.Stat(filepath.Join(config, "RTCBench", "data", "configs")); err != nil {
+		t.Fatal("desktop data is not in the user config directory:", err)
+	}
+
+	openWindow = func(context.Context, string, string) error { return errors.New("no display") }
+	if err := Run(ctx, nil, Options{}); err == nil || !strings.Contains(err.Error(), "no display") {
+		t.Fatalf("Run returned %v, want the window error", err)
 	}
 }

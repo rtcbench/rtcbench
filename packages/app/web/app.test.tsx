@@ -159,18 +159,18 @@ it("keeps the source text and colors keys, strings, literals and variables", () 
 `;
   const html = render(source);
   expect(html.replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'")).toBe(source);
-  expect(html).toContain('<span class="text-link">usersPerRoom</span>');
+  expect(html).toContain('<span class="labui:text-link">usersPerRoom</span>');
   expect(html).toContain(
-    'text-violet-600 dark:text-violet-400">$env:PLUGIN_ID=livekit<',
+    'labui:text-violet-600 labui:dark:text-violet-400">$env:PLUGIN_ID=livekit<',
   );
   expect(html).toContain(
-    'text-violet-600 dark:text-violet-400">{{spec.network.serverIP}}<',
+    'labui:text-violet-600 labui:dark:text-violet-400">{{spec.network.serverIP}}<',
   );
+  expect(html).toContain('<span class="labui:text-warning">5</span>');
   expect(html).toContain(
-    '<span class="text-amber-700 dark:text-amber-300">5</span>',
+    '<span class="labui:text-muted-foreground"># pick</span>',
   );
-  expect(html).toContain('<span class="text-muted-foreground"># pick</span>');
-  expect(html).toContain('<span class="text-link">name</span>');
+  expect(html).toContain('<span class="labui:text-link">name</span>');
 });
 
 it("summarizes the spec and reports YAML errors", () => {

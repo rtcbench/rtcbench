@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { TextField } from "@rtcbench/admin";
+import { TextField } from "@labpane/ui";
 import type { Plugin } from "./model";
 
 export function PortFields({
@@ -21,15 +21,20 @@ export function PortFields({
   };
   return (
     <details>
-      <summary className="cursor-pointer text-sm font-medium">Ports</summary>
-      <fieldset disabled={disabled} className="mt-4 flex flex-col gap-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <summary className="labui:cursor-pointer labui:text-sm labui:font-medium">
+        Ports
+      </summary>
+      <fieldset
+        disabled={disabled}
+        className="labui:mt-4 labui:flex labui:flex-col labui:gap-4"
+      >
+        <div className="labui:grid labui:grid-cols-1 labui:gap-4 labui:sm:grid-cols-2">
           {plugin?.ports.map((port) => (
             <div
               key={port.id}
               className={
                 plugin.ports.some((p) => p.minFrom === port.id)
-                  ? "sm:col-start-1"
+                  ? "labui:sm:col-start-1"
                   : undefined
               }
             >
@@ -52,7 +57,9 @@ export function PortFields({
           ))}
         </div>
         {plugin?.portNote && (
-          <p className="text-sm text-muted-foreground">{plugin.portNote}</p>
+          <p className="labui:text-sm labui:text-muted-foreground">
+            {plugin.portNote}
+          </p>
         )}
       </fieldset>
       {children}

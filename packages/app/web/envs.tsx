@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
   Spinner,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 import { Fragment, useId, useState } from "react";
 import { PlusIcon, SaveIcon, XIcon } from "lucide-react";
 import {
@@ -67,15 +67,15 @@ function EnvEditor({
 
   return (
     <Field>
-      <span className="text-sm font-medium">Variables</span>
+      <span className="labui:text-sm labui:font-medium">Variables</span>
       {entries.length > 0 && (
-        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,2fr)_auto] items-center gap-x-3 gap-y-2">
+        <div className="labui:grid labui:grid-cols-[minmax(0,1fr)_auto_minmax(0,2fr)_auto] labui:items-center labui:gap-x-3 labui:gap-y-2">
           {entries.map((e, i) => (
             <Fragment key={i}>
               <Input
                 id={`${id}-var-${i}`}
                 aria-label={`Variable ${i + 1} name`}
-                className="font-mono"
+                className="labui:font-mono"
                 placeholder="PLUGIN_ID"
                 disabled={e.saved}
                 aria-invalid={badName(entries, e)}
@@ -91,7 +91,7 @@ function EnvEditor({
               >
                 <SelectTrigger
                   aria-label={`${e.name || `Variable ${i + 1}`} type`}
-                  className="w-32"
+                  className="labui:w-32"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -104,8 +104,8 @@ function EnvEditor({
               <Input
                 aria-label={`${e.name || `Variable ${i + 1}`} value`}
                 className={cn(
-                  "font-mono",
-                  e.type === "secret" && "[-webkit-text-security:disc]",
+                  "labui:font-mono",
+                  e.type === "secret" && "labui:[-webkit-text-security:disc]",
                 )}
                 spellCheck="false"
                 placeholder={
@@ -134,7 +134,7 @@ function EnvEditor({
       )}
       <Button
         variant="secondary"
-        className="self-start"
+        className="labui:self-start"
         onClick={() =>
           update([
             ...entries,
@@ -191,7 +191,7 @@ export function SystemOverrides({ name }: { name?: string }) {
 
   const saveButton = (
     <Button
-      className="ml-auto"
+      className="labui:ml-auto"
       onClick={save}
       disabled={yaml === undefined || !valid || saving}
     >
@@ -223,9 +223,9 @@ export function SystemOverrides({ name }: { name?: string }) {
       {editor}
     </Page>
   ) : (
-    <section className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">Variables</h2>
+    <section className="labui:flex labui:flex-col labui:gap-4">
+      <div className="labui:flex labui:items-center labui:gap-3">
+        <h2 className="labui:text-lg labui:font-semibold">Variables</h2>
         {saveButton}
       </div>
       {editor}

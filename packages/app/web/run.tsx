@@ -42,7 +42,7 @@ import {
   Page,
   PageActions,
   Spinner,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 import {
   FilesSection,
   LogsSection,
@@ -82,8 +82,8 @@ function RunName({
 
   if (!editing)
     return (
-      <span className="flex items-center gap-1">
-        <h1 className="font-display text-2xl font-bold tracking-tight">
+      <span className="labui:flex labui:items-center labui:gap-1">
+        <h1 className="labui:font-display labui:text-2xl labui:font-bold labui:tracking-tight">
           {run.name}
         </h1>
         <Button
@@ -101,11 +101,11 @@ function RunName({
     );
 
   return (
-    <form className="flex items-center gap-2" onSubmit={save}>
+    <form className="labui:flex labui:items-center labui:gap-2" onSubmit={save}>
       <Input
         aria-label="Name"
         autoFocus
-        className="w-72"
+        className="labui:w-72"
         aria-invalid={!valid}
         value={name}
         onChange={(event) => setName(event.target.value)}
@@ -138,19 +138,21 @@ function DocLink({ kind, name }: { kind: DocKind; name?: string }) {
   const Icon = kind === "config" ? FileCodeIcon : VariableIcon;
   const label = (
     <>
-      <Icon className="size-3.5" />
+      <Icon className="labui:size-3.5" />
       {name}
     </>
   );
   return docs?.some((d) => d.name === name) ? (
     <Link
       href={docPath(kind, name)}
-      className="inline-flex items-center gap-1 text-link hover:underline"
+      className="labui:inline-flex labui:items-center labui:gap-1 labui:text-link labui:hover:underline"
     >
       {label}
     </Link>
   ) : (
-    <span className="inline-flex items-center gap-1">{label}</span>
+    <span className="labui:inline-flex labui:items-center labui:gap-1">
+      {label}
+    </span>
   );
 }
 
@@ -195,12 +197,12 @@ export function RunPage({ id }: { id: string }) {
 
   if (!run)
     return (
-      <Page className="gap-4">
+      <Page className="labui:gap-4">
         <Back href="runs" label="Runs" />
         {error ? (
           <Alert variant="destructive">
             <AlertTitle>{error}</AlertTitle>
-            <AlertDescription className="font-mono text-xs">
+            <AlertDescription className="labui:font-mono labui:text-xs">
               {id}
             </AlertDescription>
           </Alert>
@@ -211,10 +213,10 @@ export function RunPage({ id }: { id: string }) {
     );
 
   return (
-    <Page className="gap-10">
-      <div className="flex flex-col gap-4">
+    <Page className="labui:gap-10">
+      <div className="labui:flex labui:flex-col labui:gap-4">
         <Back href="runs" label="Runs" />
-        <header className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <header className="labui:flex labui:flex-wrap labui:items-center labui:gap-x-4 labui:gap-y-3">
           <RunName run={run} path={path} onSaved={reload} />
           <RunStatus status={run.status} />
           <PageActions>
@@ -278,10 +280,10 @@ export function RunPage({ id }: { id: string }) {
             )}
           </PageActions>
         </header>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+        <div className="labui:flex labui:flex-wrap labui:items-center labui:gap-x-5 labui:gap-y-2 labui:text-sm labui:text-muted-foreground">
           <DocLink kind="config" name={run.configName} />
           <Link
-            className="text-link"
+            className="labui:text-link"
             href={
               run.deploymentId
                 ? systemPath("deployments", run.deploymentId)
@@ -294,10 +296,10 @@ export function RunPage({ id }: { id: string }) {
             <DocLink kind="environment" name={run.envName} />
           )}
           <span>{time(run.startedAt)}</span>
-          <span className="font-mono tabular-nums">
+          <span className="labui:font-mono labui:tabular-nums">
             {duration(elapsed(run, now))}
           </span>
-          <span className="inline-flex items-center gap-1 font-mono text-xs">
+          <span className="labui:inline-flex labui:items-center labui:gap-1 labui:font-mono labui:text-xs">
             {run.id}
             <CopyButton
               value={
@@ -313,7 +315,7 @@ export function RunPage({ id }: { id: string }) {
       {run.error && (
         <Alert variant="destructive">
           <AlertTitle>Error</AlertTitle>
-          <AlertDescription className="font-mono text-xs">
+          <AlertDescription className="labui:font-mono labui:text-xs">
             {run.error}
           </AlertDescription>
         </Alert>
@@ -325,8 +327,8 @@ export function RunPage({ id }: { id: string }) {
       <LogsSection path={path} files={files} live={live} />
       <FilesSection path={path} files={files} />
       {yaml !== undefined && (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold">Config</h2>
+        <section className="labui:flex labui:flex-col labui:gap-4">
+          <h2 className="labui:text-lg labui:font-semibold">Config</h2>
           <YamlView text={yaml} />
         </section>
       )}

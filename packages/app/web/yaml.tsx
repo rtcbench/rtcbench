@@ -1,13 +1,13 @@
 import { type ReactNode, useMemo } from "react";
 import { CST, Lexer } from "yaml";
-import { cn } from "@rtcbench/admin";
+import { cn } from "@labpane/ui";
 
 const tones = {
-  key: "text-link",
-  string: "text-mint-700 dark:text-mint-400",
-  literal: "text-amber-700 dark:text-amber-300",
-  variable: "text-violet-600 dark:text-violet-400",
-  muted: "text-muted-foreground",
+  key: "labui:text-link",
+  string: "labui:text-success",
+  literal: "labui:text-warning",
+  variable: "labui:text-violet-600 labui:dark:text-violet-400",
+  muted: "labui:text-muted-foreground",
 };
 
 const markers = new Set(["\u0002", "\u0018", "\u001f"]);
@@ -71,7 +71,7 @@ export function highlight(source: string): ReactNode[] {
 
 export function YamlView({ text }: { text: string }) {
   const html = useMemo(() => highlight(text), [text]);
-  return <pre className="code-block">{html}</pre>;
+  return <pre className="rtc-code-block">{html}</pre>;
 }
 
 export function YamlEditor({
@@ -93,13 +93,13 @@ export function YamlEditor({
   return (
     <div
       className={cn(
-        "code-block grid p-0 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+        "rtc-code-block labui:grid labui:p-0 labui:focus-within:border-ring labui:focus-within:ring-[3px] labui:focus-within:ring-ring/50",
         className,
       )}
     >
       <pre
         aria-hidden="true"
-        className="pointer-events-none col-start-1 row-start-1 p-4 break-all whitespace-pre-wrap"
+        className="labui:pointer-events-none labui:col-start-1 labui:row-start-1 labui:p-4 labui:break-all labui:whitespace-pre-wrap"
       >
         {html}
         {"\n"}
@@ -111,7 +111,7 @@ export function YamlEditor({
         spellCheck="false"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="col-start-1 row-start-1 resize-none overflow-hidden bg-transparent p-4 break-all whitespace-pre-wrap text-transparent caret-foreground outline-none selection:bg-primary/25"
+        className="labui:col-start-1 labui:row-start-1 labui:resize-none labui:overflow-hidden labui:bg-transparent labui:p-4 labui:break-all labui:whitespace-pre-wrap labui:text-transparent labui:caret-foreground labui:outline-none labui:selection:bg-primary/25"
       />
     </div>
   );

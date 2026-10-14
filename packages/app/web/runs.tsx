@@ -24,7 +24,7 @@ import {
   FieldLabel,
   Page,
   Spinner,
-} from "@rtcbench/admin";
+} from "@labpane/ui";
 import { type FormEvent, type ReactElement, useId, useState } from "react";
 import { PlayIcon } from "lucide-react";
 import {
@@ -51,7 +51,7 @@ const variants = {
 export function RunStatus({ status }: { status: Status }) {
   return (
     <Badge variant={variants[status]}>
-      {status === "running" && <Spinner className="size-3" />}
+      {status === "running" && <Spinner className="labui:size-3" />}
       {status}
     </Badge>
   );
@@ -133,7 +133,10 @@ export function NewRun({
         )}
       </DialogTrigger>
       <DialogContent aria-describedby={undefined}>
-        <form className="flex flex-col gap-5" onSubmit={submit}>
+        <form
+          className="labui:flex labui:flex-col labui:gap-5"
+          onSubmit={submit}
+        >
           <DialogHeader>
             <DialogTitle>New run</DialogTitle>
           </DialogHeader>
