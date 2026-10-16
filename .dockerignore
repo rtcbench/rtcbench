@@ -7,3 +7,9 @@ venv
 *.exe
 .env
 .env.*
+bench
+results
+cluster.yml
+hints.json
+bin
+ivf

@@ -5,9 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
-// LoadCameraPaths returns the sorted absolute paths of all regular files in dir.
+// LoadCameraPaths returns the sorted absolute paths of regular IVF files in dir.
 func LoadCameraPaths(dir string) ([]string, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -16,7 +17,7 @@ func LoadCameraPaths(dir string) ([]string, error) {
 
 	names := make([]string, 0, len(ents))
 	for _, ent := range ents {
-		if ent.Type().IsRegular() {
+		if ent.Type().IsRegular() && strings.EqualFold(filepath.Ext(ent.Name()), ".ivf") {
 			names = append(names, ent.Name())
 		}
 	}

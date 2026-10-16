@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 
+	benchapi "github.com/rtcbench/rtcbench/internal/bench/api"
 	"github.com/rtcbench/rtcbench/internal/core"
 	"github.com/rtcbench/rtcbench/internal/deployment"
 	deploy "github.com/rtcbench/rtcbench/pkg/deployment"
@@ -39,6 +40,10 @@ type Server struct {
 	deployments *deployment.Manager
 	terminals   map[*terminalSession]bool
 	closing     bool
+	benchmarks  interface {
+		Register(*http.ServeMux)
+		Cancel() <-chan struct{}
+	}
 }
 
 type File struct {
@@ -83,6 +88,10 @@ func New(dir, settingsFile, version string, console io.Writer, plugins ...deploy
 	if err := s.load(); err != nil {
 		return nil, err
 	}
+	s.benchmarks, err = benchapi.New(dir, s.log)
+	if err != nil {
+		return nil, err
+	}
 	systems := filepath.Join(dir, "systems")
 	if _, err := os.Stat(systems); errors.Is(err, os.ErrNotExist) {
 		if err := os.Rename(filepath.Join(dir, "sfus"), systems); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -104,6 +113,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	router := http.NewServeMux()
 	s.deployments.Register(mux)
+	s.benchmarks.Register(mux)
 	mux.HandleFunc("GET /api/v1/version", s.getVersion)
 	mux.HandleFunc("GET /api/v1/runs", s.listRuns)
 	mux.HandleFunc("POST /api/v1/runs", s.postRun)

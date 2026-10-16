@@ -123,13 +123,16 @@ test("the terminal tab menu picks a theme and the terminal goes full screen", as
   await expect(await themeMenu()).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
+  await expect(page.locator('[role="menu"]')).toHaveCount(0);
   await page
     .getByRole("tab", { name: "Welcome", exact: true })
     .click({ button: "right" });
+  await expect(page.getByRole("menu")).toBeVisible();
   await expect(
     page.getByRole("menuitem", { name: "Theme", exact: true }),
   ).toHaveCount(0);
   await page.keyboard.press("Escape");
+  await expect(page.locator('[role="menu"]')).toHaveCount(0);
   await expect(
     page.getByRole("tab", { name: "Welcome", exact: true }),
   ).toBeFocused();

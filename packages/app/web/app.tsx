@@ -1,4 +1,10 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { PlusIcon, RotateCwIcon } from "lucide-react";
 import {
   ActionMenu,
@@ -21,32 +27,30 @@ import {
   type WindowHost,
 } from "@labpane/os";
 
-import { parse, routePath, type Route } from "./routes";
+import {
+  parse,
+  routePath,
+  RoutePage,
+  destinations,
+  type Route,
+} from "./routes";
 import { PageScope, PageTab, type PageOptions } from "./integration";
-import { ConfigPage, ConfigsPage } from "./configs";
-import { EnvPage, SystemOverrides, VariableSets } from "./envs";
-import { RunPage } from "./run";
-import { RunsPage } from "./runs";
-import { SystemsPage } from "./systems/page";
 import { AppMenu } from "./app-menu";
 import {
   setTerminalTheme,
   terminalThemeNames,
   useTerminalTheme,
 } from "./terminal-theme";
-import { PluginsPage, NewPluginPage } from "./plugins";
-import { TerminalPage } from "./terminal-page";
 import { NewTerminal } from "./new-terminal";
 import {
   destinationFor,
-  destinations,
   restoreTabs,
   visitTab,
   openContent,
   tabTitle,
   tabIcon,
   type WorkspaceTab,
-} from "./tab-routes";
+} from "./tabs";
 
 const options: MenuOption[] = Object.entries(destinations).map(
   ([id, item]) => ({
@@ -115,7 +119,10 @@ export function RTCBench({
     onRouteChange?.(next, replace);
   };
   const go = (path: string, tabKey?: string) =>
-    changeRoute({ ...(parse(path) ?? { page: "runs" }), tabKey });
+    changeRoute({
+      ...(parse(path) ?? { page: "not-found", id: path }),
+      tabKey,
+    });
   const [expanded, setExpanded] = useState(
     () => readSaved(storeKey(":expanded")) === "true",
   );
@@ -144,7 +151,7 @@ export function RTCBench({
     visibleTabs.find(
       (tab) => tab.key === route.tabKey && tab.id === destinationFor(route),
     ) ?? visibleTabs.find((tab) => tab.path === routePath(route));
-  useLayoutEffect(() => {
+  useEffect(() => {
     setTabs(visibleTabs);
     save(storageKey, visibleTabs);
     if (route.tabKey !== active?.key)
@@ -343,7 +350,7 @@ export function RTCBench({
             ) : (
               <TabPage
                 {...settings}
-                route={parse(tab.path)!}
+                path={tab.path}
                 navigate={(path) => go(path, tab.key)}
                 tab={{
                   selected: active?.key === tab.key,
@@ -421,11 +428,11 @@ function Welcome({
 }
 
 function TabPage({
-  route,
+  path,
   tab,
   ...settings
 }: PageOptions & {
-  route: Route;
+  path: string;
   tab: NonNullable<React.ContextType<typeof PageTab>>;
 }) {
   const [dirty, setDirty] = useState(false);
@@ -433,31 +440,8 @@ function TabPage({
   return (
     <PageTab.Provider value={tab}>
       <PageScope {...settings} onDirtyChange={setDirty}>
-        <PageContent {...route} />
+        <RoutePage path={path} />
       </PageScope>
     </PageTab.Provider>
   );
-}
-
-function PageContent({ page, id }: Route) {
-  if (page === "welcome") return null;
-  if (page === "terminal") return <TerminalPage target={id} />;
-  if (page === "plugins")
-    return id ? (
-      <NewPluginPage key={id} name={id === "new" ? undefined : id} />
-    ) : (
-      <PluginsPage />
-    );
-  if (page === "environment") return <EnvPage key={id} name={id} />;
-  if (page === "systems") return <SystemsPage path={id} />;
-  if (page === "run" && id) return <RunPage key={id} id={id} />;
-  if (page === "config" && id) return <ConfigPage key={id} name={id} />;
-  if (page === "configs" && id === "new") return <ConfigPage key="new" />;
-  if (page === "configs" && id === "variables/new")
-    return <EnvPage key="new-variables" />;
-  if (page === "configs" && id === "variables") return <VariableSets />;
-  if (page === "configs" && id === "system-overrides")
-    return <SystemOverrides />;
-  if (page === "configs") return <ConfigsPage />;
-  return <RunsPage />;
 }

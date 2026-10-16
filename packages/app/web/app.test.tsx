@@ -10,7 +10,7 @@ import {
   validName,
 } from "./api";
 import { highlight } from "./yaml";
-import { destinationFor, restoreTabs, visitTab } from "./tab-routes";
+import { destinationFor, restoreTabs, visitTab } from "./tabs";
 
 it("keeps plugin projects in independent tabs", () => {
   const route = parse("/plugins/my-plugin")!;

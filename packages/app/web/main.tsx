@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BrowserRouter, useLocation, useNavigate } from "react-router";
 import { createRoot } from "react-dom/client";
 import {
   densitySize,
@@ -13,18 +14,21 @@ import { parse, routePath, type Route } from "./routes";
 const base = new URL(document.baseURI);
 const welcome = document.documentElement.dataset.welcome === "true";
 const href = (path: string) => new URL(path, base).href;
-const readRoute = () => ({
-  ...(parse(location.pathname.slice(base.pathname.length)) ?? {
-    page: welcome ? "welcome" : "runs",
-  }),
-  tabKey: history.state?.tabKey as string | undefined,
-});
-
 // densityKey holds a workspace size the user picked; the default is not saved so it can change
 const densityKey = "rtcbench:workspace-size";
 
 function Standalone() {
-  const [route, setRoute] = useState<Route>(readRoute);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const route: Route = {
+    ...(location.pathname === "/"
+      ? { page: welcome ? "welcome" : "runs" }
+      : (parse(location.pathname) ?? {
+          page: "not-found",
+          id: location.pathname.slice(1),
+        })),
+    tabKey: location.state?.tabKey ?? window.history.state?.tabKey,
+  };
   const [density, setDensity] = useState<WorkspaceDensity>(() => {
     try {
       const saved = localStorage.getItem(densityKey);
@@ -52,11 +56,6 @@ function Standalone() {
     }
   });
   useEffect(() => {
-    const read = () => setRoute(readRoute());
-    addEventListener("popstate", read);
-    return () => removeEventListener("popstate", read);
-  }, []);
-  useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     setWindowTheme(dark);
     try {
@@ -81,15 +80,24 @@ function Standalone() {
       onFullscreenChange={setFullscreen}
       host={desktopWindow}
       onRouteChange={(next, replace) => {
-        history[replace ? "replaceState" : "pushState"](
-          { tabKey: next.tabKey },
-          "",
-          href(routePath(next)),
+        navigate(
+          {
+            pathname: "/" + routePath(next),
+            search: replace ? location.search : "",
+            hash: replace ? location.hash : "",
+          },
+          {
+            replace,
+            state: { tabKey: next.tabKey },
+          },
         );
-        setRoute(next);
       }}
     />
   );
 }
 
-createRoot(document.getElementById("root")!).render(<Standalone />);
+createRoot(document.getElementById("root")!).render(
+  <BrowserRouter basename={base.pathname} useTransitions={false}>
+    <Standalone />
+  </BrowserRouter>,
+);

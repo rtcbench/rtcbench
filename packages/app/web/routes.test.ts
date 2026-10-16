@@ -1,7 +1,7 @@
 import { expect, it } from "bun:test";
 import { parse, routePath } from "./routes";
 import { systemPath, systemRoute } from "./systems/routes";
-import { restoreTabs } from "./tab-routes";
+import { restoreTabs } from "./tabs";
 import { restoreLayout, panes } from "@labpane/os";
 
 it("round-trips current URLs and rejects unsupported paths and malformed encoding", () => {
@@ -113,4 +113,37 @@ it("keeps Systems links and nested back links inside a proxy subpath", () => {
     systemRoute("instances/existing")!.parent,
   ])
     expect(new URL(path, base).pathname).toBe("/app/" + path);
+});
+
+it("matches only declared pages", () => {
+  for (const path of [
+    "/runs/not-a-page",
+    "/configs/unknown",
+    "/run",
+    "/benchmarks/one/two",
+    "/systems/unknown",
+    "/systems/keys/new/instances/new",
+    "/terminal/plugins/project/extra",
+  ])
+    expect(parse(path)).toBeNull();
+});
+
+it("excludes search and hash from resource IDs and decodes them once", () => {
+  expect(parse("/run/result?view=stats#video")).toEqual({
+    page: "run",
+    id: "result",
+  });
+  expect(parse("/config/Research%20%2525?view=source")).toEqual({
+    page: "config",
+    id: "Research %25",
+  });
+});
+
+it("distinguishes literal percent-encoded text from slashes in document names", () => {
+  for (const id of ["folder/a%2Fb", "folder/a/b", "a%25b", "Donn\u00e9es #2"]) {
+    expect(parse(routePath({ page: "config", id }))).toEqual({
+      page: "config",
+      id,
+    });
+  }
 });
