@@ -130,7 +130,11 @@ test("the terminal tab menu picks a theme and the terminal goes full screen", as
     page.getByRole("menuitem", { name: "Theme", exact: true }),
   ).toHaveCount(0);
   await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("tab", { name: "Welcome", exact: true }),
+  ).toBeFocused();
   await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
 
   const full = page.getByRole("button", { name: "Full screen", exact: true });
   const frame = page.locator('[data-slot="terminal"]');

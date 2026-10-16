@@ -9,22 +9,26 @@ declare global {
 }
 
 function detect() {
+  if (!bridge || typeof bridge.postMessage !== "function") return;
   const os = new URLSearchParams(location.search).get("desktop");
+  const valid = (value: string | null) =>
+    value === "darwin" || value === "windows" || value === "linux"
+      ? value
+      : undefined;
   try {
-    if (os) sessionStorage.setItem("rtcbench:desktop", os);
-    return os ?? sessionStorage.getItem("rtcbench:desktop") ?? undefined;
+    if (valid(os)) sessionStorage.setItem("rtcbench:desktop", os!);
+    return valid(os ?? sessionStorage.getItem("rtcbench:desktop"));
   } catch {
-    return os ?? undefined;
+    return valid(os);
   }
 }
 
+const bridge =
+  window.chrome?.webview ?? window.webkit?.messageHandlers?.external;
 // os is Go's name for the OS when the page runs inside the RTCBench desktop window
 const os = detect();
 // send posts a Wails v2.16 window message; the desktop build pins that version
-const send = (message: string) =>
-  (
-    window.chrome?.webview ?? window.webkit?.messageHandlers?.external
-  )?.postMessage(message);
+const send = (message: string) => bridge?.postMessage(message);
 
 // desktopWindow is the RTCBench desktop window, or undefined in a browser
 export const desktopWindow: WindowHost | undefined = os
