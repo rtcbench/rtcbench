@@ -20,7 +20,6 @@ rsync:
     - "*.exe"
     - ".env"
     - ".env.*"
-    - "bench/"
 
 discover:
   command: "docker run --rm -v {root}:{root} -w {root} rtcbench-e2e-runner:latest -m pytest e2e/ --collect-only -q"

@@ -1,5 +1,8 @@
 import { expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router";
+import { RoutePage } from "./routes";
+import { PageScope } from "./integration";
 import { build } from "esbuild";
 import {
   ConfigPage,
@@ -10,6 +13,8 @@ import {
   VariablePage,
   VariablesPage,
   SystemOverridesPage,
+  BenchmarkPage,
+  BenchmarksPage,
 } from "../pages";
 import { page, useNavigation } from "./integration";
 import { useApi } from "./api";
@@ -50,6 +55,8 @@ it("renders pages in a host layout without a provider, Lab, or browser globals",
     <VariablePage />,
     <SystemOverridesPage />,
     <SystemsPage />,
+    <BenchmarksPage />,
+    <BenchmarkPage id="new" />,
   ]) {
     const html = renderToStaticMarkup(
       <section aria-label="Host layout">{content}</section>,
@@ -125,4 +132,38 @@ it("keeps Lab and the standalone entry out of the pages bundle", async () => {
   expect(imports.some((path) => /^@rtcbench\/lab(?:\/|$)/.test(path))).toBe(
     false,
   );
+});
+
+it("renders independent workspace routes without taking over an embedded host router", () => {
+  function HostLocation() {
+    return <output>{useLocation().pathname}</output>;
+  }
+  const pages = (
+    <PageScope href={(path) => `/tools/rtc/${path}`}>
+      <RoutePage path="configs/new" />
+      <RoutePage path="systems/networks" />
+    </PageScope>
+  );
+  const standalone = renderToStaticMarkup(pages);
+  const embedded = renderToStaticMarkup(
+    <MemoryRouter initialEntries={["/host/dashboard"]}>
+      <Routes>
+        <Route
+          path="host/*"
+          element={
+            <>
+              {pages}
+              <HostLocation />
+            </>
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+  expect(standalone).toContain('href="/tools/rtc/configs"');
+  expect(standalone).toContain("Networks");
+  expect(embedded).toContain('href="/tools/rtc/configs"');
+  expect(embedded).toContain("New config");
+  expect(embedded).toContain("Networks");
+  expect(embedded).toContain("<output>/host/dashboard</output>");
 });

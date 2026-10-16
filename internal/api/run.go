@@ -404,20 +404,22 @@ func (s *Server) execute(ctx context.Context, rn *run, sess *session) {
 }
 
 func (s *Server) Shutdown(ctx context.Context) {
-	s.closeTerminals(ctx)
-	s.deployments.Close(ctx)
 	s.mu.Lock()
-	var active []*run
+	s.closing = true
+	var active []<-chan struct{}
 	for _, rn := range s.runs {
 		if rn.Status == StatusRunning {
-			active = append(active, rn)
+			rn.cancel()
+			active = append(active, rn.done)
 		}
 	}
 	s.mu.Unlock()
-	for _, rn := range active {
-		rn.cancel()
+	active = append(active, s.benchmarks.Cancel())
+	s.closeTerminals(ctx)
+	s.deployments.Close(ctx)
+	for _, done := range active {
 		select {
-		case <-rn.done:
+		case <-done:
 		case <-ctx.Done():
 			return
 		}

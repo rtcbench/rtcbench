@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { testPackage } from "../../testing";
 
 testPackage(join(import.meta.dir, ".."), {
-  dependencies: ["@wterm/dom", "lucide-react", "yaml"],
+  dependencies: ["@wterm/dom", "lucide-react", "react-router", "yaml"],
   peers: {
     "@labpane/os": "^1.4.0",
     "@labpane/ui": "^1.4.0",

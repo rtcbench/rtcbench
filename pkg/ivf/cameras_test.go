@@ -123,3 +123,30 @@ func TestNewCamerasEmptyDir(t *testing.T) {
 		t.Fatal("expected error for empty dir in memory mode")
 	}
 }
+
+func TestNewCamerasIgnoresOtherFormats(t *testing.T) {
+	dir := t.TempDir()
+	writeTestIVF(t, filepath.Join(dir, "video.IVF"), [][]byte{{10, 20}})
+	for _, name := range []string{"browser.mp4", "metadata.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("not IVF"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, memory := range []bool{false, true} {
+		cams, err := NewCameras(dir, memory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := cams.NewSource()
+		for range 3 {
+			frame, _, err := src.NextFrame()
+			if err != nil {
+				t.Fatalf("inMemory=%t: %v", memory, err)
+			}
+			if len(frame) != 2 || frame[0] != 10 {
+				t.Fatalf("unexpected frame: %v", frame)
+			}
+		}
+		src.Close()
+	}
+}

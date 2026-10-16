@@ -2,7 +2,7 @@ import { expect, it } from "bun:test";
 import { pluginFiles } from "./plugin-template";
 import { pluginPrompt } from "./plugin-prompt";
 import { parse } from "./routes";
-import { restoreTabs } from "./tab-routes";
+import { restoreTabs } from "./tabs";
 
 it("includes the project location and server download URL in the prompt", () => {
   const url = "https://bench.example/app/api/v1/plugins/my-plugin/download";

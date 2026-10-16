@@ -1,6 +1,40 @@
 package rtcbench
 
-import "github.com/rtcbench/rtcbench/internal/core"
+import (
+	"context"
+	"embed"
+	"io/fs"
+
+	"github.com/rtcbench/rtcbench/internal/app"
+	"github.com/rtcbench/rtcbench/internal/core"
+	"github.com/rtcbench/rtcbench/pkg/deployment"
+)
+
+//go:embed config-examples
+var examples embed.FS
+
+// BuiltinPlugins contains manifests for the plugins registered by the standard CLI.
+//
+//go:embed plugin/*/plugin.yml
+var BuiltinPlugins embed.FS
+
+type Options struct {
+	Deployments []deployment.Plugin
+	Version     string
+	Web         fs.FS
+	Plugins     fs.FS
+	// Register may be called concurrently; register factories rather than shared instances.
+	Register func(*Client)
+}
+
+// Run serves the app or runs a config, stopping on cancellation or an interrupt.
+func Run(ctx context.Context, args []string, options Options) error {
+	configs, _ := fs.Sub(examples, "config-examples")
+	return app.Run(ctx, args, app.Options{
+		Deployments: options.Deployments, Version: options.Version, Web: options.Web,
+		Plugins: options.Plugins, Register: options.Register, Examples: configs,
+	})
+}
 
 type (
 	Client      = core.Client

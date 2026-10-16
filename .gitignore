@@ -57,3 +57,9 @@ Thumbs.db
 
 docker/livekit/livekit-server
 cmd/rtcbench/*.syso
+
+/bench/
+/results/
+/cluster.yml
+/hints.json
+/ivf/
