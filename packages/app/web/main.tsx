@@ -13,9 +13,15 @@ import { parse, routePath, type Route } from "./routes";
 
 const base = new URL(document.baseURI);
 const welcome = document.documentElement.dataset.welcome === "true";
+const { releases, preview } = document.documentElement.dataset;
+const persistent = preview !== "true";
 const href = (path: string) => new URL(path, base).href;
 // densityKey holds a workspace size the user picked; the default is not saved so it can change
 const densityKey = "rtcbench:workspace-size";
+const previewFetch =
+  preview === "true"
+    ? (await import("./preview")).createPreview(base)
+    : undefined;
 
 function Standalone() {
   const location = useLocation();
@@ -31,7 +37,7 @@ function Standalone() {
   };
   const [density, setDensity] = useState<WorkspaceDensity>(() => {
     try {
-      const saved = localStorage.getItem(densityKey);
+      const saved = persistent ? localStorage.getItem(densityKey) : null;
       if (saved) return densitySize(Number(saved)).value;
     } catch {}
     return 40;
@@ -39,18 +45,18 @@ function Standalone() {
   const changeDensity = (value: WorkspaceDensity) => {
     setDensity(value);
     try {
-      localStorage.setItem(densityKey, String(value));
+      if (persistent) localStorage.setItem(densityKey, String(value));
     } catch {}
   };
   const resetDensity = () => {
     setDensity(40);
     try {
-      localStorage.removeItem(densityKey);
+      if (persistent) localStorage.removeItem(densityKey);
     } catch {}
   };
   const [dark, setDark] = useState(() => {
     try {
-      return localStorage.getItem("rtcbench:theme") === "dark";
+      return persistent && localStorage.getItem("rtcbench:theme") === "dark";
     } catch {
       return false;
     }
@@ -59,7 +65,8 @@ function Standalone() {
     document.documentElement.classList.toggle("dark", dark);
     setWindowTheme(dark);
     try {
-      localStorage.setItem("rtcbench:theme", dark ? "dark" : "light");
+      if (persistent)
+        localStorage.setItem("rtcbench:theme", dark ? "dark" : "light");
     } catch {}
   }, [dark]);
   const [fullscreen, setFullscreen] = useFullscreen(desktopWindow);
@@ -67,10 +74,12 @@ function Standalone() {
   return (
     <RTCBench
       apiUrl={href("api/v1")}
+      fetch={previewFetch}
       href={href}
       welcome={welcome}
+      releases={releases}
       route={route}
-      storageKey={"rtcbench:tabs:" + base.pathname}
+      storageKey={persistent ? "rtcbench:tabs:" + base.pathname : undefined}
       dark={dark}
       onThemeChange={setDark}
       density={density}

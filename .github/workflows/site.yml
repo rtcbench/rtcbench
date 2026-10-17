@@ -1,0 +1,72 @@
+name: Site
+
+on:
+  push:
+    branches: ["main"]
+  release:
+    types: [published, edited, deleted]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+        with:
+          enablement: true
+
+      - name: Build (make site)
+        run: make site
+        env:
+          SITE_BASE: ${{ steps.pages.outputs.base_path || '/' }}
+          SITE_RELEASES: ${{ github.repository }}
+
+      - name: Add the release list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > dist/site/releases.json
+
+      - name: Add the checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/site/checksums
+          for tag in $(jq -r '.[] | select(any(.assets[]; .name | endswith("sums.txt"))) | .tag_name' dist/site/releases.json); do
+            rm -rf sums
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*sums.txt' --dir sums
+            cat sums/*sums.txt > "dist/site/checksums/$tag.txt"
+          done
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

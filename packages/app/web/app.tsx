@@ -42,6 +42,7 @@ import {
   useTerminalTheme,
 } from "./terminal-theme";
 import { NewTerminal } from "./new-terminal";
+import { DownloadButton, Welcome } from "./welcome";
 import {
   destinationFor,
   restoreTabs,
@@ -76,6 +77,7 @@ function save(key: string | undefined, value: unknown) {
 }
 export type RTCBenchProps = Pick<PageOptions, "apiUrl" | "fetch" | "href"> & {
   welcome?: boolean;
+  releases?: string;
   route?: Route;
   onRouteChange?: (route: Route, replace: boolean) => void;
   storageKey?: string;
@@ -94,6 +96,7 @@ export type RTCBenchProps = Pick<PageOptions, "apiUrl" | "fetch" | "href"> & {
 
 export function RTCBench({
   welcome = false,
+  releases,
   route: controlledRoute,
   onRouteChange,
   storageKey,
@@ -128,6 +131,7 @@ export function RTCBench({
   );
   const [terminalOpener, setTerminalOpener] = useState<string>();
   const [menuPane, setMenuPane] = useState<string>();
+  const [attention, setAttention] = useState(0);
   const openedTab = useRef<string | undefined>(undefined);
   const [discard, setDiscard] = useState<{
     label: string;
@@ -204,6 +208,18 @@ export function RTCBench({
         onFullscreenChange={onFullscreenChange}
         align={align}
       />
+      {releases && (
+        <DownloadButton
+          onClick={() => {
+            setAttention((count) => count + 1);
+            go(
+              "welcome",
+              visibleTabs.find((tab) => tab.id === "welcome")?.key ??
+                crypto.randomUUID(),
+            );
+          }}
+        />
+      )}
     </PageScope>
   );
   const frame = (workspace: ReactNode) =>
@@ -342,11 +358,25 @@ export function RTCBench({
             setTabs(next);
             save(storageKey, next);
           }}
-          empty={(pane) => <Welcome empty open={() => setMenuPane(pane.id)} />}
+          empty={(pane) =>
+            releases ? (
+              <Welcome
+                releases={releases}
+                attention={attention}
+                visit={(path) => open(path, pane.id)}
+              />
+            ) : (
+              <EmptyPane open={() => setMenuPane(pane.id)} />
+            )
+          }
         >
-          {(tab, pane) =>
+          {(tab) =>
             tab.id === "welcome" ? (
-              <Welcome open={() => setMenuPane(pane.id)} />
+              <Welcome
+                releases={releases}
+                attention={attention}
+                visit={(path) => open(path, tab.key)}
+              />
             ) : (
               <TabPage
                 {...settings}
@@ -401,20 +431,9 @@ export function RTCBench({
   );
 }
 
-function Welcome({
-  empty = false,
-  open,
-}: {
-  empty?: boolean;
-  open: () => void;
-}) {
+function EmptyPane({ open }: { open: () => void }) {
   return (
     <div className="labui:flex labui:min-h-full labui:flex-col labui:items-center labui:justify-center labui:gap-4 labui:p-3">
-      {!empty && (
-        <h1 className="labui:font-display labui:text-3xl labui:font-bold labui:tracking-tight">
-          Welcome
-        </h1>
-      )}
       <button
         type="button"
         onClick={open}
