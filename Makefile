@@ -1,4 +1,4 @@
-.PHONY: all dev cli desktop web clean clean-ci clean-screenshots install test e2e-app \
+.PHONY: all dev cli desktop web site release clean clean-ci clean-screenshots install test e2e-app \
 	e2e e2e-janus e2e-jitsi e2e-livekit e2e-mediasoup screenshots \
 	_build-all _build-e2e-runner _build-janus _build-jitsi _build-livekit _build-mediasoup \
 	_e2e-run remote-ci remote-run remote-seed remote-status remote-clean remote-estimate \
@@ -59,6 +59,37 @@ endif
 web:
 	cd packages && $(INSTALL_PACKAGES)
 	cd packages/app && $(RUN_APP) build && $(RUN_APP) build:web
+
+site:
+	cd packages && $(INSTALL_PACKAGES)
+	cd packages/app && $(RUN_APP) build && $(RUN_APP) build:site
+
+RELEASE_DIR := dist/release
+GOARCH := $(shell go env GOARCH)
+
+release: web
+	mkdir -p $(RELEASE_DIR)/desktop $(RELEASE_DIR)/headless
+ifeq ($(GOOS),linux)
+	$(DESKTOP_ENV) go build -trimpath -tags $(DESKTOP_TAGS) $(LDFLAGS) -o $(RELEASE_DIR)/desktop/rtcbench ./cmd/rtcbench
+	CGO_ENABLED=0 go build -trimpath $(LDFLAGS) -o $(RELEASE_DIR)/headless/rtcbench ./cmd/rtcbench
+	tar -C $(RELEASE_DIR)/desktop -czf $(RELEASE_DIR)/rtcbench-linux-$(GOARCH)-webkitgtk.tar.gz rtcbench
+	tar -C $(RELEASE_DIR)/headless -czf $(RELEASE_DIR)/rtcbench-headless-linux-$(GOARCH).tar.gz rtcbench
+else ifeq ($(GOOS),darwin)
+	GOARCH=arm64 $(DESKTOP_ENV) go build -trimpath -tags $(DESKTOP_TAGS) $(LDFLAGS) -o $(RELEASE_DIR)/desktop/rtcbench ./cmd/rtcbench
+	cd $(RELEASE_DIR)/desktop && zip -q ../rtcbench-macos-arm64.zip rtcbench
+	GOARCH=amd64 $(DESKTOP_ENV) go build -trimpath -tags $(DESKTOP_TAGS) $(LDFLAGS) -o $(RELEASE_DIR)/desktop/rtcbench ./cmd/rtcbench
+	cd $(RELEASE_DIR)/desktop && zip -q ../rtcbench-macos-amd64.zip rtcbench
+	CGO_ENABLED=0 GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(RELEASE_DIR)/headless/rtcbench ./cmd/rtcbench
+	cd $(RELEASE_DIR)/headless && zip -q ../rtcbench-headless-macos-arm64.zip rtcbench
+	CGO_ENABLED=0 GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(RELEASE_DIR)/headless/rtcbench ./cmd/rtcbench
+	cd $(RELEASE_DIR)/headless && zip -q ../rtcbench-headless-macos-amd64.zip rtcbench
+else
+	go run ./internal/appicon/winicon cmd/rtcbench
+	GOARCH=amd64 go build -trimpath -tags $(DESKTOP_TAGS) $(LDFLAGS) -o $(RELEASE_DIR)/rtcbench-windows-amd64.exe ./cmd/rtcbench
+	GOARCH=arm64 go build -trimpath -tags $(DESKTOP_TAGS) $(LDFLAGS) -o $(RELEASE_DIR)/rtcbench-windows-arm64.exe ./cmd/rtcbench
+	CGO_ENABLED=0 GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(RELEASE_DIR)/rtcbench-headless-windows-amd64.exe ./cmd/rtcbench
+	CGO_ENABLED=0 GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(RELEASE_DIR)/rtcbench-headless-windows-arm64.exe ./cmd/rtcbench
+endif
 
 test:
 	go vet ./...

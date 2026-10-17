@@ -5,6 +5,7 @@
     "dev": "bun run --cwd=../.. --config=packages/app/bunfig.dev.toml ./packages/app/dev.mjs",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && esbuild index.ts pages.ts --bundle --sourcemap --splitting --chunk-names=[name]-[hash] --format=esm --packages=external --loader:.svg=dataurl --outdir=dist && tailwindcss -i web/styles.css -o dist/styles.css --minify && node ../unlayer.mjs dist/styles.css && tailwindcss -i web/page.css -o dist/page.css --minify && node ../package-assets.mjs @wterm/dom && node docker-contexts.mjs dist && node deployment-web.mjs dist",
     "build:web": "tailwindcss -i web/standalone.css -o ../../internal/api/web/styles.css --minify --map ../../internal/api/web/styles.css.map && node build-web.mjs",
+    "build:site": "node build-site.mjs && tailwindcss -i web/standalone.css -o ../../dist/site/styles.css --minify",
     "test": "bun test ./web && tsc -p tsconfig.test.json",
     "format": "prettier --write --ignore-path ../../.gitignore web *.ts *.mjs *.json",
     "format:check": "prettier --check --ignore-path ../../.gitignore web *.ts *.mjs *.json",

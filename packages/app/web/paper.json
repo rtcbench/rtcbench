@@ -1,0 +1,29 @@
+{
+  "title": "RTCBench: A Scalable Benchmarking Framework for Multi-Party Video Conferencing",
+  "authors": [
+    {
+      "name": "Evan Ram",
+      "url": "https://www.linkedin.com/in/evanram"
+    },
+    {
+      "name": "Tuan Tran",
+      "url": "https://www.linkedin.com/in/tuan-tran-mns"
+    },
+    {
+      "name": "Youngwook Son",
+      "url": "https://ywson.github.io/"
+    },
+    {
+      "name": "Sangtae Ha",
+      "url": "https://netstech.org/"
+    }
+  ],
+  "affiliation": "University of Colorado Boulder",
+  "venue": "ACM Multimedia 2026",
+  "venueUrl": "https://2026.acmmm.org/",
+  "proceedings": "Proceedings of the 34th ACM International Conference on Multimedia (MM '26)",
+  "city": "Rio de Janeiro",
+  "year": 2026,
+  "doi": "10.1145/3767308.3835424",
+  "pdf": "https://github.com/rtcbench/rtcbench/wiki/Paper-link"
+}

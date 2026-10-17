@@ -6,6 +6,24 @@
   .rtc-code-block {
     @apply labui:rounded-md labui:border labui:bg-background labui:p-4 labui:font-mono labui:text-xs labui:leading-relaxed labui:break-all labui:whitespace-pre-wrap labui:text-foreground;
   }
+  .rtc-serif {
+    font-family:
+      "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+      "Times New Roman", serif;
+  }
+  .rtc-attention {
+    animation: rtc-attention 0.7s ease-out 1;
+  }
+}
+
+@keyframes rtc-attention {
+  from {
+    box-shadow: 0 0 0 0
+      color-mix(in oklab, var(--labui-primary) 60%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 14px transparent;
+  }
 }
 
 @media (forced-colors: active) {
