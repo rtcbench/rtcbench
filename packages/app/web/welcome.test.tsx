@@ -42,7 +42,8 @@ it("picks the download for the visitor's platform", () => {
   expect(defaultTarget("macos", true)).toBe("macos-arm64");
   expect(defaultTarget("macos", false)).toBe("macos-amd64");
   expect(defaultTarget("linux", false)).toBe("linux-amd64");
-  expect(defaultTarget(undefined)).toBe(undefined);
+  expect(defaultTarget(undefined)).toBe("linux-amd64");
+  expect(defaultTarget(undefined, true)).toBe("linux-amd64");
 });
 
 it("recognises release assets by name", () => {
@@ -205,19 +206,21 @@ it("offers the latest release on the website", () => {
     <Welcome releases="rtcbench/rtcbench" visit={() => {}} />,
   );
   expect(html).toContain("https://github.com/rtcbench/rtcbench/releases");
-  expect(html).toMatch(/Download<\/span>/);
+  expect(html).toContain("Download for Linux x64");
+  expect(html).toContain("rtcbench-headless-linux-amd64.tar.gz");
   expect(html).toContain("Star on GitHub");
   expect(html).toContain("Come say hi!");
   expect(html).toContain(
     'href="https://github.com/rtcbench/rtcbench/wiki/Discord-link"',
   );
   expect(html).toContain('href="https://github.com/rtcbench/rtcbench"');
-  expect(html).not.toContain("Headless");
+  expect(html).toContain("Headless");
   expect(html).not.toContain("Configs</button>");
 });
 
 it("links the top bar to the welcome page", () => {
   const html = renderToStaticMarkup(<DownloadButton onClick={() => {}} />);
-  expect(html).toContain("Download</button>");
+  expect(html).toContain('aria-label="Download RTCBench"');
+  expect(html).toContain("Download</span>");
   expect(html).not.toContain("Download for");
 });
