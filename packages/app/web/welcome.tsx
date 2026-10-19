@@ -135,8 +135,9 @@ export function detectPlatform(
 }
 
 export const defaultTarget = (platform: Platform | undefined, arm?: boolean) =>
-  platform &&
-  `${platform}-${(platform === "macos" ? arm !== false : !!arm) ? "arm64" : "amd64"}`;
+  platform
+    ? `${platform}-${(platform === "macos" ? arm !== false : !!arm) ? "arm64" : "amd64"}`
+    : "linux-amd64";
 
 export const assetUrl = (repo: string, file: string) =>
   `https://github.com/${repo}/releases/latest/download/${file}`;
@@ -327,9 +328,9 @@ export function Welcome({
   visit: (path: string) => void;
 }) {
   return (
-    <div className="labui:mx-auto labui:flex labui:w-full labui:max-w-3xl labui:flex-col labui:gap-14 labui:px-4 labui:py-10">
+    <div className="labui:mx-auto labui:flex labui:w-full labui:min-w-0 labui:max-w-3xl labui:flex-col labui:gap-8 labui:px-3 labui:py-6 labui:sm:gap-14 labui:sm:px-4 labui:sm:py-10">
       <header className="labui:relative labui:flex labui:flex-col labui:gap-6">
-        <div className="labui:flex labui:items-start labui:justify-between labui:gap-4">
+        <div className="labui:flex labui:flex-wrap labui:items-start labui:justify-between labui:gap-4">
           <div className="labui:flex labui:items-center labui:gap-3">
             <Logo className="labui:size-10" />
             <h1 className="labui:font-display labui:text-3xl labui:font-semibold labui:tracking-tight">
@@ -374,26 +375,7 @@ export function Welcome({
 
       <div className="labui:flex labui:flex-col labui:gap-8">
         <Paper />
-        <figure className="labui:flex labui:gap-1 labui:lg:-ml-[78px]">
-          <span
-            aria-hidden="true"
-            className="labui:self-center labui:rotate-180 labui:text-xs labui:text-muted-foreground labui:[writing-mode:vertical-rl]"
-          >
-            # of full-quality 1080p25 streams
-          </span>
-          <div className="labui:flex labui:min-w-0 labui:flex-1 labui:flex-col labui:gap-3">
-            <Scaling />
-            <figcaption
-              className="labui:text-center labui:text-sm labui:font-semibold"
-              style={{
-                paddingRight: `${((chart.right - chart.left) / chart.width) * 100}%`,
-              }}
-            >
-              Streams per host (LiveKit, CloudLab c8220, two 10-core Xeon
-              E5-2660 v2)
-            </figcaption>
-          </div>
-        </figure>
+        <Scaling />
       </div>
     </div>
   );
@@ -401,7 +383,7 @@ export function Welcome({
 
 function WorksWith() {
   return (
-    <div className="labui:mb-6 labui:flex labui:flex-wrap labui:items-center labui:justify-between labui:gap-x-6 labui:gap-y-3">
+    <div className="labui:flex labui:flex-wrap labui:items-center labui:justify-between labui:gap-x-6 labui:gap-y-3 labui:sm:mb-6">
       <span className="labui:text-sm labui:text-muted-foreground">
         Works with
       </span>
@@ -450,7 +432,9 @@ export function Download({
   const groups = useMemo(() => groupReleases(releases), [releases]);
   const [tag, setTag] = useState<string>();
   const release = releases.find((item) => item.tag === tag) ?? groups[0]?.top;
-  const [headless, setHeadless] = useState(platform === "linux");
+  const [headless, setHeadless] = useState(
+    platform !== "macos" && platform !== "windows",
+  );
   const [target, setTarget] = useState<string>();
   const [started, setStarted] = useState(false);
   const [curl, setCurl] = useState(false);
@@ -496,16 +480,19 @@ export function Download({
     (platform ? builds[0] : undefined);
   const github = `https://github.com/${repo}`;
   return (
-    <div className="labui:flex labui:flex-col labui:gap-3">
+    <div className="labui:flex labui:min-w-0 labui:flex-col labui:gap-3">
       <div className="labui:flex labui:flex-wrap labui:items-stretch labui:gap-2">
         <div
           ref={anchor}
-          className={cn("labui:flex labui:rounded-lg", glow && "rtc-attention")}
+          className={cn(
+            "labui:flex labui:w-full labui:min-w-0 labui:max-w-full labui:rounded-lg labui:sm:w-96",
+            glow && "rtc-attention",
+          )}
         >
           <Button
             size="lg"
             asChild
-            className="labui:h-auto labui:min-w-80 labui:flex-1 labui:justify-start labui:rounded-r-none labui:px-6 labui:text-base"
+            className="labui:h-auto labui:min-h-14 labui:min-w-0 labui:flex-1 labui:justify-start labui:rounded-r-none labui:px-3 labui:py-2 labui:text-base labui:whitespace-normal labui:sm:px-6"
           >
             <a
               href={build?.url ?? releasesUrl(repo)}
@@ -514,10 +501,10 @@ export function Download({
               onClick={() => setStarted(true)}
             >
               <DownloadIcon aria-hidden="true" />
-              <span className="labui:flex labui:flex-col labui:items-start labui:leading-tight">
+              <span className="labui:flex labui:min-w-0 labui:flex-col labui:items-start labui:leading-snug">
                 {build ? `Download for ${build.os} ${build.arch}` : "Download"}
                 {build && (
-                  <span className="labui:flex labui:gap-3 labui:text-xs labui:leading-tight labui:opacity-90">
+                  <span className="labui:flex labui:flex-wrap labui:gap-x-3 labui:text-xs labui:leading-snug labui:opacity-90">
                     <span>
                       <span className="labui:font-semibold">
                         {release?.tag ?? "latest"}
@@ -550,7 +537,7 @@ export function Download({
               <Button
                 size="icon-lg"
                 aria-label="Choose a platform"
-                className="labui:h-auto labui:rounded-l-none labui:border-l labui:border-primary-foreground/25"
+                className="labui:h-auto labui:min-h-14 labui:w-11 labui:shrink-0 labui:rounded-l-none labui:border-l labui:border-primary-foreground/25"
               >
                 <ChevronDownIcon aria-hidden="true" />
               </Button>
@@ -585,7 +572,7 @@ export function Download({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <div className="labui:flex labui:flex-col labui:justify-between labui:gap-1">
+        <div className="labui:flex labui:flex-wrap labui:items-center labui:gap-3 labui:sm:flex-col labui:sm:items-start labui:sm:justify-between labui:sm:gap-1">
           {release && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -718,23 +705,33 @@ export function DownloadButton({ onClick }: { onClick: () => void }) {
     <Badge asChild>
       <button
         type="button"
-        className="labui:cursor-pointer labui:hover:bg-primary/90"
+        aria-label="Download RTCBench"
+        className="labui:justify-center labui:cursor-pointer labui:hover:bg-primary/90 labui:max-sm:min-h-8 labui:max-sm:min-w-8"
         onClick={onClick}
       >
         <DownloadIcon aria-hidden="true" className="labui:size-3" />
-        Download
+        <span className="labui:hidden labui:sm:inline">Download</span>
       </button>
     </Badge>
   );
 }
 
-const chart = { width: 716, height: 320, left: 52, right: 86 };
-
 function Scaling() {
-  const { width, height, left, right } = chart;
-  const top = 40;
-  const bottom = 40;
-  const mark = 25;
+  const svg = useRef<SVGSVGElement>(null);
+  const [width, setWidth] = useState(716);
+  useEffect(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0)
+        setWidth(Math.round(entry.contentRect.width));
+    });
+    observer.observe(svg.current!);
+    return () => observer.disconnect();
+  }, []);
+  const height = width < 480 ? 260 : 320;
+  const left = 48;
+  const right = 18;
+  const top = 28;
+  const bottom = 56;
   const plot = { w: width - left - right, h: height - top - bottom };
   const floor = Math.log10(5);
   const ceiling = Math.log10(4000);
@@ -751,198 +748,148 @@ function Scaling() {
       .map((value, index) => `${index ? "L" : "M"}${point(value, index)}`)
       .join(" ");
   const ratio = Math.floor(scaling.rtcbench[last]! / scaling.chromium[last]!);
-  const brace = (bx: number, y1: number, y2: number, w = 7) => {
-    const mid = (y1 + y2) / 2;
-    return `M${bx} ${y1} Q${bx + w} ${y1} ${bx + w} ${y1 + w} L${bx + w} ${mid - w} Q${bx + w} ${mid} ${bx + 2 * w} ${mid} Q${bx + w} ${mid} ${bx + w} ${mid + w} L${bx + w} ${y2 - w} Q${bx + w} ${y2} ${bx} ${y2}`;
-  };
   const title = (name: string, index: number, value: number) =>
     `${name}, ${cores[index]} cores: ${number(value)} receivers`;
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label={`LiveKit receivers per host against CPU cores, log scale: RTCBench reaches ${number(scaling.rtcbench[last]!)} at ${cores[last]} cores, Chromium ${scaling.chromium[last]}, ${ratio} times more`}
-      className="labui:w-full labui:text-[13px]"
-    >
-      {minor.map((tick) => (
-        <line
-          key={tick}
-          x1={left}
-          x2={left + plot.w}
-          y1={y(tick)}
-          y2={y(tick)}
-          className="labui:stroke-border/50"
-        />
-      ))}
-      {[10, 100, 1000].map((tick) => (
-        <g key={tick}>
+    <figure className="labui:flex labui:min-w-0 labui:flex-col labui:gap-3">
+      <div className="labui:flex labui:flex-wrap labui:items-center labui:justify-between labui:gap-3 labui:text-sm">
+        <span className="labui:text-muted-foreground">
+          Full-quality 1080p25 streams
+        </span>
+        <div className="labui:flex labui:flex-wrap labui:gap-4">
+          <span className="labui:inline-flex labui:items-center labui:gap-1.5">
+            <Logo className="labui:size-4" />
+            RTCBench
+          </span>
+          <span className="labui:inline-flex labui:items-center labui:gap-1.5">
+            <ChromiumMark className="labui:size-4" />
+            Chromium
+          </span>
+        </div>
+      </div>
+      <svg
+        ref={svg}
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`LiveKit receivers per host against CPU cores, log scale: RTCBench reaches ${number(scaling.rtcbench[last]!)} at ${cores[last]} cores, Chromium ${scaling.chromium[last]}, ${ratio} times more`}
+        className="labui:block labui:w-full labui:text-[13px]"
+      >
+        {minor.map((tick) => (
           <line
+            key={tick}
             x1={left}
             x2={left + plot.w}
             y1={y(tick)}
             y2={y(tick)}
-            className="labui:stroke-border"
+            className="labui:stroke-border/50"
           />
+        ))}
+        {[10, 100, 1000].map((tick) => (
+          <g key={tick}>
+            <line
+              x1={left}
+              x2={left + plot.w}
+              y1={y(tick)}
+              y2={y(tick)}
+              className="labui:stroke-border"
+            />
+            <text
+              x={left - 8}
+              y={y(tick) + 4}
+              textAnchor="end"
+              className="labui:fill-muted-foreground"
+            >
+              {number(tick)}
+            </text>
+          </g>
+        ))}
+        {cores.map((core, index) => (
           <text
-            x={left - 10}
-            y={y(tick) + 4}
-            textAnchor="end"
+            key={core}
+            x={x(index)}
+            y={height - bottom + 28}
+            textAnchor="middle"
             className="labui:fill-muted-foreground"
           >
-            {number(tick)}
+            {core}
           </text>
-        </g>
-      ))}
-      {cores.map((core, index) => (
+        ))}
         <text
-          key={core}
-          x={x(index)}
-          y={height - bottom + 20}
+          x={left + plot.w / 2}
+          y={height - 6}
           textAnchor="middle"
           className="labui:fill-muted-foreground"
         >
-          {core}
+          CPU cores
         </text>
-      ))}
-      <text
-        x={left + plot.w / 2}
-        y={height - 4}
-        textAnchor="middle"
-        className="labui:fill-muted-foreground"
-      >
-        CPU cores
-      </text>
-      <path
-        d={line(scaling.chromium)}
-        fill="none"
-        strokeWidth={2.5}
-        strokeDasharray="6 5"
-        className="labui:stroke-muted-foreground/70"
-      />
-      <path
-        d={line(scaling.rtcbench)}
-        fill="none"
-        strokeWidth={3.5}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        className="labui:stroke-primary"
-      />
-      {scaling.chromium.map((value, index) => (
-        <g key={index}>
-          <title>{title("Chromium", index, value)}</title>
-          <circle
-            cx={x(index)}
-            cy={y(value)}
-            r={5}
-            className="labui:fill-muted-foreground labui:stroke-background"
-            strokeWidth={2}
-          />
-          {index < last && (
+        <path
+          d={line(scaling.chromium)}
+          fill="none"
+          strokeWidth={2.5}
+          strokeDasharray="6 5"
+          className="labui:stroke-muted-foreground/70"
+        />
+        <path
+          d={line(scaling.rtcbench)}
+          fill="none"
+          strokeWidth={3.5}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          className="labui:stroke-primary"
+        />
+        {scaling.chromium.map((value, index) => (
+          <g key={index}>
+            <title>{title("Chromium", index, value)}</title>
+            <circle
+              cx={x(index)}
+              cy={y(value)}
+              r={5}
+              className="labui:fill-muted-foreground labui:stroke-background"
+              strokeWidth={2}
+            />
             <text
               x={x(index)}
               y={y(value) + 20}
-              textAnchor="middle"
+              textAnchor={index === last ? "end" : "middle"}
               className="labui:fill-muted-foreground labui:font-mono"
             >
               {number(value)}
             </text>
-          )}
-        </g>
-      ))}
-      {scaling.rtcbench.map((value, index) => (
-        <g key={index}>
-          <title>{title("RTCBench", index, value)}</title>
-          <circle
-            cx={x(index)}
-            cy={y(value)}
-            r={5}
-            className="labui:fill-primary labui:stroke-background"
-            strokeWidth={2}
-          />
-          {index < last && (
+          </g>
+        ))}
+        {scaling.rtcbench.map((value, index) => (
+          <g key={index}>
+            <title>{title("RTCBench", index, value)}</title>
+            <circle
+              cx={x(index)}
+              cy={y(value)}
+              r={5}
+              className="labui:fill-primary labui:stroke-background"
+              strokeWidth={2}
+            />
             <text
-              x={x(index)}
+              x={x(index) + (index === 0 ? 8 : 0)}
               y={y(value) - 12}
-              textAnchor="middle"
+              textAnchor={
+                index === 0 ? "start" : index === last ? "end" : "middle"
+              }
               className="labui:fill-foreground labui:font-mono labui:font-semibold"
             >
               {number(value)}
             </text>
-          )}
-        </g>
-      ))}
-      <Logo
-        x={x(last) - 70}
-        y={y(scaling.rtcbench[last]!) - 52}
-        width={mark}
-        height={mark}
-      />
-      <text
-        x={x(last) - 70 + mark / 2}
-        y={y(scaling.rtcbench[last]!) - 17}
-        textAnchor="middle"
-        className="labui:fill-muted-foreground labui:text-[10px]"
-      >
-        RTCBench
-      </text>
-      <text
-        x={x(last) - 39}
-        y={y(scaling.rtcbench[last]!) - 35}
-        className="labui:fill-primary labui:font-semibold"
-      >
-        {number(scaling.rtcbench[last]!)}
-      </text>
-      <ChromiumMark
-        x={x(last) - 62}
-        y={y(scaling.chromium[last]!) + 10}
-        width={mark}
-        height={mark}
-      />
-      <text
-        x={x(last) - 62 + mark / 2}
-        y={y(scaling.chromium[last]!) + 46}
-        textAnchor="middle"
-        className="labui:fill-muted-foreground labui:text-[10px]"
-      >
-        Chromium
-      </text>
-      <text
-        x={x(last) - 31}
-        y={y(scaling.chromium[last]!) + 27}
-        className="labui:fill-muted-foreground labui:font-semibold"
-      >
-        {scaling.chromium[last]}
-      </text>
-      <path
-        d={brace(
-          x(last) + 12,
-          y(scaling.rtcbench[last]!),
-          y(scaling.chromium[last]!),
-        )}
-        fill="none"
-        strokeWidth={1.5}
-        className="labui:stroke-muted-foreground"
-      />
-      <text
-        x={x(last) + 56}
-        y={(y(scaling.rtcbench[last]!) + y(scaling.chromium[last]!)) / 2 + 3}
-        textAnchor="middle"
-        className="labui:fill-foreground labui:font-display labui:text-2xl labui:font-semibold"
-      >
-        {ratio}×
-      </text>
-      <text
-        x={x(last) + 56}
-        y={(y(scaling.rtcbench[last]!) + y(scaling.chromium[last]!)) / 2 + 20}
-        textAnchor="middle"
-        className="labui:fill-muted-foreground"
-      >
-        <tspan x={x(last) + 56}>more</tspan>
-        <tspan x={x(last) + 56} dy="1.15em">
-          streams
-        </tspan>
-      </text>
-    </svg>
+          </g>
+        ))}
+      </svg>
+      <figcaption className="labui:flex labui:flex-col labui:gap-1 labui:text-sm labui:text-muted-foreground">
+        <span>
+          <strong className="labui:text-primary">{ratio}× more streams</strong>{" "}
+          at {cores[last]} CPU cores · log scale
+        </span>
+        <span className="labui:text-xs">
+          LiveKit · CloudLab c8220 · two 10-core Xeon E5-2660 v2
+        </span>
+      </figcaption>
+    </figure>
   );
 }
 
@@ -951,8 +898,12 @@ const link =
 
 function Repository({ repo }: { repo: string }) {
   return (
-    <div className="labui:flex labui:shrink-0 labui:flex-col labui:gap-2 labui:md:absolute labui:md:top-0 labui:md:right-0">
-      <Button variant="outline" asChild className="labui:justify-start">
+    <div className="labui:flex labui:w-full labui:min-w-0 labui:flex-wrap labui:gap-2 labui:sm:w-auto labui:md:absolute labui:md:top-0 labui:md:right-0 labui:md:flex-col">
+      <Button
+        variant="outline"
+        asChild
+        className="labui:min-h-11 labui:flex-1 labui:justify-center labui:sm:flex-none labui:md:justify-start"
+      >
         <a href={`https://github.com/${repo}`} target="_blank" rel="noreferrer">
           <GitHubMark className="labui:size-4" />
           Star on GitHub
@@ -960,7 +911,7 @@ function Repository({ repo }: { repo: string }) {
       </Button>
       <Button
         asChild
-        className="labui:justify-start labui:bg-[#5865f2] labui:text-white labui:hover:bg-[#4752c4]"
+        className="labui:min-h-11 labui:flex-1 labui:justify-center labui:bg-[#5865f2] labui:text-white labui:hover:bg-[#4752c4] labui:sm:flex-none labui:md:justify-start"
       >
         <a href={community} target="_blank" rel="noreferrer">
           <DiscordMark className="labui:size-4" />

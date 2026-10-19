@@ -4,8 +4,8 @@ import { testPackage } from "../../testing";
 testPackage(join(import.meta.dir, ".."), {
   dependencies: ["@wterm/dom", "lucide-react", "react-router", "yaml"],
   peers: {
-    "@labpane/os": "^1.4.0",
-    "@labpane/ui": "^1.4.0",
+    "@labpane/os": "^1.4.2",
+    "@labpane/ui": "^1.4.2",
     "@radix-ui/react-popover": "^1.1.15",
     react: "^18.2.0 || ^19.0.0",
     "react-dom": "^18.2.0 || ^19.0.0",
