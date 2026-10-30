@@ -6,6 +6,7 @@ const baseURL = (remote ?? "http://127.0.0.1:18727/app").replace(/\/?$/, "/");
 export default defineConfig({
   testDir: ".",
   testMatch: "*.spec.ts",
+  testIgnore: "site.spec.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,

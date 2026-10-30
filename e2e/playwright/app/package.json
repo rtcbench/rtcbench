@@ -4,11 +4,12 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:site": "playwright test --config=site.config.ts",
     "check": "tsc --noEmit"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.0",
-    "@types/bun": "^1.4.2",
+    "@playwright/test": "1.64.1",
+    "@types/bun": "^1.4.4",
     "typescript": "^7.0.2"
   }
 }
