@@ -130,6 +130,7 @@ type pluginEnv struct {
 	config         *Config
 	logRegistry    *log.Registry
 	statsConsumers []func(vp9_stats.Period, vp9_stats.VideoQualitySample)
+	rttConsumers   []func(userID string, rtt time.Duration)
 }
 
 func (e *pluginEnv) Config() *Config {
@@ -156,6 +157,9 @@ func (e *pluginEnv) ObserveReceiverRTT(userID string, rtt time.Duration) {
 		return
 	}
 	e.client.metrics.ObserveReceiverRTT(userID, rtt)
+	for _, fn := range e.rttConsumers {
+		fn(userID, rtt)
+	}
 }
 
 type Client struct {
@@ -204,6 +208,10 @@ func (c *Client) receiverStatsConsumer(_ vp9_stats.Period, sample vp9_stats.Vide
 
 func (c *Client) AddStatsConsumer(fn func(vp9_stats.Period, vp9_stats.VideoQualitySample)) {
 	c.env.statsConsumers = append(c.env.statsConsumers, fn)
+}
+
+func (c *Client) AddRTTConsumer(fn func(userID string, rtt time.Duration)) {
+	c.env.rttConsumers = append(c.env.rttConsumers, fn)
 }
 
 func (c *Client) RegisterPlugin(pluginID string, factory PluginFactory) {

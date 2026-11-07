@@ -39,6 +39,7 @@ type Server struct {
 	profiling   bool
 	deployments *deployment.Manager
 	terminals   map[*terminalSession]bool
+	live        *liveState
 	closing     bool
 	benchmarks  interface {
 		Register(*http.ServeMux)
@@ -81,6 +82,7 @@ func New(dir, settingsFile, version string, console io.Writer, plugins ...deploy
 		log:       stdlog.New(console, "", stdlog.LstdFlags),
 		runs:      map[string]*run{},
 		terminals: map[*terminalSession]bool{},
+		live:      newLive(),
 	}
 	if err := s.configureWeb(); err != nil {
 		return nil, fmt.Errorf("%s: %w", settingsFile, err)
@@ -117,7 +119,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/version", s.getVersion)
 	mux.HandleFunc("GET /api/v1/runs", s.listRuns)
 	mux.HandleFunc("POST /api/v1/runs", s.postRun)
+	mux.HandleFunc("GET /api/v1/runs/live", s.liveRuns)
+	mux.HandleFunc("GET /api/v1/runs/series", s.listSeries)
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.getRun)
+	mux.HandleFunc("GET /api/v1/runs/{id}/live", s.liveRun)
+	mux.HandleFunc("GET /api/v1/runs/{id}/series", s.getSeries)
 	mux.HandleFunc("PATCH /api/v1/runs/{id}", s.patchRun)
 	mux.HandleFunc("DELETE /api/v1/runs/{id}", s.deleteRun)
 	mux.HandleFunc("POST /api/v1/runs/{id}/stop", s.stopRun)
@@ -229,6 +235,7 @@ func (s *Server) patchRun(w http.ResponseWriter, r *http.Request) {
 	}
 	rn.Name = name
 	save(rn.dir, rn.Run)
+	s.live.run(rn.Run)
 	writeJSON(w, http.StatusOK, rn.Run)
 }
 
@@ -249,6 +256,7 @@ func (s *Server) deleteRun(w http.ResponseWriter, r *http.Request) {
 	}
 	s.prune(filepath.Dir(rn.dir))
 	delete(s.runs, rn.ID)
+	s.live.deleted(rn.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

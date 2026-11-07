@@ -6,9 +6,12 @@ import type {
   Receiver,
   Run,
   RunFile,
+  Series,
+  Snapshot,
   Summary,
   Viewer,
   Viewers,
+  ViewersSnapshot,
 } from "./api";
 import type { Inventory } from "./systems/model";
 
@@ -303,6 +306,198 @@ function health(sample: Sample): Viewers {
     errors: sample.unhealthy ? { "fps below threshold": sample.unhealthy } : {},
     viewers,
   };
+}
+
+const seriesFields = [
+  "t",
+  "viewers",
+  "active",
+  "bitrate",
+  "fps_p10",
+  "fps_p50",
+  "fps_p90",
+  "dec_fps_p50",
+  "jitter_p50",
+  "jitter_p90",
+  "frames_complete",
+  "frames_lost",
+  "pli",
+  "errors",
+  "below",
+  "rtt_p50",
+  "rtt_p90",
+  "layers_s0",
+  "layers_s1",
+  "layers_s2",
+];
+const viewerFields = [
+  "bitrate",
+  "fps",
+  "dec_fps",
+  "buf_fps",
+  "est_dec_fps",
+  "jitter",
+  "frames_complete",
+  "frames_lost",
+  "pli",
+  "sid",
+  "tid",
+  "samples",
+  "seen",
+  "rtt",
+];
+
+function series(sample: Sample): Series {
+  const random = seeded(sample.seed + 2);
+  const seconds = sample.durationMinutes * 60;
+  const interval = seconds > 900 ? 2000 : 1000;
+  const start = Date.parse(sample.startedAt);
+  const joinSeconds = Math.max(20, seconds * 0.1);
+  const churn = sample.scenario === "churn";
+  const degraded = sample.unhealthy ?? 0;
+  const dip = [seconds * 0.45, seconds * 0.6];
+  const points: number[][] = [];
+  let complete = 0;
+  let lost = 0;
+  let pli = 0;
+  for (let t = interval / 1000; t <= seconds; t += interval / 1000) {
+    const leaving = t > seconds - 6;
+    const joined = Math.min(
+      sample.viewers,
+      Math.ceil((sample.viewers * t) / joinSeconds),
+    );
+    const active = leaving
+      ? 0
+      : churn
+        ? Math.round(joined * between(random, 0.85, 1))
+        : joined;
+    const inDip = degraded && t >= dip[0]! && t <= dip[1]!;
+    const fps = (inDip ? 21.5 : 24.6) + between(random, -0.3, 0.3);
+    const unhealthyShare = inDip ? degraded / sample.viewers : 0;
+    const p10 = inDip ? 15 + between(random, 0, 2) : fps - 0.4;
+    const bitrate =
+      active *
+      fps *
+      120_000 *
+      (1 - unhealthyShare * 0.3) *
+      between(random, 0.98, 1.02);
+    const lossRate = active * fps * (inDip ? 0.03 : 0.001);
+    complete += (active * fps * interval) / 1000;
+    lost += (lossRate * interval) / 1000;
+    pli += inDip ? between(random, 0, 0.6) : between(random, 0, 0.02);
+    const below = inDip ? Math.min(active, degraded) : 0;
+    const downgraded = inDip ? Math.min(active, degraded) : 0;
+    const rtt = 24 + between(random, -3, 3) + (inDip ? 40 : 0);
+    points.push([
+      start + t * 1000,
+      joined,
+      active,
+      Math.round(bitrate),
+      round(p10, 2),
+      round(fps, 2),
+      round(fps + 0.3, 2),
+      round(fps - 0.1, 2),
+      Math.round(8000 + between(random, -800, 800) + (inDip ? 6000 : 0)),
+      Math.round(12_000 + between(random, -1000, 1500) + (inDip ? 20_000 : 0)),
+      Math.round(complete),
+      Math.round(lost),
+      Math.floor(pli),
+      0,
+      below,
+      active ? round(rtt, 1) : 0,
+      active ? round(rtt * 2.2 + between(random, 0, 8), 1) : 0,
+      0,
+      downgraded,
+      active - downgraded,
+    ]);
+  }
+  return {
+    start,
+    interval,
+    fields: seriesFields,
+    points,
+    thresholds: degraded ? { min_fps: 20, max_rtt_ms: 150 } : undefined,
+  };
+}
+
+function viewersSnapshot(sample: Sample): ViewersSnapshot {
+  const random = seeded(sample.seed + 3);
+  const current = health(sample);
+  const seconds = sample.durationMinutes * 60;
+  const buckets = 60;
+  const interval = Math.ceil(seconds / buckets) * 1000;
+  const joinSeconds = Math.max(20, seconds * 0.1);
+  return {
+    fields: viewerFields,
+    names: current.viewers.map((v) => v.nickname),
+    rows: current.viewers.map((v) => [
+      v.smooth_bitrate_bps,
+      v.smooth_fps,
+      v.dec_sm_fps,
+      v.dec_buf_fps,
+      v.est_dec_fps,
+      v.frame_jitter_us,
+      v.frames_complete,
+      v.frames_lost,
+      v.pli_sent,
+      v.max_recv_sid,
+      v.max_recv_tid,
+      v.sample_count,
+      round(v.last_seen_ago_ms / 1000, 1),
+      round(22 + between(random, 0, 12), 1),
+    ]),
+    start: Date.parse(sample.startedAt),
+    interval,
+    history: current.viewers.map((v, index) => {
+      const offset = Math.floor(
+        ((index / sample.viewers) * joinSeconds * 1000) / interval,
+      );
+      const values: [number, number][] = [];
+      for (let bucket = offset; bucket < buckets; bucket++)
+        values.push([
+          Math.round(v.smooth_bitrate_bps * between(random, 0.96, 1.04)),
+          round(v.smooth_fps + between(random, -0.4, 0.2), 2),
+        ]);
+      return { o: offset, h: values };
+    }),
+    errors: current.errors,
+  };
+}
+
+function snapshot(sample: Sample): Snapshot {
+  return { series: series(sample), viewers: viewersSnapshot(sample) };
+}
+
+function sparkline(sample: Sample): Series {
+  const full = series(sample);
+  const keep = [
+    "t",
+    "viewers",
+    "active",
+    "bitrate",
+    "fps_p50",
+    "frames_complete",
+    "frames_lost",
+    "below",
+  ];
+  const indexes = keep.map((field) => seriesFields.indexOf(field));
+  const size = Math.ceil(full.points.length / 60);
+  const points: number[][] = [];
+  for (let i = 0; i < full.points.length; i += size) {
+    const group = full.points.slice(i, i + size);
+    const last = group.at(-1)!;
+    points.push(
+      indexes.map((index) =>
+        index === 3 || index === 5
+          ? round(
+              group.reduce((sum, p) => sum + p[index]!, 0) / group.length,
+              2,
+            )
+          : last[index]!,
+      ),
+    );
+  }
+  return { ...full, interval: full.interval * size, fields: keep, points };
 }
 
 function toRun(sample: Sample): Run {
@@ -948,11 +1143,19 @@ export function createPreview(base: URL): typeof fetch {
     if (head === "runs") {
       if (method !== "GET") return error(readOnly);
       if (!id) return json(samples.map(toRun));
+      if (id === "series")
+        return json(
+          Object.fromEntries(samples.map((s) => [s.id, sparkline(s)])),
+        );
+      if (id === "live") return error("Live streams need a running rtcbench.");
       const sample = samples.find((s) => s.id === id);
       if (!sample) return notFound();
       const [section, ...file] = rest;
       if (!section) return json(toRun(sample));
       if (section === "viewers") return json(health(sample));
+      if (section === "series") return json(snapshot(sample));
+      if (section === "live")
+        return error("Live streams need a running rtcbench.");
       if (section === "files" && file.length === 0)
         return json(files(sample, await config(sample)));
       if (section === "files") {

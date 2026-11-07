@@ -10,8 +10,6 @@ import {
   type Summary,
   usePoll,
   useApi,
-  type Viewer,
-  type Viewers,
 } from "./api";
 import {
   column,
@@ -299,106 +297,6 @@ export function SummarySection({
         rows={summary.Receivers}
         columns={receivers}
       />
-    </section>
-  );
-}
-
-const columns = (live: boolean): TableColumn<Viewer>[] => [
-  { ...mono("viewer", "Viewer", (v) => v.nickname), rowHeader: true },
-  num("bitrate", "Bitrate", (v) => v.smooth_bitrate_bps / 1e6, 2, "Mbps"),
-  num("fps", "FPS", (v) => v.smooth_fps, 1),
-  num("dec", "Decoder FPS", (v) => v.dec_sm_fps, 1),
-  num("buf", "Buffer FPS", (v) => v.dec_buf_fps, 1),
-  num("est", "Est. decoder FPS", (v) => v.est_dec_fps),
-  num("jitter", "Jitter", (v) => v.frame_jitter_us / 1000, 1, "ms"),
-  num("frames", "Frames", (v) => v.frames_complete),
-  num("lost", "Lost", (v) => v.frames_lost),
-  num("pli", "PLI", (v) => v.pli_sent),
-  column(
-    "svc",
-    "SVC",
-    (v) => v.max_recv_sid * 10 + v.max_recv_tid,
-    (v) => (
-      <span className="labui:font-mono">
-        S{v.max_recv_sid}T{v.max_recv_tid}
-      </span>
-    ),
-  ),
-  num("samples", "Samples", (v) => v.sample_count),
-  ...(live
-    ? [
-        num(
-          "seen",
-          "Last seen",
-          (v: Viewer) => v.last_seen_ago_ms / 1000,
-          0,
-          "s",
-        ),
-      ]
-    : []),
-];
-
-export function ViewersSection({
-  data,
-  live,
-}: {
-  data: Viewers;
-  live: boolean;
-}) {
-  const viewers = data.viewers;
-  const errors = Object.entries(data.errors ?? {});
-  const stats = [
-    ["Viewers", data.viewers_total ?? viewers.length],
-    ["Active", data.viewers_active ?? 0],
-    [
-      "Aggregate bitrate",
-      `${(data.aggregate_bitrate_mbps ?? 0).toFixed(2)} Mbps`,
-    ],
-    [
-      "Frames lost",
-      viewers.reduce((sum, v) => sum + v.frames_lost, 0).toLocaleString(),
-    ],
-  ] as const;
-
-  return (
-    <section className="labui:flex labui:flex-col labui:gap-4">
-      <h2 className="labui:text-lg labui:font-semibold">Viewers</h2>
-      <dl className="labui:grid labui:gap-3 labui:sm:grid-cols-2 labui:lg:grid-cols-4">
-        {stats.map(([label, value]) => (
-          <div
-            key={label}
-            className="labui:flex labui:flex-col labui:gap-1 labui:rounded-lg labui:border labui:bg-card labui:px-4 labui:py-3"
-          >
-            <dt className="labui:text-xs labui:font-medium labui:tracking-wide labui:text-muted-foreground labui:uppercase">
-              {label}
-            </dt>
-            <dd className="labui:text-xl labui:font-semibold labui:tracking-tight labui:tabular-nums">
-              {value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {errors.length > 0 && (
-        <Alert variant="warning">
-          <AlertTitle>Errors</AlertTitle>
-          <AlertDescription className="labui:font-mono labui:text-xs">
-            {errors.map(([name, count]) => (
-              <span key={name}>
-                {name} {count}
-              </span>
-            ))}
-          </AlertDescription>
-        </Alert>
-      )}
-      {viewers.length > 0 && (
-        <Table
-          label="Viewers"
-          rows={viewers}
-          rowKey={(v) => v.nickname}
-          defaultSort={{ column: "viewer", direction: "asc" }}
-          columns={columns(live)}
-        />
-      )}
     </section>
   );
 }
