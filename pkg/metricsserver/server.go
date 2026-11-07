@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,15 @@ type viewerState struct {
 	MaxRecvTID          uint8
 	SampleCount         int64
 	LastSeenAt          time.Time
+	RTTMS               float64
+
+	index      int
+	dirty      bool
+	offset     int
+	history    [][2]float32
+	sumBitrate float64
+	sumFPS     float64
+	samples    int
 }
 
 // Server is a lightweight HTTP metrics server that tracks per-viewer stats.
@@ -35,7 +45,9 @@ type Server struct {
 	port    int
 	mu      sync.RWMutex
 	viewers map[string]*viewerState
+	order   []*viewerState
 	errors  [vp9_stats.NumErrIDs]int32
+	rec     *recording
 }
 
 // New creates a Server that will listen on the given port.
@@ -49,27 +61,64 @@ func New(port int) *Server {
 // Subscriber returns a func compatible with vp9_stats.Publisher.AddSubscriber.
 func (s *Server) Subscriber() func(vp9_stats.Period, vp9_stats.VideoQualitySample) {
 	return func(period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+		s.observe(time.Now(), period, sample)
+	}
+}
+
+func (s *Server) RTTSubscriber() func(userID string, rtt time.Duration) {
+	return func(userID string, rtt time.Duration) {
+		if rtt <= 0 {
+			return
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		vs, ok := s.viewers[sample.Nickname]
-		if !ok {
-			vs = &viewerState{Nickname: sample.Nickname}
-			s.viewers[sample.Nickname] = vs
+		for _, vs := range s.order {
+			if vs.Nickname != userID && !strings.HasPrefix(vs.Nickname, userID+"[") {
+				continue
+			}
+			vs.RTTMS = float64(rtt.Microseconds()) / 1000
+			if s.rec != nil && !vs.dirty {
+				vs.dirty = true
+				s.rec.dirty = append(s.rec.dirty, vs)
+			}
 		}
-		vs.SmoothBitrateBps = sample.SmoothBitrate
-		vs.SmoothFPS = sample.SmoothFPS
-		vs.DecoderSmoothFPS = sample.DecoderSmoothFPS
-		vs.DecoderBufferFPS = sample.DecoderBufferFPS
-		vs.EstimatedDecoderFPS = sample.EstimatedDecoderFPS
-		vs.FrameJitterUS = sample.FrameJitterUS
-		vs.FramesComplete = sample.FramesComplete
-		vs.FramesLost = sample.FramesLost
-		vs.PLISent = sample.RTCP.PLISent
-		vs.MaxRecvSID = sample.SVC.MaxRecvSID
-		vs.MaxRecvTID = sample.SVC.MaxRecvTID
-		vs.SampleCount++
-		vs.LastSeenAt = time.Now()
-		s.errors = period.Errors
+	}
+}
+
+func (s *Server) observe(now time.Time, period vp9_stats.Period, sample vp9_stats.VideoQualitySample) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	vs, ok := s.viewers[sample.Nickname]
+	if !ok {
+		vs = &viewerState{Nickname: sample.Nickname, index: len(s.order)}
+		s.viewers[sample.Nickname] = vs
+		s.order = append(s.order, vs)
+		if s.rec != nil {
+			s.rec.added = append(s.rec.added, vs)
+		}
+	}
+	vs.SmoothBitrateBps = sample.SmoothBitrate
+	vs.SmoothFPS = sample.SmoothFPS
+	vs.DecoderSmoothFPS = sample.DecoderSmoothFPS
+	vs.DecoderBufferFPS = sample.DecoderBufferFPS
+	vs.EstimatedDecoderFPS = sample.EstimatedDecoderFPS
+	vs.FrameJitterUS = sample.FrameJitterUS
+	vs.FramesComplete = sample.FramesComplete
+	vs.FramesLost = sample.FramesLost
+	vs.PLISent = sample.RTCP.PLISent
+	vs.MaxRecvSID = sample.SVC.MaxRecvSID
+	vs.MaxRecvTID = sample.SVC.MaxRecvTID
+	vs.SampleCount++
+	vs.LastSeenAt = now
+	s.errors = period.Errors
+	if s.rec != nil {
+		if !vs.dirty {
+			vs.dirty = true
+			s.rec.dirty = append(s.rec.dirty, vs)
+		}
+		vs.sumBitrate += float64(sample.SmoothBitrate)
+		vs.sumFPS += float64(sample.SmoothFPS)
+		vs.samples++
 	}
 }
 
@@ -105,12 +154,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type healthResponse struct {
-	Status               string            `json:"status"`
-	ViewersTotal         int               `json:"viewers_total"`
-	ViewersActive        int               `json:"viewers_active"`
-	AggregateBitrateMbps float32           `json:"aggregate_bitrate_mbps"`
-	Errors               map[string]int32  `json:"errors,omitempty"`
-	Viewers              []viewerReport    `json:"viewers"`
+	Status               string           `json:"status"`
+	ViewersTotal         int              `json:"viewers_total"`
+	ViewersActive        int              `json:"viewers_active"`
+	AggregateBitrateMbps float32          `json:"aggregate_bitrate_mbps"`
+	Errors               map[string]int32 `json:"errors,omitempty"`
+	Viewers              []viewerReport   `json:"viewers"`
 }
 
 type viewerReport struct {
@@ -140,7 +189,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var totalBitrate float32
 	activeCount := 0
 
-	for _, vs := range s.viewers {
+	for _, vs := range s.order {
 		agoMs := now.Sub(vs.LastSeenAt).Milliseconds()
 		reports = append(reports, viewerReport{
 			Nickname:            vs.Nickname,
@@ -169,22 +218,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = "ok"
 	}
 
-	var errMap map[string]int32
-	for i, count := range s.errors {
-		if count > 0 {
-			if errMap == nil {
-				errMap = make(map[string]int32)
-			}
-			errMap[vp9_stats.ErrIDToString(i)] = count
-		}
-	}
-
 	resp := healthResponse{
 		Status:               status,
 		ViewersTotal:         len(s.viewers),
 		ViewersActive:        activeCount,
 		AggregateBitrateMbps: totalBitrate / 1_000_000,
-		Errors:               errMap,
+		Errors:               errorCounts(s.errors),
 		Viewers:              reports,
 	}
 

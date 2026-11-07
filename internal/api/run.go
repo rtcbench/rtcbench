@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"runtime/pprof"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -68,10 +69,13 @@ type Run struct {
 
 type run struct {
 	Run
-	dir     string
-	cancel  context.CancelFunc
-	metrics *metricsserver.Server
-	done    chan struct{}
+	dir       string
+	cancel    context.CancelFunc
+	metrics   *metricsserver.Server
+	ticks     context.CancelFunc
+	done      chan struct{}
+	seriesMu  sync.Mutex
+	sparkline *metricsserver.Series
 }
 
 type session struct {
@@ -236,6 +240,7 @@ func (s *Server) start(req StartRequest) (Run, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	tickCtx, ticks := context.WithCancel(context.Background())
 	rn := &run{
 		Run: Run{
 			ID:           id,
@@ -254,15 +259,21 @@ func (s *Server) start(req StartRequest) (Run, error) {
 		dir:     dir,
 		cancel:  cancel,
 		metrics: metricsserver.New(0),
+		ticks:   ticks,
 		done:    make(chan struct{}),
 	}
 	sess.client.AddStatsConsumer(rn.metrics.Subscriber())
+	sess.client.AddRTTConsumer(rn.metrics.RTTSubscriber())
+	rn.metrics.Record(started, liveThresholds(cfg.Spec.Metrics.ReceiverThresholds))
 
 	s.mu.Lock()
 	s.runs[id] = rn
 	save(dir, rn.Run)
 	s.mu.Unlock()
 	s.Logf("run %s started: %s", id, rn.Name)
+	s.live.run(rn.Run)
+	go rn.metrics.Run(tickCtx)
+	go s.forwardTicks(tickCtx, rn)
 	go s.execute(ctx, rn, sess)
 	return rn.Run, nil
 }
@@ -365,9 +376,14 @@ func (s *Server) execute(ctx context.Context, rn *run, sess *session) {
 		failures = append(failures, err.Error())
 	}
 
+	rn.ticks()
+	rn.metrics.Tick(time.Now())
 	snapshot := httptest.NewRecorder()
 	rn.metrics.ServeHTTP(snapshot, httptest.NewRequest("GET", "/", nil))
 	_ = os.WriteFile(filepath.Join(rn.dir, "viewers.json"), snapshot.Body.Bytes(), 0o644)
+	final := rn.metrics.Snapshot()
+	saveSnapshot(rn.dir, final)
+	spark := sparkline(final.Series)
 
 	if sess.profile != nil {
 		pprof.StopCPUProfile()
@@ -380,6 +396,7 @@ func (s *Server) execute(ctx context.Context, rn *run, sess *session) {
 	defer s.mu.Unlock()
 	now := time.Now()
 	rn.EndedAt, rn.Summary, rn.Failures = &now, &summary, failures
+	rn.sparkline = &spark
 	rn.Status = StatusCompleted
 	if runErr != nil || len(failures) > 0 {
 		rn.Status = StatusFailed
@@ -394,6 +411,7 @@ func (s *Server) execute(ctx context.Context, rn *run, sess *session) {
 		s.Logf("run %s move: %v", rn.ID, err)
 	}
 	save(rn.dir, rn.Run)
+	s.live.run(rn.Run)
 	s.Logf("run %s %s", rn.ID, rn.Status)
 	if rn.Error != "" {
 		s.Logf("run %s error: %s", rn.ID, rn.Error)
@@ -414,6 +432,7 @@ func (s *Server) Shutdown(ctx context.Context) {
 		}
 	}
 	s.mu.Unlock()
+	s.live.cancel()
 	active = append(active, s.benchmarks.Cancel())
 	s.closeTerminals(ctx)
 	s.deployments.Close(ctx)

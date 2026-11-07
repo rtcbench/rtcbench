@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { createPreview, readOnly } from "./preview";
-import type { Doc, Run, RunFile } from "./api";
+import type { Doc, Run, RunFile, Series, Snapshot } from "./api";
 
 const base = new URL("https://preview.test/site/");
 const examples = ["churn.yml", "jitsi/250-viewer-bots.yml"];
@@ -53,6 +53,40 @@ it("serves sample runs with summaries, viewers, files and logs", async () => {
   const log = await (await preview(api(`/runs/${run.id}/logs/general`))).text();
   expect(log).toContain("Setup() ok");
   expect((await preview(api(`/runs/${run.id}/logs/nope`))).status).toBe(404);
+});
+
+it("serves the series and viewer histories of sample runs", async () => {
+  const preview = createPreview(base);
+  const runs: Run[] = await (await preview(api("/runs"))).json();
+  const snapshot: Snapshot = await (
+    await preview(api(`/runs/${runs[0]!.id}/series`))
+  ).json();
+  expect(snapshot.series.fields[0]).toBe("t");
+  expect(snapshot.series.points.length).toBeGreaterThan(100);
+  expect(snapshot.series.points.length).toBeLessThanOrEqual(900);
+  const last = snapshot.series.points.at(-1)!;
+  expect(last[1]).toBe(250);
+  expect(snapshot.series.points.some((p) => p[3]! > 700_000_000)).toBe(true);
+  expect(snapshot.viewers.names).toHaveLength(250);
+  expect(snapshot.viewers.history[0]!.h.length).toBeGreaterThan(50);
+  expect(snapshot.series.thresholds).toBeUndefined();
+  expect(snapshot.series.fields).toContain("layers_s2");
+  expect(last[snapshot.series.fields.indexOf("rtt_p50")]).toBe(0);
+  const failed: Snapshot = await (
+    await preview(api(`/runs/${runs[2]!.id}/series`))
+  ).json();
+  expect(failed.series.thresholds).toEqual({ min_fps: 20, max_rtt_ms: 150 });
+  const below = failed.series.fields.indexOf("below");
+  expect(Math.max(...failed.series.points.map((p) => p[below]!))).toBe(14);
+  expect(failed.viewers.fields.at(-1)).toBe("rtt");
+  const sparklines: Record<string, Series> = await (
+    await preview(api("/runs/series"))
+  ).json();
+  expect(Object.keys(sparklines)).toHaveLength(runs.length);
+  expect(sparklines[runs[0]!.id]!.points.length).toBeLessThanOrEqual(60);
+  expect(sparklines[runs[0]!.id]!.fields).toContain("bitrate");
+  expect(sparklines[runs[0]!.id]!.fields).toContain("frames_complete");
+  expect((await preview(api("/runs/live"))).status).toBe(503);
 });
 
 it("loads configs from the example files and keeps edits in memory", async () => {

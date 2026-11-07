@@ -19,6 +19,9 @@ import {
   Badge,
   Button,
   Checkbox,
+  compactNumber as compact,
+  fieldIndex,
+  Sparkline,
   Field,
   FieldError,
   FieldLabel,
@@ -35,11 +38,13 @@ import {
   type Run,
   runPath,
   type RunStatus as Status,
+  type Series,
   time,
   useNow,
   usePoll,
   validName,
 } from "./api";
+import { useRunsLive } from "./live";
 
 const variants = {
   running: "default",
@@ -226,9 +231,29 @@ export function NewRun({
   );
 }
 
+function glance(series: Series | undefined, running: boolean) {
+  if (!series?.points.length) return undefined;
+  const index = fieldIndex(series);
+  const at = (p: number[], field: string) => {
+    const i = index[field];
+    return i === undefined ? 0 : (p[i] ?? 0);
+  };
+  const last = series.points.at(-1)!;
+  const bitrates = series.points.map((p) => at(p, "bitrate") / 1e6);
+  const lost = at(last, "frames_lost");
+  const frames = lost + at(last, "frames_complete");
+  return {
+    joined: at(last, "viewers"),
+    active: at(last, "active"),
+    bitrate: running ? bitrates.at(-1)! : Math.max(...bitrates),
+    bitrates,
+    loss: frames ? (lost / frames) * 100 : undefined,
+  };
+}
+
 export function RunsPage() {
   const { open: openTab } = useNavigation();
-  const { data: runs, error } = usePoll<Run[]>("/runs", 2000);
+  const { runs, series, error } = useRunsLive(true);
   const now = useNow(!!runs?.some((r) => r.status === "running"));
 
   const columns: TableColumn<Run>[] = [
@@ -255,6 +280,61 @@ export function RunsPage() {
         (r) => duration(elapsed(r, now)),
       ),
       numeric: true,
+    },
+    {
+      ...column(
+        "viewers",
+        "Viewers",
+        (r) => glance(series[r.id], r.status === "running")?.joined,
+        (r) => {
+          const view = glance(series[r.id], r.status === "running");
+          if (!view) return "";
+          return r.status === "running"
+            ? `${compact(view.active, 0)} / ${compact(view.joined, 0)}`
+            : compact(view.joined, 0);
+        },
+      ),
+      numeric: true,
+      hideBelow: "md",
+    },
+    {
+      ...column(
+        "bitrate",
+        "Bitrate",
+        (r) => glance(series[r.id], r.status === "running")?.bitrate,
+        (r) => {
+          const view = glance(series[r.id], r.status === "running");
+          if (!view) return "";
+          return (
+            <span className="labui:inline-flex labui:items-center labui:justify-end labui:gap-2">
+              <Sparkline
+                values={view.bitrates}
+                label={`${r.status === "running" ? "Live" : "Final"} bitrate trend for ${r.name}`}
+                width={80}
+                height={20}
+              />
+              {compact(view.bitrate, 1)}
+            </span>
+          );
+        },
+      ),
+      headerDetail: "Mbps",
+      numeric: true,
+      hideBelow: "sm",
+    },
+    {
+      ...column(
+        "loss",
+        "Loss",
+        (r) => glance(series[r.id], r.status === "running")?.loss,
+        (r) => {
+          const loss = glance(series[r.id], r.status === "running")?.loss;
+          return loss === undefined ? "" : compact(loss, 2);
+        },
+      ),
+      headerDetail: "% frames",
+      numeric: true,
+      hideBelow: "lg",
     },
   ];
 

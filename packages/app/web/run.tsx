@@ -1,7 +1,7 @@
 import { useNavigation, usePageTitle, Back, Link } from "./integration";
 import { systemPath } from "./systems/routes";
 
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { parseDocument } from "yaml";
 import type { Inventory } from "./systems/model";
 import {
@@ -29,8 +29,8 @@ import {
   useNow,
   usePoll,
   validName,
-  type Viewers,
 } from "./api";
+import { useRunLive } from "./live";
 import {
   ConfirmDialog,
   Alert,
@@ -43,12 +43,10 @@ import {
   PageActions,
   Spinner,
 } from "@labpane/ui";
-import {
-  FilesSection,
-  LogsSection,
-  SummarySection,
-  ViewersSection,
-} from "./run-sections";
+import { FilesSection, LogsSection, SummarySection } from "./run-sections";
+import { RunStats } from "./run-stats";
+import { TimelineSection } from "./run-timeline";
+import { ViewersSection } from "./run-viewers";
 import { NewRun, RunStatus } from "./runs";
 
 import { YamlView } from "./yaml";
@@ -160,13 +158,21 @@ export function RunPage({ id }: { id: string }) {
   const { request, url } = useApi();
   const { go, href } = useNavigation();
   const path = `/runs/${id}`;
-  const { data: run, error, reload } = usePoll<Run>(path, 1000);
+  const [polling, setPolling] = useState(1000);
+  const { data: polled, error, reload } = usePoll<Run>(path, polling);
+  const { ended, series, viewers, status } = useRunLive(path, polled);
+  const run =
+    polled && ended && polled.status === "running"
+      ? { ...polled, ...ended, name: polled.name }
+      : polled;
   usePageTitle(run?.name);
   const live = run?.status === "running";
-  const { data: viewers } = usePoll<Viewers>(
-    run ? `${path}/viewers` : null,
-    live ? 1000 : 0,
-  );
+  useEffect(() => {
+    if (ended) reload();
+  }, [ended, reload]);
+  useEffect(() => {
+    setPolling(live && status !== "open" ? 1000 : 0);
+  }, [live, status]);
   const { data: files } = usePoll<RunFile[]>(
     run ? `${path}/files` : null,
     live ? 5000 : 0,
@@ -320,7 +326,11 @@ export function RunPage({ id }: { id: string }) {
           </AlertDescription>
         </Alert>
       )}
-      {viewers && <ViewersSection data={viewers} live={live} />}
+      <RunStats series={series} viewers={viewers} live={live} now={now} />
+      {series && (
+        <TimelineSection name={run.name} series={series} live={live} />
+      )}
+      {viewers && <ViewersSection data={viewers} live={live} now={now} />}
       {run.summary && (
         <SummarySection summary={run.summary} failures={run.failures ?? []} />
       )}

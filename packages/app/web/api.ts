@@ -272,3 +272,71 @@ export const docPath = (kind: DocKind, name: string) =>
   `${kind}/${segments(name)}`;
 export const docApi = (kind: DocKind, name: string) =>
   `/${kind}s/${segments(name)}`;
+
+export type Thresholds = {
+  min_fps?: number;
+  min_bitrate_bps?: number;
+  max_jitter_us?: number;
+  max_rtt_ms?: number;
+};
+
+export type Series = {
+  start: number;
+  interval: number;
+  fields: string[];
+  points: number[][];
+  thresholds?: Thresholds;
+};
+
+export type ViewerHistory = { o: number; h: [number, number][] };
+
+export type ViewersSnapshot = {
+  fields: string[];
+  names: string[];
+  rows: number[][];
+  start: number;
+  interval: number;
+  history: ViewerHistory[];
+  errors?: Record<string, number>;
+};
+
+export type Snapshot = { series: Series; viewers: ViewersSnapshot };
+
+export type HistoryBucket = { i: number; r?: [number, number, number][] };
+
+export type LiveUpdate = {
+  p?: number[];
+  v?: number[][];
+  n?: string[];
+  b?: HistoryBucket[];
+  e?: Record<string, number>;
+  series?: Series;
+  viewers?: ViewersSnapshot;
+};
+
+export type RunMessage = LiveUpdate & {
+  type: "snapshot" | "tick" | "viewers" | "run";
+  run?: Run;
+};
+
+export type ListMessage = {
+  type: "snapshot" | "tick" | "series" | "run" | "deleted";
+  id?: string;
+  run?: Run;
+  p?: number[];
+  series?: Record<string, Series>;
+};
+
+export type LiveViewer = Viewer & {
+  rtt_ms: number;
+  history: [number, number][];
+  offset: number;
+  updatedAt: number;
+};
+
+export type RunViewers = {
+  start: number;
+  interval: number;
+  viewers: LiveViewer[];
+  errors?: Record<string, number>;
+};
